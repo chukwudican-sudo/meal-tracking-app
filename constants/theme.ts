@@ -1,53 +1,85 @@
-/**
- * Below are the colors that are used in the app. The colors are defined in the light and dark mode.
- * There are many other ways to style your app. For example, [Nativewind](https://www.nativewind.dev/), [Tamagui](https://tamagui.dev/), [unistyles](https://reactnativeunistyles.vercel.app), etc.
- */
-
 import { Platform } from 'react-native';
+import { DarkTheme } from '@react-navigation/native';
 
-const tintColorLight = '#0a7ea4';
-const tintColorDark = '#fff';
+// ─── App colour palette (dark-only) ──────────────────────────────────────────
 
-export const Colors = {
-  light: {
-    text: '#11181C',
-    background: '#fff',
-    tint: tintColorLight,
-    icon: '#687076',
-    tabIconDefault: '#687076',
-    tabIconSelected: tintColorLight,
-  },
-  dark: {
-    text: '#ECEDEE',
-    background: '#151718',
-    tint: tintColorDark,
-    icon: '#9BA1A6',
-    tabIconDefault: '#9BA1A6',
-    tabIconSelected: tintColorDark,
+export const COLORS = {
+  // Backgrounds
+  bg:       '#1C1C1E',   // main screen background
+  card:     '#2C2C2E',   // card / surface background
+  elevated: '#3A3A3C',   // modals, inputs, elevated surfaces
+
+  // Borders & separators
+  border:   '#3A3A3C',
+
+  // Text
+  text:          '#FFFFFF',
+  textSecondary: '#8E8E93',
+  textMuted:     '#48484A',
+
+  // Accents
+  green:  '#34C759',   // completed / success
+  red:    '#FF3B30',   // missed / error
+  blue:   '#4F8EF7',   // primary action / progress
+  orange: '#FF9500',   // fats / warning
+  purple: '#BF5AF2',   // optional nutrient accent
+} as const;
+
+// ─── Navigation theme ─────────────────────────────────────────────────────────
+
+export const AppDarkTheme = {
+  ...DarkTheme,
+  colors: {
+    ...DarkTheme.colors,
+    background: COLORS.bg,
+    card:       COLORS.card,
+    border:     COLORS.border,
+    text:       COLORS.text,
+    primary:    COLORS.blue,
+    notification: COLORS.red,
   },
 };
 
+// ─── Typography ───────────────────────────────────────────────────────────────
+
 export const Fonts = Platform.select({
   ios: {
-    /** iOS `UIFontDescriptorSystemDesignDefault` */
-    sans: 'system-ui',
-    /** iOS `UIFontDescriptorSystemDesignSerif` */
-    serif: 'ui-serif',
-    /** iOS `UIFontDescriptorSystemDesignRounded` */
+    sans:    'system-ui',
+    serif:   'ui-serif',
     rounded: 'ui-rounded',
-    /** iOS `UIFontDescriptorSystemDesignMonospaced` */
-    mono: 'ui-monospace',
+    mono:    'ui-monospace',
   },
   default: {
-    sans: 'normal',
-    serif: 'serif',
+    sans:    'normal',
+    serif:   'serif',
     rounded: 'normal',
-    mono: 'monospace',
+    mono:    'monospace',
   },
   web: {
-    sans: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
-    serif: "Georgia, 'Times New Roman', serif",
-    rounded: "'SF Pro Rounded', 'Hiragino Maru Gothic ProN', Meiryo, 'MS PGothic', sans-serif",
-    mono: "SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
+    sans:    "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+    serif:   "Georgia, 'Times New Roman', serif",
+    rounded: "'SF Pro Rounded', sans-serif",
+    mono:    "SFMono-Regular, Menlo, Monaco, Consolas, monospace",
   },
 });
+
+// ─── Legacy export (keep existing imports working) ────────────────────────────
+
+export const Colors = {
+  light: {
+    text:           '#11181C',
+    background:     '#fff',
+    tint:           '#0a7ea4',
+    icon:           '#687076',
+    tabIconDefault: '#687076',
+    tabIconSelected:'#0a7ea4',
+  },
+  dark: {
+    text:           COLORS.text,
+    background:     COLORS.bg,
+    tint:           COLORS.blue,
+    icon:           COLORS.textSecondary,
+    tabIconDefault: COLORS.textSecondary,
+    tabIconSelected:COLORS.blue,
+  },
+};

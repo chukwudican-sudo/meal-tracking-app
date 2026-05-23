@@ -9,7 +9,12 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSCameraUsageDescription": "Used to scan meals and barcodes for adding to your day.",
+        "NSPhotoLibraryUsageDescription": "Used to upload meal photos for AI identification.",
+        "NSMicrophoneUsageDescription": "Used for voice dictation when describing meals."
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -38,7 +43,21 @@
             "backgroundColor": "#000000"
           }
         }
-      ]
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Used to scan meals and barcodes for adding to your day.",
+          "microphonePermission": "Used for voice dictation when describing meals."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Used to upload meal photos for AI identification."
+        }
+      ],
+      "@react-native-community/datetimepicker"
     ],
     "experiments": {
       "typedRoutes": true,
