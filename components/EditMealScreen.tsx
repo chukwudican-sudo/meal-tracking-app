@@ -33,6 +33,8 @@ interface Props {
   entry: MealEntry | null;
   visible: boolean;
   onClose: () => void;
+  mode?: 'edit' | 'create';
+  onSaved?: () => void;
 }
 
 type Tab = 'edit' | 'ai';
@@ -204,13 +206,24 @@ function buildRecurrence(
 
 // ─── Component ──────────────────────────────────────────────────────────────
 
-export function EditMealScreen({ date, entry, visible, onClose }: Props) {
+export function EditMealScreen({
+  date,
+  entry,
+  visible,
+  onClose,
+  mode = 'edit',
+  onSaved,
+}: Props) {
   const insets = useSafeAreaInsets();
   const templates = useMealStore(s => s.templates);
   const editMealOnDay = useMealStore(s => s.editMealOnDay);
   const addTemplate = useMealStore(s => s.addTemplate);
   const updateTemplate = useMealStore(s => s.updateTemplate);
   const removeTemplate = useMealStore(s => s.removeTemplate);
+  const addMealToDay = useMealStore(s => s.addMealToDay);
+  const removeMealFromDay = useMealStore(s => s.removeMealFromDay);
+  const saveToLibrary = useMealStore(s => s.saveToLibrary);
+  const removeFromLibrary = useMealStore(s => s.removeFromLibrary);
   const showUndo = useUndoStore(s => s.showUndo);
 
   // Find the template this entry materialized from (if any). A template-derived
@@ -249,14 +262,36 @@ export function EditMealScreen({ date, entry, visible, onClose }: Props) {
   const [recType, setRecType] = useState<RecType>('daily');
   const [everyN, setEveryN] = useState('2');
   const [everyUnit, setEveryUnit] = useState<EveryUnit>('days');
+  const [saveLib, setSaveLib] = useState(false);
 
   // ── AI tab state (shell only) ─────────────────────────────────────────────
   const [aiMessages, setAiMessages] = useState<ChatMsg[]>([]);
   const [aiInput, setAiInput] = useState('');
 
-  // Reset form whenever a different entry is opened.
+  // Reset form whenever a different entry is opened or create mode is launched.
   useEffect(() => {
-    if (!entry || !visible) return;
+    if (!visible) return;
+    if (mode === 'create') {
+      setTab('edit');
+      setName('');
+      setTime(new Date());
+      setDuration(30);
+      setOpenPicker(null);
+      setCalories('');
+      setProtein('');
+      setCarbs('');
+      setFats('');
+      setIngredients([{ id: `f-${Date.now()}`, name: '', quantity: '', unit: '' }]);
+      setIsRecurring(false);
+      setRecType('daily');
+      setEveryN('2');
+      setEveryUnit('days');
+      setSaveLib(false);
+      setAiMessages([]);
+      setAiInput('');
+      return;
+    }
+    if (!entry) return;
     setTab('edit');
     setName(entry.name);
     setTime(parseHHMMToDate(entry.time));
@@ -272,9 +307,10 @@ export function EditMealScreen({ date, entry, visible, onClose }: Props) {
     setRecType(rec.type);
     setEveryN(rec.everyN);
     setEveryUnit(rec.everyUnit);
+    setSaveLib(false);
     setAiMessages([]);
     setAiInput('');
-  }, [entry, visible, sourceTemplate]);
+  }, [entry, visible, sourceTemplate, mode]);
 
   // ── Field handlers ────────────────────────────────────────────────────────
   function updateIngredient(id: string, key: keyof IngredientForm, value: string) {
@@ -315,8 +351,98 @@ export function EditMealScreen({ date, entry, visible, onClose }: Props) {
     };
   }
 
+  // ── Create flow ───────────────────────────────────────────────────────────
+  function handleCreate() {
+    const trimmedName = name.trim() || 'New meal';
+    const cleanIngredients = formsToIngredients(ingredients, `tmp-${Date.now()}`);
+    const macros = {
+      protein: toIntSafe(protein),
+      carbs: toIntSafe(carbs),
+      fats: toIntSafe(fats),
+    };
+    const cals = toIntSafe(calories);
+    const timeStr = formatDateToHHMM(time);
+
+    let createdTemplateId: string | null = null;
+    let entryId: string;
+
+    if (isRecurring) {
+      const tplId = `tpl-${Date.now()}`;
+      createdTemplateId = tplId;
+      entryId = `${date}-${tplId}`;
+      const recRule = buildRecurrence(true, recType, everyN, everyUnit, date);
+      const newTemplate: MealTemplate = {
+        id: tplId,
+        name: trimmedName,
+        time: timeStr,
+        duration,
+        calories: cals,
+        ingredients: cleanIngredients,
+        macros,
+        recurrence: recRule,
+      };
+      addTemplate(newTemplate);
+      const newEntry: MealEntry = {
+        id: entryId,
+        name: trimmedName,
+        time: timeStr,
+        duration,
+        calories: cals,
+        ingredients: cleanIngredients,
+        macros,
+        status: 'pending',
+      };
+      addMealToDay(date, newEntry);
+    } else {
+      entryId = `${date}-custom-${Date.now()}`;
+      const newEntry: MealEntry = {
+        id: entryId,
+        name: trimmedName,
+        time: timeStr,
+        duration,
+        calories: cals,
+        ingredients: cleanIngredients,
+        macros,
+        status: 'pending',
+      };
+      addMealToDay(date, newEntry);
+    }
+
+    let savedLibId: string | null = null;
+    if (saveLib) {
+      savedLibId = `lib-${Date.now()}`;
+      saveToLibrary({
+        id: savedLibId,
+        name: trimmedName,
+        calories: cals,
+        ingredients: cleanIngredients,
+        macros,
+        usageCount: 0,
+        lastUsed: toIsoDate(new Date()),
+      });
+    }
+
+    showUndo({
+      message: isRecurring
+        ? `Added recurring "${trimmedName}"`
+        : `Added "${trimmedName}"`,
+      undo: () => {
+        removeMealFromDay(date, entryId);
+        if (createdTemplateId) removeTemplate(createdTemplateId);
+        if (savedLibId) removeFromLibrary(savedLibId);
+      },
+    });
+
+    onSaved?.();
+    onClose();
+  }
+
   // ── Save flow ─────────────────────────────────────────────────────────────
   function handleSave() {
+    if (mode === 'create') {
+      handleCreate();
+      return;
+    }
     if (!entry) return;
 
     // Only show the scope dialog when the meal was ALREADY recurring when this
@@ -330,10 +456,26 @@ export function EditMealScreen({ date, entry, visible, onClose }: Props) {
       const previous = cloneEntry(entry);
       const next = buildNextEntry();
       editMealOnDay(date, next);
+      const savedLibId = saveLib ? `lib-${Date.now()}` : null;
+      if (savedLibId) {
+        saveToLibrary({
+          id: savedLibId,
+          name: next.name,
+          calories: next.calories,
+          ingredients: next.ingredients,
+          macros: next.macros,
+          usageCount: 0,
+          lastUsed: toIsoDate(new Date()),
+        });
+      }
       showUndo({
         message: 'Meal updated',
-        undo: () => editMealOnDay(date, previous),
+        undo: () => {
+          editMealOnDay(date, previous);
+          if (savedLibId) removeFromLibrary(savedLibId);
+        },
       });
+      onSaved?.();
       onClose();
       return;
     }
@@ -515,7 +657,7 @@ export function EditMealScreen({ date, entry, visible, onClose }: Props) {
   }
 
   // ── Render ────────────────────────────────────────────────────────────────
-  if (!entry) {
+  if (!entry && mode === 'edit') {
     return (
       <Modal visible={visible} animationType="slide" presentationStyle="fullScreen" onRequestClose={onClose}>
         <View style={styles.full} />
@@ -535,7 +677,7 @@ export function EditMealScreen({ date, entry, visible, onClose }: Props) {
             <TouchableOpacity onPress={onClose} hitSlop={12}>
               <Text style={styles.headerCancel}>Cancel</Text>
             </TouchableOpacity>
-            <Text style={styles.headerTitle}>Edit meal</Text>
+            <Text style={styles.headerTitle}>{mode === 'create' ? 'New meal' : 'Edit meal'}</Text>
             <TouchableOpacity onPress={handleSave} hitSlop={12}>
               <Text style={styles.headerSave}>Save</Text>
             </TouchableOpacity>
@@ -814,6 +956,22 @@ export function EditMealScreen({ date, entry, visible, onClose }: Props) {
                     )}
                   </>
                 )}
+              </Section>
+
+              {/* Save to Library */}
+              <Section title="Save options">
+                <View style={styles.recurringRow}>
+                  <Text style={styles.recurringLabel}>Save to library</Text>
+                  <Switch
+                    value={saveLib}
+                    onValueChange={setSaveLib}
+                    trackColor={{ true: COLORS.green, false: COLORS.elevated }}
+                    thumbColor={saveLib ? '#0E1A12' : '#cfcfd2'}
+                  />
+                </View>
+                <Text style={styles.recurringHint}>
+                  Keeps a copy in your library for quick reuse later.
+                </Text>
               </Section>
             </ScrollView>
           ) : (

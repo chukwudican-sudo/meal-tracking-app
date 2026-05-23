@@ -1,38 +1,39 @@
+import { useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 
 import { COLORS } from '@/constants/theme';
-import type { MealDraft } from '@/ai/types';
+import { EditMealScreen } from '@/components/EditMealScreen';
 
 interface Props {
-  onDraftReady: (draft: MealDraft) => void;
+  date: string;
+  onCreated: () => void;
 }
 
-const EMPTY_DRAFT: MealDraft = {
-  name: '',
-  time: nowHHMM(),
-  calories: 0,
-  macros: { protein: 0, carbs: 0, fats: 0 },
-};
+export function ManualTab({ date, onCreated }: Props) {
+  const [showCreate, setShowCreate] = useState(false);
 
-export function ManualTab({ onDraftReady }: Props) {
   return (
     <View style={styles.wrap}>
       <Text style={styles.title}>Manual entry</Text>
-      <Text style={styles.subtitle}>Type in the details yourself — name, time, calories, and macros.</Text>
+      <Text style={styles.subtitle}>Type in the details yourself — name, time, calories, macros, and ingredients.</Text>
 
-      <TouchableOpacity style={styles.bigBtn} onPress={() => onDraftReady({ ...EMPTY_DRAFT, time: nowHHMM() })}>
+      <TouchableOpacity style={styles.bigBtn} onPress={() => setShowCreate(true)}>
         <Text style={styles.bigBtnPlus}>+</Text>
         <Text style={styles.bigBtnLabel}>New meal</Text>
       </TouchableOpacity>
 
       <Text style={styles.hint}>You can also pick a saved meal from the Search tab.</Text>
+
+      <EditMealScreen
+        mode="create"
+        visible={showCreate}
+        date={date}
+        entry={null}
+        onClose={() => setShowCreate(false)}
+        onSaved={onCreated}
+      />
     </View>
   );
-}
-
-function nowHHMM(): string {
-  const d = new Date();
-  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
 const styles = StyleSheet.create({

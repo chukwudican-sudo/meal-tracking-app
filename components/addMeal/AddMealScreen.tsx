@@ -131,7 +131,7 @@ export function AddMealScreen({ visible, date, onClose }: Props) {
             />
           )}
           {activeTab === 'manual' && (
-            <ManualTab onDraftReady={draft => setPending({ draft, source: 'manual' })} />
+            <ManualTab date={date} onCreated={handleClose} />
           )}
           {activeTab === 'search' && (
             <SearchTab
