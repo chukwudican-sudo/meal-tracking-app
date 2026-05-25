@@ -505,6 +505,25 @@ export default function GroceryScreen() {
           <View style={{ width: pageWidth }}>{renderKitchenPage()}</View>
           <View style={{ width: pageWidth }}>{renderCartPage()}</View>
         </ScrollView>
+
+        {/* Page indicator dots — anchored to the bottom of the content area */}
+        <View pointerEvents="none" style={styles.dotsRow}>
+          {TAB_KEYS.map(key => {
+            const active = activeTab === key;
+            return (
+              <View
+                key={key}
+                style={[
+                  styles.dot,
+                  active && {
+                    backgroundColor: ACCENT.underline,
+                    width: 18,
+                  },
+                ]}
+              />
+            );
+          })}
+        </View>
       </View>
 
       <OldCartModal
@@ -665,7 +684,24 @@ const styles = StyleSheet.create({
 
   // ─── Pages ──────────────────────────────────────────────────────────────
   page: { flex: 1 },
-  pageContent: { padding: 16, paddingBottom: 120 },
+  pageContent: { padding: 16, paddingBottom: 60 },
+
+  // ─── Page indicator dots ────────────────────────────────────────────────
+  dotsRow: {
+    position: 'absolute',
+    bottom: 14,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 7,
+  },
+  dot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    backgroundColor: COLORS.elevated,
+  },
 
   // ─── Tip banner ─────────────────────────────────────────────────────────
   tipBanner: {
