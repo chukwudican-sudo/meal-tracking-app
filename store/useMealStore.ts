@@ -7,6 +7,8 @@ import type { StateStorage } from 'zustand/middleware';
 import type {
   AppStore,
   DailyLog,
+  GroceryItem,
+  GroceryState,
   MealEntry,
   MealTemplate,
   RecurrenceRule,
@@ -14,6 +16,7 @@ import type {
   UserGoals,
   UserProfile,
 } from './types';
+import { classifyIngredient, normalizeIngredientName } from '@/constants/ingredientCategories';
 
 // ─── Date helpers ─────────────────────────────────────────────────────────────
 
@@ -74,6 +77,32 @@ export function isTemplateApplicableOnDate(template: MealTemplate, date: string)
   }
 
   return false;
+}
+
+// Find the Monday on-or-before a given ISO date (the start of that week).
+export function mondayOfWeek(iso: string): string {
+  const d = new Date(iso + 'T00:00:00');
+  const dow = d.getDay(); // 0=Sun … 6=Sat
+  const diff = dow === 0 ? -6 : 1 - dow; // shift Sun to previous Monday
+  d.setDate(d.getDate() + diff);
+  return toIsoDate(d);
+}
+
+function shiftIsoLocal(iso: string, days: number): string {
+  const d = new Date(iso + 'T00:00:00');
+  d.setDate(d.getDate() + days);
+  return toIsoDate(d);
+}
+
+// Collect all "active" meal names — used by Grocery cleanup to determine
+// whether an ingredient is still needed after a meal is removed.
+function collectActiveMealNames(state: AppStore): string[] {
+  const names = new Set<string>();
+  state.templates.forEach(t => names.add(t.name));
+  Object.values(state.logs).forEach(log => {
+    log.meals.forEach(m => names.add(m.name));
+  });
+  return Array.from(names);
 }
 
 function toMinutesFromHHMM(value: string): number | null {
@@ -195,6 +224,15 @@ const SEED_LOGS: Record<string, DailyLog> = Object.fromEntries([
   buildSeedLog(1),
 ]);
 
+// ─── Initial grocery state ────────────────────────────────────────────────────
+
+const INITIAL_GROCERY: GroceryState = {
+  weekStart: '',                // empty so first refresh always runs
+  items: {},
+  hasSeenTip: false,
+  cartOldWeekItems: [],
+};
+
 const SEED_LIBRARY: SavedMeal[] = SEED_TEMPLATES.map(t => ({
   id:         `lib-${t.id}`,
   name:        t.name,
@@ -289,6 +327,7 @@ export const useMealStore = create<AppStore>()(
       streak:    5,
       templates: SEED_TEMPLATES,
       library:   SEED_LIBRARY,
+      grocery:   INITIAL_GROCERY,
 
       // ── Toggle completion ──────────────────────────────────────────────────
       toggleMealStatus: (date, mealId) => {
@@ -340,6 +379,12 @@ export const useMealStore = create<AppStore>()(
       },
 
       removeMealFromDay: (date, mealId) => {
+        // Capture removed meal's ingredient names before mutating state.
+        const before = get();
+        const removed = before.logs[date]?.meals.find(m => m.id === mealId);
+        const removedIngredientNames =
+          removed?.ingredients?.map(i => i.name).filter(Boolean) ?? [];
+
         set(state => {
           const log = state.logs[date];
           if (!log) return state;
@@ -350,6 +395,15 @@ export const useMealStore = create<AppStore>()(
             },
           };
         });
+
+        if (removedIngredientNames.length > 0) {
+          const after = get();
+          const remainingMealNames = collectActiveMealNames(after);
+          after.cleanupRemovedMealIngredients(
+            removedIngredientNames,
+            remainingMealNames,
+          );
+        }
       },
 
       restoreMealToDay: (date, entry, index) => {
@@ -431,8 +485,23 @@ export const useMealStore = create<AppStore>()(
           templates: state.templates.map(t => t.id === template.id ? template : t),
         })),
 
-      removeTemplate: id =>
-        set(state => ({ templates: state.templates.filter(t => t.id !== id) })),
+      removeTemplate: id => {
+        const before = get();
+        const removedTemplate = before.templates.find(t => t.id === id);
+        const removedIngredientNames =
+          removedTemplate?.ingredients?.map(i => i.name).filter(Boolean) ?? [];
+
+        set(state => ({ templates: state.templates.filter(t => t.id !== id) }));
+
+        if (removedIngredientNames.length > 0) {
+          const after = get();
+          const remainingMealNames = collectActiveMealNames(after);
+          after.cleanupRemovedMealIngredients(
+            removedIngredientNames,
+            remainingMealNames,
+          );
+        }
+      },
 
       // ── Resolve day from templates ─────────────────────────────────────────
       resolveDayFromTemplates: (date) => {
@@ -496,6 +565,336 @@ export const useMealStore = create<AppStore>()(
             streak++;
           }
           return { streak };
+        });
+      },
+
+      // ─────────────────────────────────────────────────────────────────────
+      // Grocery actions
+      // ─────────────────────────────────────────────────────────────────────
+
+      refreshGroceryWeek: (weekStart) => {
+        const state = get();
+        const sameWeek = state.grocery.weekStart === weekStart;
+
+        // Capture leftover unbought Cart items from last week (only when the
+        // Monday actually rolled over — not on first load when weekStart === '').
+        let cartOldWeekItems: string[] = state.grocery.cartOldWeekItems;
+        if (!sameWeek && state.grocery.weekStart) {
+          cartOldWeekItems = Object.values(state.grocery.items)
+            .filter(i => i.section === 'cart' && !i.struckThrough && !i.isCustom)
+            .map(i => i.key);
+        }
+
+        // Derive this week's ingredients from templates applicable on each day.
+        const days = Array.from({ length: 7 }, (_, i) => shiftIsoLocal(weekStart, i));
+        const weekIngredients = new Map<string, { name: string; mealNames: Set<string> }>();
+        days.forEach(iso => {
+          state.templates.forEach(t => {
+            if (!isTemplateApplicableOnDate(t, iso)) return;
+            t.ingredients.forEach(ing => {
+              const key = normalizeIngredientName(ing.name);
+              if (!key) return;
+              if (!weekIngredients.has(key)) {
+                weekIngredients.set(key, { name: ing.name, mealNames: new Set() });
+              }
+              weekIngredients.get(key)!.mealNames.add(t.name);
+            });
+          });
+        });
+
+        // Start from existing items but clear out any 'planned' items
+        // (per spec: only Planned section is cleared and repopulated on refresh).
+        const nextItems: Record<string, GroceryItem> = {};
+        Object.values(state.grocery.items).forEach(item => {
+          if (item.section === 'planned') return; // dropped
+          nextItems[item.key] = item;
+        });
+
+        const now = new Date().toISOString();
+        weekIngredients.forEach(({ name, mealNames }, key) => {
+          const existing = nextItems[key];
+          // If already in kitchen or cart, skip — silent merge per spec.
+          if (existing && (existing.section === 'kitchen' || existing.section === 'cart')) {
+            return;
+          }
+          // Otherwise (none, or wasn't present at all) → add to planned.
+          nextItems[key] = {
+            key,
+            name,
+            category: classifyIngredient(name),
+            section: 'planned',
+            mealNames: Array.from(mealNames),
+            updatedAt: now,
+          };
+        });
+
+        set({
+          grocery: {
+            ...state.grocery,
+            weekStart,
+            items: nextItems,
+            cartOldWeekItems,
+          },
+        });
+      },
+
+      sortIngredient: (key, to) => {
+        set(state => {
+          const item = state.grocery.items[key];
+          if (!item) return state;
+          // If moving to kitchen and an item with same key already in kitchen,
+          // it's the same record — silently no-op (already sorted there).
+          if (to === 'kitchen' && item.section === 'kitchen') return state;
+          if (to === 'cart' && item.section === 'cart') return state;
+          return {
+            grocery: {
+              ...state.grocery,
+              items: {
+                ...state.grocery.items,
+                [key]: {
+                  ...item,
+                  section: to,
+                  struckThrough: false,
+                  updatedAt: new Date().toISOString(),
+                },
+              },
+            },
+          };
+        });
+      },
+
+      skipIngredient: (key) => {
+        set(state => {
+          const item = state.grocery.items[key];
+          if (!item) return state;
+          return {
+            grocery: {
+              ...state.grocery,
+              items: {
+                ...state.grocery.items,
+                [key]: { ...item, section: 'none', updatedAt: new Date().toISOString() },
+              },
+            },
+          };
+        });
+      },
+
+      moveKitchenToCart: (key) => {
+        set(state => {
+          const item = state.grocery.items[key];
+          if (!item || item.section !== 'kitchen') return state;
+          return {
+            grocery: {
+              ...state.grocery,
+              items: {
+                ...state.grocery.items,
+                [key]: {
+                  ...item,
+                  section: 'cart',
+                  struckThrough: false,
+                  updatedAt: new Date().toISOString(),
+                },
+              },
+            },
+          };
+        });
+      },
+
+      toggleCartStrikethrough: (key) => {
+        set(state => {
+          const item = state.grocery.items[key];
+          if (!item || item.section !== 'cart') return state;
+          return {
+            grocery: {
+              ...state.grocery,
+              items: {
+                ...state.grocery.items,
+                [key]: {
+                  ...item,
+                  struckThrough: !item.struckThrough,
+                  updatedAt: new Date().toISOString(),
+                },
+              },
+            },
+          };
+        });
+      },
+
+      addManualCartItem: (rawName) => {
+        const name = rawName.trim();
+        if (!name) return;
+        const key = normalizeIngredientName(name);
+        set(state => {
+          const existing = state.grocery.items[key];
+          // If a non-custom item already exists in cart with same key, no-op.
+          if (existing && existing.section === 'cart') return state;
+          const next: GroceryItem = {
+            key,
+            name,
+            category: classifyIngredient(name),
+            section: 'cart',
+            isCustom: true,
+            struckThrough: false,
+            updatedAt: new Date().toISOString(),
+          };
+          return {
+            grocery: {
+              ...state.grocery,
+              items: { ...state.grocery.items, [key]: next },
+            },
+          };
+        });
+      },
+
+      addManualKitchenItem: (rawName) => {
+        const name = rawName.trim();
+        if (!name) return;
+        const key = normalizeIngredientName(name);
+        set(state => {
+          const existing = state.grocery.items[key];
+          if (existing && existing.section === 'kitchen') return state;
+          const next: GroceryItem = {
+            key,
+            name,
+            category: classifyIngredient(name),
+            section: 'kitchen',
+            updatedAt: new Date().toISOString(),
+          };
+          return {
+            grocery: {
+              ...state.grocery,
+              items: { ...state.grocery.items, [key]: next },
+            },
+          };
+        });
+      },
+
+      removeGroceryItem: (key) => {
+        set(state => {
+          if (!state.grocery.items[key]) return state;
+          const nextItems = { ...state.grocery.items };
+          delete nextItems[key];
+          return { grocery: { ...state.grocery, items: nextItems } };
+        });
+      },
+
+      doneShopping: () => {
+        set(state => {
+          const nextItems: Record<string, GroceryItem> = {};
+          const now = new Date().toISOString();
+          Object.values(state.grocery.items).forEach(item => {
+            if (item.section === 'cart' && item.struckThrough) {
+              if (item.isCustom) {
+                // Custom struck-through items are cleared (no Kitchen persistence).
+                return;
+              }
+              // Plan-derived struck-through items move to Kitchen.
+              nextItems[item.key] = {
+                ...item,
+                section: 'kitchen',
+                struckThrough: false,
+                isCustom: false,
+                updatedAt: now,
+              };
+              return;
+            }
+            nextItems[item.key] = item;
+          });
+          return { grocery: { ...state.grocery, items: nextItems } };
+        });
+      },
+
+      resolveOldCartItems: (decisions) => {
+        set(state => {
+          const nextItems = { ...state.grocery.items };
+          Object.entries(decisions).forEach(([key, decision]) => {
+            const item = nextItems[key];
+            if (!item) return;
+            if (decision === 'remove') {
+              delete nextItems[key];
+            }
+            // 'keep' = no change; item already in cart.
+          });
+          return {
+            grocery: {
+              ...state.grocery,
+              items: nextItems,
+              cartOldWeekItems: [],
+            },
+          };
+        });
+      },
+
+      dismissGroceryTip: () => {
+        set(state => ({ grocery: { ...state.grocery, hasSeenTip: true } }));
+      },
+
+      ingestMidWeekIngredients: (ingredients) => {
+        set(state => {
+          const nextItems = { ...state.grocery.items };
+          const now = new Date().toISOString();
+          ingredients.forEach(({ name, mealName }) => {
+            const key = normalizeIngredientName(name);
+            if (!key) return;
+            const existing = nextItems[key];
+            // If already in kitchen or cart, silent no-op.
+            if (existing && (existing.section === 'kitchen' || existing.section === 'cart')) {
+              return;
+            }
+            // Add (or re-add if previously skipped/none) to Planned.
+            const prevMealNames = existing?.mealNames ?? [];
+            const mergedMeals = Array.from(new Set([...prevMealNames, mealName]));
+            nextItems[key] = {
+              key,
+              name: existing?.name ?? name,
+              category: existing?.category ?? classifyIngredient(name),
+              section: 'planned',
+              mealNames: mergedMeals,
+              updatedAt: now,
+            };
+          });
+          return { grocery: { ...state.grocery, items: nextItems } };
+        });
+      },
+
+      cleanupRemovedMealIngredients: (mealIngredientNames, remainingMealNames) => {
+        set(state => {
+          const nextItems = { ...state.grocery.items };
+          const now = new Date().toISOString();
+          const remaining = new Set(remainingMealNames);
+
+          // Build set of ingredient names still required by remaining meals,
+          // looking across both templates AND any one-off meals in logs.
+          const stillNeededKeys = new Set<string>();
+          state.templates.forEach(t => {
+            if (!remaining.has(t.name)) return;
+            t.ingredients.forEach(ing => {
+              stillNeededKeys.add(normalizeIngredientName(ing.name));
+            });
+          });
+          Object.values(state.logs).forEach(log => {
+            log.meals.forEach(m => {
+              if (!remaining.has(m.name)) return;
+              m.ingredients.forEach(ing => {
+                stillNeededKeys.add(normalizeIngredientName(ing.name));
+              });
+            });
+          });
+
+          mealIngredientNames.forEach(rawName => {
+            const key = normalizeIngredientName(rawName);
+            if (!key) return;
+            if (stillNeededKeys.has(key)) return; // another meal still needs it
+            const item = nextItems[key];
+            if (!item) return;
+            if (item.section === 'planned') {
+              // Auto-remove from Planned (no popup per spec).
+              nextItems[key] = { ...item, section: 'none', updatedAt: now };
+            }
+            // Cart/Kitchen left alone — caller handles Cart popup, Kitchen is independent.
+          });
+
+          return { grocery: { ...state.grocery, items: nextItems } };
         });
       },
     }),

@@ -42,6 +42,7 @@ export function MealDraftCard({
   const editMealOnDay = useMealStore(s => s.editMealOnDay);
   const saveToLibrary = useMealStore(s => s.saveToLibrary);
   const resolveDay = useMealStore(s => s.resolveDayFromTemplates);
+  const ingestMidWeekIngredients = useMealStore(s => s.ingestMidWeekIngredients);
   const showUndo = useUndoStore(s => s.showUndo);
 
   const [name, setName] = useState(initial.name);
@@ -98,6 +99,8 @@ export function MealDraftCard({
           lastUsed: new Date().toISOString().slice(0, 10),
         });
       }
+      // Surface ingredients into Grocery → Planned (no-op when empty).
+      ingestMidWeekIngredients([]);
       onSaved();
       return;
     }
@@ -152,6 +155,10 @@ export function MealDraftCard({
     // Touch the resolver in case templates from the new save apply to
     // future days viewed elsewhere (no-op for the current `date`).
     resolveDay(date);
+
+    // Surface ingredients into Grocery → Planned (no-op when empty;
+    // future-proof for AI/scan flows that populate ingredients).
+    ingestMidWeekIngredients([]);
 
     onSaved();
   }

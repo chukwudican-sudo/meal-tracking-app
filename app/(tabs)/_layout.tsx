@@ -2,8 +2,13 @@ import { Tabs } from 'expo-router';
 import { Text } from 'react-native';
 
 import { COLORS } from '@/constants/theme';
+import { useMealStore } from '@/store/useMealStore';
 
 export default function TabLayout() {
+  const plannedCount = useMealStore(s =>
+    Object.values(s.grocery.items).filter(i => i.section === 'planned').length
+  );
+
   return (
     <Tabs
       screenOptions={{
@@ -42,6 +47,15 @@ export default function TabLayout() {
         options={{
           title: 'Grocery',
           tabBarIcon: ({ color }) => <TabIcon label="🛒" color={color} />,
+          tabBarBadge: plannedCount > 0 ? plannedCount : undefined,
+          tabBarBadgeStyle: {
+            backgroundColor: COLORS.red,
+            color: '#FFFFFF',
+            fontSize: 10,
+            minWidth: 18,
+            height: 18,
+            lineHeight: 16,
+          },
         }}
       />
       <Tabs.Screen

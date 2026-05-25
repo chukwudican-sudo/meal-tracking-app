@@ -224,6 +224,7 @@ export function EditMealScreen({
   const removeMealFromDay = useMealStore(s => s.removeMealFromDay);
   const saveToLibrary = useMealStore(s => s.saveToLibrary);
   const removeFromLibrary = useMealStore(s => s.removeFromLibrary);
+  const ingestMidWeekIngredients = useMealStore(s => s.ingestMidWeekIngredients);
   const showUndo = useUndoStore(s => s.showUndo);
 
   // Find the template this entry materialized from (if any). A template-derived
@@ -420,6 +421,14 @@ export function EditMealScreen({
         usageCount: 0,
         lastUsed: toIsoDate(new Date()),
       });
+    }
+
+    // Surface any new ingredients into the Grocery → Planned section
+    // (no-op if the ingredient is already in Kitchen or Cart).
+    if (cleanIngredients.length > 0) {
+      ingestMidWeekIngredients(
+        cleanIngredients.map(ing => ({ name: ing.name, mealName: trimmedName }))
+      );
     }
 
     showUndo({

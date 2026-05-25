@@ -62,6 +62,38 @@ export interface MealTemplate {
   recurrence: RecurrenceRule;
 }
 
+// ─── Grocery (Kitchen / Cart / Planned ingredients) ──────────────────────────
+
+export type IngredientCategory =
+  | 'Proteins'
+  | 'Carbs & Grains'
+  | 'Fruits & Vegetables'
+  | 'Dairy'
+  | 'Oils & Fats'
+  | 'Spices & Seasonings'
+  | 'Condiments'
+  | 'Other';
+
+export type GrocerySection = 'planned' | 'kitchen' | 'cart' | 'none';
+
+export interface GroceryItem {
+  key: string;              // normalized lowercased name (the shared key)
+  name: string;             // display name (first occurrence wins)
+  category: IngredientCategory;
+  section: GrocerySection;
+  isCustom?: boolean;       // true for manually added Cart items that don't move to Kitchen
+  struckThrough?: boolean;  // Cart only — user tapped to indicate bought
+  mealNames?: string[];     // which meals use this ingredient (for Skip warning)
+  updatedAt: string;        // ISO timestamp
+}
+
+export interface GroceryState {
+  weekStart: string;                      // ISO of Monday that populated Planned
+  items: Record<string, GroceryItem>;     // key = normalized name
+  hasSeenTip: boolean;                    // dismisses the onboarding banner
+  cartOldWeekItems: string[];             // keys of Cart items from last week pending keep/remove decision
+}
+
 // ─── Library (saved meals) ────────────────────────────────────────────────────
 
 export interface SavedMeal {
@@ -83,6 +115,7 @@ export interface AppStore {
   streak: number;
   templates: MealTemplate[];
   library: SavedMeal[];
+  grocery: GroceryState;
 
   toggleMealStatus:       (date: string, mealId: string) => void;
   logWater:               (date: string, ml: number) => void;
@@ -101,4 +134,19 @@ export interface AppStore {
   updateGoals:            (goals: Partial<UserGoals>) => void;
   updateProfile:          (profile: Partial<UserProfile>) => void;
   recalcStreak:           () => void;
+
+  // ─── Grocery actions ──────────────────────────────────────────────────────
+  refreshGroceryWeek:            (weekStart: string) => void;
+  sortIngredient:                (key: string, to: 'kitchen' | 'cart') => void;
+  skipIngredient:                (key: string) => void;
+  moveKitchenToCart:             (key: string) => void;
+  toggleCartStrikethrough:       (key: string) => void;
+  addManualCartItem:             (name: string) => void;
+  addManualKitchenItem:          (name: string) => void;
+  removeGroceryItem:             (key: string) => void;
+  doneShopping:                  () => void;
+  resolveOldCartItems:           (decisions: Record<string, 'keep' | 'remove'>) => void;
+  dismissGroceryTip:             () => void;
+  ingestMidWeekIngredients:      (ingredients: { name: string; mealName: string }[]) => void;
+  cleanupRemovedMealIngredients: (mealIngredientNames: string[], remainingMealNames: string[]) => void;
 }
