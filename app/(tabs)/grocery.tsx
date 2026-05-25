@@ -220,7 +220,7 @@ export default function GroceryScreen() {
 
   const renderPlannedPage = () => (
     <ScrollView
-      style={styles.page}
+      style={styles.panelScroll}
       contentContainerStyle={styles.pageContent}
       keyboardShouldPersistTaps="handled"
       showsVerticalScrollIndicator={false}
@@ -293,7 +293,7 @@ export default function GroceryScreen() {
 
   const renderKitchenPage = () => (
     <ScrollView
-      style={styles.page}
+      style={styles.panelScroll}
       contentContainerStyle={styles.pageContent}
       keyboardShouldPersistTaps="handled"
       showsVerticalScrollIndicator={false}
@@ -358,7 +358,7 @@ export default function GroceryScreen() {
 
   const renderCartPage = () => (
     <ScrollView
-      style={styles.page}
+      style={styles.panelScroll}
       contentContainerStyle={styles.pageContent}
       keyboardShouldPersistTaps="handled"
       showsVerticalScrollIndicator={false}
@@ -501,9 +501,15 @@ export default function GroceryScreen() {
           bounces={false}
           contentOffset={{ x: TAB_KEYS.indexOf(activeTab) * pageWidth, y: 0 }}
         >
-          <View style={{ width: pageWidth }}>{renderPlannedPage()}</View>
-          <View style={{ width: pageWidth }}>{renderKitchenPage()}</View>
-          <View style={{ width: pageWidth }}>{renderCartPage()}</View>
+          <View style={[styles.pageSlot, { width: pageWidth }]}>
+            <View style={styles.panel}>{renderPlannedPage()}</View>
+          </View>
+          <View style={[styles.pageSlot, { width: pageWidth }]}>
+            <View style={styles.panel}>{renderKitchenPage()}</View>
+          </View>
+          <View style={[styles.pageSlot, { width: pageWidth }]}>
+            <View style={styles.panel}>{renderCartPage()}</View>
+          </View>
         </ScrollView>
 
         {/* Page indicator dots — anchored to the bottom of the content area */}
@@ -683,13 +689,32 @@ const styles = StyleSheet.create({
   },
 
   // ─── Pages ──────────────────────────────────────────────────────────────
-  page: { flex: 1 },
-  pageContent: { padding: 16, paddingBottom: 60 },
+  pageSlot: {
+    flex: 1,
+    paddingHorizontal: 12,
+    paddingTop: 12,
+    paddingBottom: 36, // leaves room for the dots row below
+  },
+  panel: {
+    flex: 1,
+    backgroundColor: COLORS.card,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 10,
+    elevation: 4,
+  },
+  panelScroll: { flex: 1 },
+  pageContent: { padding: 16, paddingBottom: 28 },
 
   // ─── Page indicator dots ────────────────────────────────────────────────
   dotsRow: {
     position: 'absolute',
-    bottom: 14,
+    bottom: 12,
     left: 0,
     right: 0,
     flexDirection: 'row',
@@ -706,7 +731,7 @@ const styles = StyleSheet.create({
   // ─── Tip banner ─────────────────────────────────────────────────────────
   tipBanner: {
     padding: 14,
-    backgroundColor: COLORS.card,
+    backgroundColor: COLORS.elevated,
     borderRadius: 12,
     borderWidth: 1,
     borderColor: ACCENT.underline,
@@ -797,7 +822,7 @@ const styles = StyleSheet.create({
   },
   addInput: {
     flex: 1,
-    backgroundColor: COLORS.card,
+    backgroundColor: COLORS.elevated,
     color: COLORS.text,
     paddingHorizontal: 14,
     paddingVertical: Platform.OS === 'ios' ? 11 : 8,
