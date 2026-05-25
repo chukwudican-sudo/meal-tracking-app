@@ -21,20 +21,17 @@ import type { GroceryItem, IngredientCategory } from '@/store/types';
 import { useMealStore, mondayOfWeek } from '@/store/useMealStore';
 
 // ─── Refined accent palette ───────────────────────────────────────────────────
-// Tinted iOS-style chips: subtle background fill + bold accent text.
 const ACCENT = {
-  inStockBg: 'rgba(48, 209, 88, 0.18)',      // soft green tint
-  inStockBorder: 'rgba(48, 209, 88, 0.45)',
-  inStockText: '#30D158',
-  needItBg: 'rgba(255, 159, 10, 0.18)',      // amber tint
-  needItBorder: 'rgba(255, 159, 10, 0.45)',
-  needItText: '#FF9F0A',
-  skipBg: 'rgba(142, 142, 147, 0.10)',
+  green: '#30D158',
+  greenBg: 'rgba(48, 209, 88, 0.18)',
+  amber: '#FF9F0A',
+  amberBg: 'rgba(255, 159, 10, 0.18)',
   skipText: COLORS.textSecondary,
-  doneBg: '#30D158',
-  primaryBg: '#FF9F0A',                       // for + add buttons
   underline: '#FF9F0A',
 };
+
+// Fixed height for collapsed card (~5 rows of content + chrome)
+const COLLAPSED_PANEL_HEIGHT = 460;
 
 const CATEGORY_ORDER: IngredientCategory[] = [
   'Proteins',
@@ -97,10 +94,15 @@ export default function GroceryScreen() {
   const pagerRef = useRef<ScrollView>(null);
   const [pageWidth, setPageWidth] = useState(Dimensions.get('window').width);
 
+  // Defer scrollTo to the next tick so React commits the state update first.
   const goToTab = (tab: TabKey) => {
-    setActiveTab(tab);
+    if (pageWidth <= 0) return;
     const index = TAB_KEYS.indexOf(tab);
-    pagerRef.current?.scrollTo({ x: index * pageWidth, animated: true });
+    if (index < 0) return;
+    setActiveTab(tab);
+    requestAnimationFrame(() => {
+      pagerRef.current?.scrollTo({ x: index * pageWidth, animated: true });
+    });
   };
 
   const handleMomentumEnd = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
@@ -109,6 +111,34 @@ export default function GroceryScreen() {
     const next = TAB_KEYS[idx] ?? 'planned';
     if (next !== activeTab) setActiveTab(next);
   };
+
+  // Re-align scroll position whenever pageWidth changes (initial layout, rotation).
+  useEffect(() => {
+    if (pageWidth > 0) {
+      const idx = TAB_KEYS.indexOf(activeTab);
+      pagerRef.current?.scrollTo({ x: idx * pageWidth, animated: false });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pageWidth]);
+
+  // ─── Expand / collapse card height + per-page overflow tracking ───────────
+  const [expanded, setExpanded] = useState(false);
+  const [bodyHeights, setBodyHeights] = useState<Record<TabKey, number>>({
+    planned: 0, kitchen: 0, cart: 0,
+  });
+  const [contentHeights, setContentHeights] = useState<Record<TabKey, number>>({
+    planned: 0, kitchen: 0, cart: 0,
+  });
+  const overflows: Record<TabKey, boolean> = {
+    planned: contentHeights.planned > bodyHeights.planned + 4,
+    kitchen: contentHeights.kitchen > bodyHeights.kitchen + 4,
+    cart: contentHeights.cart > bodyHeights.cart + 4,
+  };
+
+  const setBodyH = (tab: TabKey, h: number) =>
+    setBodyHeights(prev => (prev[tab] === h ? prev : { ...prev, [tab]: h }));
+  const setContentH = (tab: TabKey, h: number) =>
+    setContentHeights(prev => (prev[tab] === h ? prev : { ...prev, [tab]: h }));
 
   // Auto-refresh on Monday rollover
   useEffect(() => {
@@ -216,224 +246,273 @@ export default function GroceryScreen() {
     );
   };
 
-  // ─── Pages ────────────────────────────────────────────────────────────────
+  // ─── Sub-renders ──────────────────────────────────────────────────────────
 
-  const renderPlannedPage = () => (
-    <ScrollView
-      style={styles.panelScroll}
-      contentContainerStyle={styles.pageContent}
-      keyboardShouldPersistTaps="handled"
-      showsVerticalScrollIndicator={false}
-    >
-      {!grocery.hasSeenTip && (
-        <View style={styles.tipBanner}>
-          <View style={{ flex: 1, paddingRight: 12 }}>
-            <Text style={styles.tipTitle}>How this works</Text>
-            <Text style={styles.tipBody}>
-              Ingredients from your meal plan land here. Tap{' '}
-              <Text style={styles.tipBold}>In stock</Text> if you have it,{' '}
-              <Text style={styles.tipBold}>Need it</Text> to add to Cart, or{' '}
-              <Text style={styles.tipBold}>Skip</Text> to remove.
-            </Text>
-          </View>
-          <TouchableOpacity onPress={dismissGroceryTip} hitSlop={8}>
-            <Text style={styles.tipDismiss}>Got it</Text>
-          </TouchableOpacity>
-        </View>
-      )}
+  const seeMoreToggle = (tab: TabKey) => {
+    const showToggle = overflows[tab] || expanded;
+    if (!showToggle) return null;
+    return (
+      <Pressable
+        style={styles.seeBtn}
+        onPress={() => setExpanded(e => !e)}
+        hitSlop={6}
+      >
+        <Text style={styles.seeBtnText}>{expanded ? 'See less' : 'See more'}</Text>
+      </Pressable>
+    );
+  };
 
-      {planned.length === 0 ? (
-        <Text style={styles.emptyText}>
-          Your plan&apos;s ingredients will appear here on Monday.
-        </Text>
-      ) : (
-        planned
-          .slice()
-          .sort((a, b) => a.name.localeCompare(b.name))
-          .map(item => (
-            <View key={item.key} style={styles.plannedCard}>
-              <View style={{ flex: 1, marginRight: 8 }}>
-                <Text style={styles.itemName}>{item.name}</Text>
-                {item.mealNames && item.mealNames.length > 0 && (
-                  <Text style={styles.mealTag}>
-                    {item.mealNames.length === 1
-                      ? item.mealNames[0]
-                      : `${item.mealNames[0]} +${item.mealNames.length - 1}`}
-                  </Text>
-                )}
-              </View>
-              <View style={styles.plannedActions}>
-                <TouchableOpacity
-                  style={[styles.chipBtn, styles.chipInStock]}
-                  onPress={() => sortIngredient(item.key, 'kitchen')}
-                  activeOpacity={0.75}
-                >
-                  <Text style={[styles.chipText, { color: ACCENT.inStockText }]}>In stock</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.chipBtn, styles.chipNeedIt]}
-                  onPress={() => sortIngredient(item.key, 'cart')}
-                  activeOpacity={0.75}
-                >
-                  <Text style={[styles.chipText, { color: ACCENT.needItText }]}>Need it</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.chipBtn, styles.chipSkip]}
-                  onPress={() => handleSkip(item)}
-                  activeOpacity={0.75}
-                >
-                  <Text style={[styles.chipText, { color: ACCENT.skipText }]}>Skip</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          ))
-      )}
-    </ScrollView>
-  );
-
-  const renderKitchenPage = () => (
-    <ScrollView
-      style={styles.panelScroll}
-      contentContainerStyle={styles.pageContent}
-      keyboardShouldPersistTaps="handled"
-      showsVerticalScrollIndicator={false}
-    >
-      <View style={styles.addRow}>
-        <TextInput
-          style={styles.addInput}
-          placeholder="Add what's in your kitchen…"
-          placeholderTextColor={COLORS.textMuted}
-          value={kitchenInput}
-          onChangeText={setKitchenInput}
-          onSubmitEditing={handleAddKitchen}
-          returnKeyType="done"
-        />
-        <TouchableOpacity
-          style={[styles.addBtn, !kitchenInput.trim() && styles.addBtnDisabled]}
-          onPress={handleAddKitchen}
-          disabled={!kitchenInput.trim()}
+  const renderPlannedContent = () => (
+    <>
+      <View
+        style={styles.panelBody}
+        onLayout={e => setBodyH('planned', e.nativeEvent.layout.height)}
+      >
+        <ScrollView
+          contentContainerStyle={styles.bodyContent}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+          onContentSizeChange={(_, h) => setContentH('planned', h)}
         >
-          <Text style={styles.addBtnText}>+</Text>
-        </TouchableOpacity>
-      </View>
+          {!grocery.hasSeenTip && (
+            <View style={styles.tipBanner}>
+              <View style={{ flex: 1, paddingRight: 12 }}>
+                <Text style={styles.tipTitle}>How this works</Text>
+                <Text style={styles.tipBody}>
+                  Ingredients from your meal plan land here. Tap{' '}
+                  <Text style={styles.tipBold}>In stock</Text> if you have it,{' '}
+                  <Text style={styles.tipBold}>Need it</Text> to add to Cart, or{' '}
+                  <Text style={styles.tipBold}>Skip</Text> to remove.
+                </Text>
+              </View>
+              <TouchableOpacity onPress={dismissGroceryTip} hitSlop={8}>
+                <Text style={styles.tipDismiss}>Got it</Text>
+              </TouchableOpacity>
+            </View>
+          )}
 
-      {kitchen.length === 0 ? (
-        <Text style={styles.emptyText}>
-          Add what you already have so we can suggest meals from it.
-        </Text>
-      ) : (
-        CATEGORY_ORDER.map(cat => {
-          const items = kitchenByCategory[cat];
-          if (!items || items.length === 0) return null;
-          return (
-            <View key={cat} style={{ marginTop: 14 }}>
-              <Text style={styles.categoryHeader}>{cat}</Text>
-              {items
-                .slice()
-                .sort((a, b) => a.name.localeCompare(b.name))
-                .map(item => (
-                  <View key={item.key} style={styles.kitchenRow}>
-                    <Text style={[styles.itemName, { flex: 1 }]}>{item.name}</Text>
+          {planned.length === 0 ? (
+            <Text style={styles.emptyText}>
+              Your plan&apos;s ingredients will appear here on Monday.
+            </Text>
+          ) : (
+            planned
+              .slice()
+              .sort((a, b) => a.name.localeCompare(b.name))
+              .map(item => (
+                <View key={item.key} style={styles.plannedCard}>
+                  <View style={{ flex: 1, marginRight: 8 }}>
+                    <Text style={styles.itemName}>{item.name}</Text>
+                    {item.mealNames && item.mealNames.length > 0 && (
+                      <Text style={styles.mealTag}>
+                        {item.mealNames.length === 1
+                          ? item.mealNames[0]
+                          : `${item.mealNames[0]} +${item.mealNames.length - 1}`}
+                      </Text>
+                    )}
+                  </View>
+                  <View style={styles.plannedActions}>
+                    <TouchableOpacity
+                      style={[styles.chipBtn, styles.chipInStock]}
+                      onPress={() => sortIngredient(item.key, 'kitchen')}
+                      activeOpacity={0.85}
+                    >
+                      <Text style={styles.chipInStockText}>In stock</Text>
+                    </TouchableOpacity>
                     <TouchableOpacity
                       style={[styles.chipBtn, styles.chipNeedIt]}
-                      onPress={() => moveKitchenToCart(item.key)}
+                      onPress={() => sortIngredient(item.key, 'cart')}
+                      activeOpacity={0.7}
                     >
-                      <Text style={[styles.chipText, { color: ACCENT.needItText }]}>→ Cart</Text>
+                      <Text style={styles.chipNeedItText}>Need it</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
-                      style={styles.iconBtn}
-                      onPress={() => handleRemovePress(item)}
-                      hitSlop={8}
+                      style={styles.chipSkip}
+                      onPress={() => handleSkip(item)}
+                      activeOpacity={0.6}
+                      hitSlop={4}
                     >
-                      <Text style={styles.iconBtnText}>×</Text>
+                      <Text style={styles.chipSkipText}>Skip</Text>
                     </TouchableOpacity>
                   </View>
-                ))}
-            </View>
-          );
-        })
-      )}
-    </ScrollView>
+                </View>
+              ))
+          )}
+        </ScrollView>
+      </View>
+      <View style={styles.panelFooter}>
+        {seeMoreToggle('planned')}
+      </View>
+    </>
   );
 
-  const renderCartPage = () => (
-    <ScrollView
-      style={styles.panelScroll}
-      contentContainerStyle={styles.pageContent}
-      keyboardShouldPersistTaps="handled"
-      showsVerticalScrollIndicator={false}
-    >
-      <View style={styles.addRow}>
-        <TextInput
-          style={styles.addInput}
-          placeholder="Add custom item…"
-          placeholderTextColor={COLORS.textMuted}
-          value={cartInput}
-          onChangeText={setCartInput}
-          onSubmitEditing={handleAddCart}
-          returnKeyType="done"
-        />
-        <TouchableOpacity
-          style={[styles.addBtn, !cartInput.trim() && styles.addBtnDisabled]}
-          onPress={handleAddCart}
-          disabled={!cartInput.trim()}
-        >
-          <Text style={styles.addBtnText}>+</Text>
-        </TouchableOpacity>
+  const renderKitchenContent = () => (
+    <>
+      <View style={styles.panelHeader}>
+        <View style={styles.addRow}>
+          <TextInput
+            style={styles.addInput}
+            placeholder="Add what's in your kitchen…"
+            placeholderTextColor={COLORS.textMuted}
+            value={kitchenInput}
+            onChangeText={setKitchenInput}
+            onSubmitEditing={handleAddKitchen}
+            returnKeyType="done"
+          />
+          <TouchableOpacity
+            style={[styles.addBtn, !kitchenInput.trim() && styles.addBtnDisabled]}
+            onPress={handleAddKitchen}
+            disabled={!kitchenInput.trim()}
+          >
+            <Text style={styles.addBtnText}>+</Text>
+          </TouchableOpacity>
+        </View>
       </View>
-
-      {cart.length === 0 ? (
-        <Text style={styles.emptyText}>Your shopping list is empty.</Text>
-      ) : (
-        cart
-          .slice()
-          .sort((a, b) => a.name.localeCompare(b.name))
-          .map(item => (
-            <Pressable
-              key={item.key}
-              style={styles.cartRow}
-              onPress={() => toggleCartStrikethrough(item.key)}
-              onLongPress={() => handleRemovePress(item)}
-            >
-              <View
-                style={[
-                  styles.checkbox,
-                  item.struckThrough && {
-                    borderColor: ACCENT.inStockText,
-                    backgroundColor: ACCENT.inStockBg,
-                  },
-                ]}
-              >
-                {item.struckThrough && (
-                  <Text style={[styles.checkmark, { color: ACCENT.inStockText }]}>✓</Text>
-                )}
-              </View>
-              <Text
-                style={[
-                  styles.itemName,
-                  { flex: 1 },
-                  item.struckThrough && styles.strikethrough,
-                ]}
-              >
-                {item.name}
-              </Text>
-              {item.isCustom && <Text style={styles.customLabel}>custom</Text>}
-            </Pressable>
-          ))
-      )}
-
-      <TouchableOpacity
-        style={[styles.doneBtn, cart.length === 0 && styles.doneBtnDisabled]}
-        onPress={handleDoneShopping}
-        disabled={cart.length === 0}
+      <View
+        style={styles.panelBody}
+        onLayout={e => setBodyH('kitchen', e.nativeEvent.layout.height)}
       >
-        <Text style={styles.doneBtnText}>Done shopping</Text>
-      </TouchableOpacity>
-      <Text style={styles.doneHint}>Tap when you&apos;re back from the store.</Text>
-    </ScrollView>
+        <ScrollView
+          contentContainerStyle={styles.bodyContent}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+          onContentSizeChange={(_, h) => setContentH('kitchen', h)}
+        >
+          {kitchen.length === 0 ? (
+            <Text style={styles.emptyText}>
+              Add what you already have so we can suggest meals from it.
+            </Text>
+          ) : (
+            CATEGORY_ORDER.map(cat => {
+              const items = kitchenByCategory[cat];
+              if (!items || items.length === 0) return null;
+              return (
+                <View key={cat} style={{ marginTop: 12 }}>
+                  <Text style={styles.categoryHeader}>{cat}</Text>
+                  {items
+                    .slice()
+                    .sort((a, b) => a.name.localeCompare(b.name))
+                    .map(item => (
+                      <View key={item.key} style={styles.kitchenRow}>
+                        <Text style={[styles.itemName, { flex: 1 }]}>{item.name}</Text>
+                        <TouchableOpacity
+                          style={[styles.chipBtn, styles.chipNeedIt]}
+                          onPress={() => moveKitchenToCart(item.key)}
+                          activeOpacity={0.7}
+                        >
+                          <Text style={styles.chipNeedItText}>→ Cart</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={styles.iconBtn}
+                          onPress={() => handleRemovePress(item)}
+                          hitSlop={8}
+                        >
+                          <Text style={styles.iconBtnText}>×</Text>
+                        </TouchableOpacity>
+                      </View>
+                    ))}
+                </View>
+              );
+            })
+          )}
+        </ScrollView>
+      </View>
+      <View style={styles.panelFooter}>
+        {seeMoreToggle('kitchen')}
+      </View>
+    </>
+  );
+
+  const renderCartContent = () => (
+    <>
+      <View style={styles.panelHeader}>
+        <View style={styles.addRow}>
+          <TextInput
+            style={styles.addInput}
+            placeholder="Add custom item…"
+            placeholderTextColor={COLORS.textMuted}
+            value={cartInput}
+            onChangeText={setCartInput}
+            onSubmitEditing={handleAddCart}
+            returnKeyType="done"
+          />
+          <TouchableOpacity
+            style={[styles.addBtn, !cartInput.trim() && styles.addBtnDisabled]}
+            onPress={handleAddCart}
+            disabled={!cartInput.trim()}
+          >
+            <Text style={styles.addBtnText}>+</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+      <View
+        style={styles.panelBody}
+        onLayout={e => setBodyH('cart', e.nativeEvent.layout.height)}
+      >
+        <ScrollView
+          contentContainerStyle={styles.bodyContent}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+          onContentSizeChange={(_, h) => setContentH('cart', h)}
+        >
+          {cart.length === 0 ? (
+            <Text style={styles.emptyText}>Your shopping list is empty.</Text>
+          ) : (
+            cart
+              .slice()
+              .sort((a, b) => a.name.localeCompare(b.name))
+              .map(item => (
+                <Pressable
+                  key={item.key}
+                  style={styles.cartRow}
+                  onPress={() => toggleCartStrikethrough(item.key)}
+                  onLongPress={() => handleRemovePress(item)}
+                >
+                  <View
+                    style={[
+                      styles.checkbox,
+                      item.struckThrough && {
+                        borderColor: ACCENT.green,
+                        backgroundColor: ACCENT.greenBg,
+                      },
+                    ]}
+                  >
+                    {item.struckThrough && (
+                      <Text style={[styles.checkmark, { color: ACCENT.green }]}>✓</Text>
+                    )}
+                  </View>
+                  <Text
+                    style={[
+                      styles.itemName,
+                      { flex: 1 },
+                      item.struckThrough && styles.strikethrough,
+                    ]}
+                  >
+                    {item.name}
+                  </Text>
+                  {item.isCustom && <Text style={styles.customLabel}>custom</Text>}
+                </Pressable>
+              ))
+          )}
+        </ScrollView>
+      </View>
+      <View style={styles.panelFooter}>
+        {seeMoreToggle('cart')}
+        <TouchableOpacity
+          style={[styles.doneBtn, cart.length === 0 && styles.doneBtnDisabled]}
+          onPress={handleDoneShopping}
+          disabled={cart.length === 0}
+        >
+          <Text style={styles.doneBtnText}>Done shopping</Text>
+        </TouchableOpacity>
+        <Text style={styles.doneHint}>Tap when you&apos;re back from the store.</Text>
+      </View>
+    </>
   );
 
   // ─── Render ───────────────────────────────────────────────────────────────
+  const panelHeightStyle = expanded ? { flex: 1 } : { height: COLLAPSED_PANEL_HEIGHT };
+
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
       <View style={styles.header}>
@@ -497,22 +576,26 @@ export default function GroceryScreen() {
           showsHorizontalScrollIndicator={false}
           onMomentumScrollEnd={handleMomentumEnd}
           keyboardShouldPersistTaps="handled"
-          // iOS bounces by default; disable so swipe boundaries feel firm
           bounces={false}
-          contentOffset={{ x: TAB_KEYS.indexOf(activeTab) * pageWidth, y: 0 }}
         >
           <View style={[styles.pageSlot, { width: pageWidth }]}>
-            <View style={styles.panel}>{renderPlannedPage()}</View>
+            <View style={[styles.panel, panelHeightStyle]}>
+              {renderPlannedContent()}
+            </View>
           </View>
           <View style={[styles.pageSlot, { width: pageWidth }]}>
-            <View style={styles.panel}>{renderKitchenPage()}</View>
+            <View style={[styles.panel, panelHeightStyle]}>
+              {renderKitchenContent()}
+            </View>
           </View>
           <View style={[styles.pageSlot, { width: pageWidth }]}>
-            <View style={styles.panel}>{renderCartPage()}</View>
+            <View style={[styles.panel, panelHeightStyle]}>
+              {renderCartContent()}
+            </View>
           </View>
         </ScrollView>
 
-        {/* Page indicator dots — anchored to the bottom of the content area */}
+        {/* Page indicator dots — anchored to bottom of the content area */}
         <View pointerEvents="none" style={styles.dotsRow}>
           {TAB_KEYS.map(key => {
             const active = activeTab === key;
@@ -521,10 +604,7 @@ export default function GroceryScreen() {
                 key={key}
                 style={[
                   styles.dot,
-                  active && {
-                    backgroundColor: ACCENT.underline,
-                    width: 18,
-                  },
+                  active && { backgroundColor: ACCENT.underline, width: 18 },
                 ]}
               />
             );
@@ -654,22 +734,14 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: COLORS.border,
   },
-  tabBtn: {
-    flex: 1,
-    alignItems: 'center',
-    paddingTop: 12,
-  },
+  tabBtn: { flex: 1, alignItems: 'center', paddingTop: 12 },
   tabLabelRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
     paddingBottom: 10,
   },
-  tabLabel: {
-    color: COLORS.textSecondary,
-    fontSize: 14,
-    fontWeight: '600',
-  },
+  tabLabel: { color: COLORS.textSecondary, fontSize: 14, fontWeight: '600' },
   tabLabelActive: { color: COLORS.text },
   tabCount: {
     minWidth: 18,
@@ -690,13 +762,11 @@ const styles = StyleSheet.create({
 
   // ─── Pages ──────────────────────────────────────────────────────────────
   pageSlot: {
-    flex: 1,
     paddingHorizontal: 12,
     paddingTop: 12,
-    paddingBottom: 36, // leaves room for the dots row below
+    paddingBottom: 36, // leaves room for the dots row
   },
   panel: {
-    flex: 1,
     backgroundColor: COLORS.card,
     borderRadius: 18,
     borderWidth: 1,
@@ -708,8 +778,30 @@ const styles = StyleSheet.create({
     shadowRadius: 10,
     elevation: 4,
   },
-  panelScroll: { flex: 1 },
-  pageContent: { padding: 16, paddingBottom: 28 },
+  panelHeader: {
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 4,
+  },
+  panelBody: { flex: 1, paddingHorizontal: 16 },
+  bodyContent: { paddingTop: 4, paddingBottom: 12 },
+  panelFooter: {
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 14,
+  },
+  seeBtn: {
+    alignSelf: 'center',
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    marginBottom: 6,
+  },
+  seeBtnText: {
+    color: COLORS.textSecondary,
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 0.4,
+  },
 
   // ─── Page indicator dots ────────────────────────────────────────────────
   dotsRow: {
@@ -748,7 +840,7 @@ const styles = StyleSheet.create({
   emptyText: {
     color: COLORS.textSecondary,
     fontSize: 13,
-    paddingVertical: 12,
+    paddingVertical: 16,
     fontStyle: 'italic',
     textAlign: 'center',
   },
@@ -763,28 +855,45 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
   },
-  plannedActions: { flexDirection: 'row', gap: 6 },
+  plannedActions: { flexDirection: 'row', alignItems: 'center', gap: 6 },
 
-  // ─── Tinted chip buttons (refined palette) ──────────────────────────────
+  // ─── Action chips (refined hierarchy) ──────────────────────────────────
+  // Primary: solid green fill
+  // Secondary: green outline + green text, no fill
+  // Tertiary: plain grey text
   chipBtn: {
     paddingHorizontal: 11,
     paddingVertical: 7,
     borderRadius: 10,
-    borderWidth: 1,
+    borderWidth: 1.5,
   },
   chipInStock: {
-    backgroundColor: ACCENT.inStockBg,
-    borderColor: ACCENT.inStockBorder,
+    backgroundColor: ACCENT.green,
+    borderColor: ACCENT.green,
+  },
+  chipInStockText: {
+    color: '#0E1A12',
+    fontSize: 12,
+    fontWeight: '800',
   },
   chipNeedIt: {
-    backgroundColor: ACCENT.needItBg,
-    borderColor: ACCENT.needItBorder,
+    backgroundColor: 'transparent',
+    borderColor: ACCENT.green,
+  },
+  chipNeedItText: {
+    color: ACCENT.green,
+    fontSize: 12,
+    fontWeight: '700',
   },
   chipSkip: {
-    backgroundColor: ACCENT.skipBg,
-    borderColor: COLORS.border,
+    paddingHorizontal: 8,
+    paddingVertical: 7,
   },
-  chipText: { fontSize: 12, fontWeight: '700' },
+  chipSkipText: {
+    color: ACCENT.skipText,
+    fontSize: 12,
+    fontWeight: '600',
+  },
 
   // ─── Kitchen rows ───────────────────────────────────────────────────────
   categoryHeader: {
@@ -818,7 +927,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    marginBottom: 4,
   },
   addInput: {
     flex: 1,
@@ -835,7 +943,7 @@ const styles = StyleSheet.create({
     width: 42,
     height: 42,
     borderRadius: 10,
-    backgroundColor: ACCENT.primaryBg,
+    backgroundColor: ACCENT.amber,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -872,9 +980,8 @@ const styles = StyleSheet.create({
   },
 
   doneBtn: {
-    marginTop: 22,
-    backgroundColor: ACCENT.doneBg,
-    paddingVertical: 14,
+    backgroundColor: ACCENT.green,
+    paddingVertical: 13,
     borderRadius: 12,
     alignItems: 'center',
   },
@@ -884,7 +991,7 @@ const styles = StyleSheet.create({
     color: COLORS.textSecondary,
     fontSize: 11,
     textAlign: 'center',
-    marginTop: 8,
+    marginTop: 6,
   },
 
   // ─── Old-cart modal ─────────────────────────────────────────────────────
@@ -918,9 +1025,9 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.elevated,
   },
   modalChoiceActive: {
-    backgroundColor: ACCENT.inStockBg,
+    backgroundColor: ACCENT.greenBg,
     borderWidth: 1,
-    borderColor: ACCENT.inStockBorder,
+    borderColor: ACCENT.green,
   },
   modalChoiceRemove: {
     backgroundColor: 'rgba(255,59,48,0.18)',
@@ -931,7 +1038,7 @@ const styles = StyleSheet.create({
   modalChoiceTextActive: { color: COLORS.text },
   modalConfirm: {
     marginTop: 14,
-    backgroundColor: ACCENT.primaryBg,
+    backgroundColor: ACCENT.amber,
     paddingVertical: 13,
     borderRadius: 12,
     alignItems: 'center',
