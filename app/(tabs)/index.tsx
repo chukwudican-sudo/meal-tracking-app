@@ -9,11 +9,11 @@ import {
   type AppStateStatus,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router } from 'expo-router';
 
 import { COLORS } from '@/constants/theme';
 import { useMealStore, toIsoDate } from '@/store/useMealStore';
 import { useUndoStore } from '@/store/useUndoStore';
+import { CartIcon } from '@/components/CartIcon';
 import { MealCard } from '@/components/MealCard';
 import { WeekStrip } from '@/components/WeekStrip';
 import { EditMealScreen } from '@/components/EditMealScreen';
@@ -157,12 +157,7 @@ export default function HomeScreen() {
                 <Text style={styles.streakText}>{streak} day streak</Text>
               </View>
             )}
-            <TouchableOpacity
-              onPress={() => router.push('/settings')}
-              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-            >
-              <Text style={styles.gearIcon}>⚙</Text>
-            </TouchableOpacity>
+            <CartIcon />
           </View>
         </View>
 
@@ -362,11 +357,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: COLORS.text,
   },
-  gearIcon: {
-    fontSize: 18,
-    color: COLORS.textSecondary,
-  },
-
   // ── Date row ────────────────────────────────────────────────────────────────
   dateRow: {
     flexDirection: 'row',

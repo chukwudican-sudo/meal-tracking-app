@@ -17,6 +17,8 @@ import { useUndoStore } from '@/store/useUndoStore';
 import type { Ingredient, MealTemplate, RecurrenceRule } from '@/store/types';
 import { DayDetailModal } from '@/components/DayDetailModal';
 import { AddMealScreen } from '@/components/addMeal/AddMealScreen';
+import { CartIcon } from '@/components/CartIcon';
+import { PlannedIngredientsSection } from '@/components/grocery/PlannedIngredientsSection';
 
 const MONTHS = ['J', 'F', 'M', 'A', 'M', 'J', 'J', 'A', 'S', 'O', 'N', 'D'];
 const SHORT_DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -397,9 +399,12 @@ export default function PlanScreen() {
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
         <View style={styles.headerRow}>
           <Text style={styles.title}>Plan</Text>
-          <TouchableOpacity style={styles.headerBtn} onPress={() => openCreateTemplate(selectedDate)}>
-            <Text style={styles.headerBtnText}>+ Add</Text>
-          </TouchableOpacity>
+          <View style={styles.headerActions}>
+            <TouchableOpacity style={styles.headerBtn} onPress={() => openCreateTemplate(selectedDate)}>
+              <Text style={styles.headerBtnText}>+ Add</Text>
+            </TouchableOpacity>
+            <CartIcon />
+          </View>
         </View>
 
         <View style={styles.sectionCard}>
@@ -607,6 +612,8 @@ export default function PlanScreen() {
             );
           })}
         </View>
+
+        <PlannedIngredientsSection />
       </ScrollView>
 
       <Modal visible={modalVisible} transparent animationType="slide" onRequestClose={() => setModalVisible(false)}>
@@ -712,6 +719,7 @@ const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: COLORS.bg },
   scroll: { padding: 14, paddingBottom: 34, gap: 12 },
   headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   title: { fontSize: 24, fontWeight: '700', color: COLORS.text },
   headerBtn: { borderWidth: 1, borderColor: COLORS.border, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
   headerBtnText: { color: COLORS.text, fontSize: 12, fontWeight: '600' },
