@@ -30,8 +30,8 @@ const ACCENT = {
   underline: '#FF9F0A',
 };
 
-// Fixed height for collapsed card (~5 rows of content + chrome)
-const COLLAPSED_PANEL_HEIGHT = 460;
+// Fixed height for the collapsed card (fits ~5 rows of content + tabs/dots).
+const COLLAPSED_PANEL_HEIGHT = 520;
 
 const CATEGORY_ORDER: IngredientCategory[] = [
   'Proteins',
@@ -93,8 +93,8 @@ export default function GroceryScreen() {
   const [activeTab, setActiveTab] = useState<TabKey>('planned');
   const pagerRef = useRef<ScrollView>(null);
   const [pageWidth, setPageWidth] = useState(Dimensions.get('window').width);
+  const [pageHeight, setPageHeight] = useState(0);
 
-  // Defer scrollTo to the next tick so React commits the state update first.
   const goToTab = (tab: TabKey) => {
     if (pageWidth <= 0) return;
     const index = TAB_KEYS.indexOf(tab);
@@ -134,6 +134,7 @@ export default function GroceryScreen() {
     kitchen: contentHeights.kitchen > bodyHeights.kitchen + 4,
     cart: contentHeights.cart > bodyHeights.cart + 4,
   };
+  const showSeeToggle = overflows[activeTab] || expanded;
 
   const setBodyH = (tab: TabKey, h: number) =>
     setBodyHeights(prev => (prev[tab] === h ? prev : { ...prev, [tab]: h }));
@@ -246,30 +247,16 @@ export default function GroceryScreen() {
     );
   };
 
-  // ─── Sub-renders ──────────────────────────────────────────────────────────
-
-  const seeMoreToggle = (tab: TabKey) => {
-    const showToggle = overflows[tab] || expanded;
-    if (!showToggle) return null;
-    return (
-      <Pressable
-        style={styles.seeBtn}
-        onPress={() => setExpanded(e => !e)}
-        hitSlop={6}
-      >
-        <Text style={styles.seeBtnText}>{expanded ? 'See less' : 'See more'}</Text>
-      </Pressable>
-    );
-  };
+  // ─── Page renders ─────────────────────────────────────────────────────────
 
   const renderPlannedContent = () => (
-    <>
+    <View style={styles.pageInner}>
       <View
-        style={styles.panelBody}
+        style={styles.pageBody}
         onLayout={e => setBodyH('planned', e.nativeEvent.layout.height)}
       >
         <ScrollView
-          contentContainerStyle={styles.bodyContent}
+          contentContainerStyle={styles.pageBodyContent}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
           onContentSizeChange={(_, h) => setContentH('planned', h)}
@@ -340,15 +327,12 @@ export default function GroceryScreen() {
           )}
         </ScrollView>
       </View>
-      <View style={styles.panelFooter}>
-        {seeMoreToggle('planned')}
-      </View>
-    </>
+    </View>
   );
 
   const renderKitchenContent = () => (
-    <>
-      <View style={styles.panelHeader}>
+    <View style={styles.pageInner}>
+      <View style={styles.pageHeader}>
         <View style={styles.addRow}>
           <TextInput
             style={styles.addInput}
@@ -369,11 +353,11 @@ export default function GroceryScreen() {
         </View>
       </View>
       <View
-        style={styles.panelBody}
+        style={styles.pageBody}
         onLayout={e => setBodyH('kitchen', e.nativeEvent.layout.height)}
       >
         <ScrollView
-          contentContainerStyle={styles.bodyContent}
+          contentContainerStyle={styles.pageBodyContent}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
           onContentSizeChange={(_, h) => setContentH('kitchen', h)}
@@ -417,15 +401,12 @@ export default function GroceryScreen() {
           )}
         </ScrollView>
       </View>
-      <View style={styles.panelFooter}>
-        {seeMoreToggle('kitchen')}
-      </View>
-    </>
+    </View>
   );
 
   const renderCartContent = () => (
-    <>
-      <View style={styles.panelHeader}>
+    <View style={styles.pageInner}>
+      <View style={styles.pageHeader}>
         <View style={styles.addRow}>
           <TextInput
             style={styles.addInput}
@@ -446,11 +427,11 @@ export default function GroceryScreen() {
         </View>
       </View>
       <View
-        style={styles.panelBody}
+        style={styles.pageBody}
         onLayout={e => setBodyH('cart', e.nativeEvent.layout.height)}
       >
         <ScrollView
-          contentContainerStyle={styles.bodyContent}
+          contentContainerStyle={styles.pageBodyContent}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
           onContentSizeChange={(_, h) => setContentH('cart', h)}
@@ -496,8 +477,7 @@ export default function GroceryScreen() {
           )}
         </ScrollView>
       </View>
-      <View style={styles.panelFooter}>
-        {seeMoreToggle('cart')}
+      <View style={styles.cartFooter}>
         <TouchableOpacity
           style={[styles.doneBtn, cart.length === 0 && styles.doneBtnDisabled]}
           onPress={handleDoneShopping}
@@ -507,7 +487,7 @@ export default function GroceryScreen() {
         </TouchableOpacity>
         <Text style={styles.doneHint}>Tap when you&apos;re back from the store.</Text>
       </View>
-    </>
+    </View>
   );
 
   // ─── Render ───────────────────────────────────────────────────────────────
@@ -515,100 +495,114 @@ export default function GroceryScreen() {
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
+      {/* Heading stays OUTSIDE the card */}
       <View style={styles.header}>
         <Text style={styles.title}>Grocery</Text>
         <Text style={styles.subtitle}>{formatWeekLabel(grocery.weekStart)}</Text>
       </View>
 
-      {/* Tab bar */}
-      <View style={styles.tabBar}>
-        {TAB_KEYS.map(key => {
-          const active = activeTab === key;
-          return (
-            <TouchableOpacity
-              key={key}
-              style={styles.tabBtn}
-              onPress={() => goToTab(key)}
-              activeOpacity={0.7}
-            >
-              <View style={styles.tabLabelRow}>
-                <Text style={[styles.tabLabel, active && styles.tabLabelActive]}>
-                  {TAB_LABELS[key]}
-                </Text>
-                {counts[key] > 0 && (
+      {/* Self-contained card */}
+      <View style={styles.outerWrap}>
+        <View style={[styles.panel, panelHeightStyle]}>
+          {/* Tab bar inside the card */}
+          <View style={styles.tabBar}>
+            {TAB_KEYS.map(key => {
+              const active = activeTab === key;
+              return (
+                <TouchableOpacity
+                  key={key}
+                  style={styles.tabBtn}
+                  onPress={() => goToTab(key)}
+                  activeOpacity={0.7}
+                >
+                  <View style={styles.tabLabelRow}>
+                    <Text style={[styles.tabLabel, active && styles.tabLabelActive]}>
+                      {TAB_LABELS[key]}
+                    </Text>
+                    {counts[key] > 0 && (
+                      <View
+                        style={[
+                          styles.tabCount,
+                          active && { backgroundColor: ACCENT.underline },
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.tabCountText,
+                            active && { color: '#1A1207' },
+                          ]}
+                        >
+                          {counts[key]}
+                        </Text>
+                      </View>
+                    )}
+                  </View>
                   <View
                     style={[
-                      styles.tabCount,
+                      styles.tabUnderline,
                       active && { backgroundColor: ACCENT.underline },
                     ]}
-                  >
-                    <Text
-                      style={[
-                        styles.tabCountText,
-                        active && { color: '#1A1207' },
-                      ]}
-                    >
-                      {counts[key]}
-                    </Text>
-                  </View>
-                )}
+                  />
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
+          {/* Pager body */}
+          <View
+            style={styles.pagerWrap}
+            onLayout={e => {
+              setPageWidth(e.nativeEvent.layout.width);
+              setPageHeight(e.nativeEvent.layout.height);
+            }}
+          >
+            <ScrollView
+              ref={pagerRef}
+              horizontal
+              pagingEnabled
+              showsHorizontalScrollIndicator={false}
+              onMomentumScrollEnd={handleMomentumEnd}
+              keyboardShouldPersistTaps="handled"
+              bounces={false}
+            >
+              <View style={{ width: pageWidth, height: pageHeight }}>
+                {renderPlannedContent()}
               </View>
-              <View
-                style={[
-                  styles.tabUnderline,
-                  active && { backgroundColor: ACCENT.underline },
-                ]}
-              />
-            </TouchableOpacity>
-          );
-        })}
-      </View>
+              <View style={{ width: pageWidth, height: pageHeight }}>
+                {renderKitchenContent()}
+              </View>
+              <View style={{ width: pageWidth, height: pageHeight }}>
+                {renderCartContent()}
+              </View>
+            </ScrollView>
+          </View>
 
-      {/* Horizontal pager */}
-      <View
-        style={{ flex: 1 }}
-        onLayout={e => setPageWidth(e.nativeEvent.layout.width)}
-      >
-        <ScrollView
-          ref={pagerRef}
-          horizontal
-          pagingEnabled
-          showsHorizontalScrollIndicator={false}
-          onMomentumScrollEnd={handleMomentumEnd}
-          keyboardShouldPersistTaps="handled"
-          bounces={false}
-        >
-          <View style={[styles.pageSlot, { width: pageWidth }]}>
-            <View style={[styles.panel, panelHeightStyle]}>
-              {renderPlannedContent()}
-            </View>
-          </View>
-          <View style={[styles.pageSlot, { width: pageWidth }]}>
-            <View style={[styles.panel, panelHeightStyle]}>
-              {renderKitchenContent()}
-            </View>
-          </View>
-          <View style={[styles.pageSlot, { width: pageWidth }]}>
-            <View style={[styles.panel, panelHeightStyle]}>
-              {renderCartContent()}
-            </View>
-          </View>
-        </ScrollView>
+          {/* See more / See less footer (above dots, inside card) */}
+          {showSeeToggle && (
+            <Pressable
+              style={styles.seeBtn}
+              onPress={() => setExpanded(e => !e)}
+              hitSlop={6}
+            >
+              <Text style={styles.seeBtnText}>{expanded ? 'See less' : 'See more'}</Text>
+            </Pressable>
+          )}
 
-        {/* Page indicator dots — anchored to bottom of the content area */}
-        <View pointerEvents="none" style={styles.dotsRow}>
-          {TAB_KEYS.map(key => {
-            const active = activeTab === key;
-            return (
-              <View
-                key={key}
-                style={[
-                  styles.dot,
-                  active && { backgroundColor: ACCENT.underline, width: 18 },
-                ]}
-              />
-            );
-          })}
+          {/* Page indicator dots inside card */}
+          <View style={styles.dotsRow}>
+            {TAB_KEYS.map(key => {
+              const active = activeTab === key;
+              return (
+                <View
+                  key={key}
+                  style={[
+                    styles.dot,
+                    active && { backgroundColor: ACCENT.underline, width: 18 },
+                  ]}
+                />
+              );
+            })}
+          </View>
         </View>
       </View>
 
@@ -722,15 +716,34 @@ const styles = StyleSheet.create({
   header: {
     paddingHorizontal: 20,
     paddingTop: 8,
-    paddingBottom: 8,
+    paddingBottom: 12,
   },
   title: { fontSize: 28, fontWeight: '700', color: COLORS.text },
   subtitle: { fontSize: 13, color: COLORS.textSecondary, marginTop: 2 },
 
-  // ─── Tabs ───────────────────────────────────────────────────────────────
+  // ─── Card wrapper ───────────────────────────────────────────────────────
+  outerWrap: {
+    paddingHorizontal: 12,
+    paddingBottom: 12,
+  },
+  panel: {
+    backgroundColor: COLORS.card,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 10,
+    elevation: 4,
+  },
+
+  // ─── Tabs (inside card) ─────────────────────────────────────────────────
   tabBar: {
     flexDirection: 'row',
     paddingHorizontal: 8,
+    paddingTop: 4,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: COLORS.border,
   },
@@ -760,41 +773,23 @@ const styles = StyleSheet.create({
     borderRadius: 2,
   },
 
-  // ─── Pages ──────────────────────────────────────────────────────────────
-  pageSlot: {
-    paddingHorizontal: 12,
-    paddingTop: 12,
-    paddingBottom: 36, // leaves room for the dots row
-  },
-  panel: {
-    backgroundColor: COLORS.card,
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.25,
-    shadowRadius: 10,
-    elevation: 4,
-  },
-  panelHeader: {
+  // ─── Pager body ─────────────────────────────────────────────────────────
+  pagerWrap: { flex: 1 },
+
+  pageInner: { flex: 1 },
+  pageHeader: {
     paddingHorizontal: 16,
-    paddingTop: 16,
+    paddingTop: 12,
     paddingBottom: 4,
   },
-  panelBody: { flex: 1, paddingHorizontal: 16 },
-  bodyContent: { paddingTop: 4, paddingBottom: 12 },
-  panelFooter: {
-    paddingHorizontal: 16,
-    paddingTop: 8,
-    paddingBottom: 14,
-  },
+  pageBody: { flex: 1, paddingHorizontal: 16 },
+  pageBodyContent: { paddingTop: 4, paddingBottom: 12 },
+
+  // ─── See-more toggle (inside card, above dots) ──────────────────────────
   seeBtn: {
     alignSelf: 'center',
     paddingVertical: 6,
     paddingHorizontal: 12,
-    marginBottom: 6,
   },
   seeBtnText: {
     color: COLORS.textSecondary,
@@ -803,15 +798,13 @@ const styles = StyleSheet.create({
     letterSpacing: 0.4,
   },
 
-  // ─── Page indicator dots ────────────────────────────────────────────────
+  // ─── Dots (inside card, bottom) ─────────────────────────────────────────
   dotsRow: {
-    position: 'absolute',
-    bottom: 12,
-    left: 0,
-    right: 0,
     flexDirection: 'row',
     justifyContent: 'center',
     gap: 7,
+    paddingTop: 6,
+    paddingBottom: 12,
   },
   dot: {
     width: 7,
@@ -857,10 +850,7 @@ const styles = StyleSheet.create({
   },
   plannedActions: { flexDirection: 'row', alignItems: 'center', gap: 6 },
 
-  // ─── Action chips (refined hierarchy) ──────────────────────────────────
-  // Primary: solid green fill
-  // Secondary: green outline + green text, no fill
-  // Tertiary: plain grey text
+  // ─── Action chips ──────────────────────────────────────────────────────
   chipBtn: {
     paddingHorizontal: 11,
     paddingVertical: 7,
@@ -979,6 +969,11 @@ const styles = StyleSheet.create({
     fontStyle: 'italic',
   },
 
+  cartFooter: {
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 12,
+  },
   doneBtn: {
     backgroundColor: ACCENT.green,
     paddingVertical: 13,
