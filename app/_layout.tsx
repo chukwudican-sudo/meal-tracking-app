@@ -17,11 +17,13 @@ export default function RootLayout() {
     <ThemeProvider value={AppDarkTheme}>
       <View style={{ flex: 1 }}>
         <Stack>
-          <Stack.Screen name="(tabs)"    options={{ headerShown: false }} />
-          <Stack.Screen name="settings"  options={{ presentation: 'modal', headerShown: false }} />
-          <Stack.Screen name="meal/[id]" options={{ presentation: 'modal', headerShown: false }} />
-          <Stack.Screen name="cart"      options={{ presentation: 'modal', headerShown: false, animation: 'slide_from_bottom' }} />
-          <Stack.Screen name="modal"     options={{ presentation: 'modal', title: 'Modal' }} />
+          <Stack.Screen name="(tabs)"        options={{ headerShown: false }} />
+          <Stack.Screen name="settings"      options={{ presentation: 'modal', headerShown: false }} />
+          <Stack.Screen name="meal/[id]"     options={{ presentation: 'modal', headerShown: false }} />
+          <Stack.Screen name="cart"          options={{ presentation: 'modal', headerShown: false, animation: 'slide_from_bottom' }} />
+          <Stack.Screen name="profile"       options={{ presentation: 'modal', headerShown: false, animation: 'slide_from_bottom' }} />
+          <Stack.Screen name="notifications" options={{ presentation: 'modal', headerShown: false, animation: 'slide_from_bottom' }} />
+          <Stack.Screen name="modal"         options={{ presentation: 'modal', title: 'Modal' }} />
         </Stack>
         <UndoSnackbarHost />
         <ToastHost />

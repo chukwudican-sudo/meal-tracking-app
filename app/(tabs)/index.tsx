@@ -13,7 +13,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { COLORS } from '@/constants/theme';
 import { useMealStore, toIsoDate } from '@/store/useMealStore';
 import { useUndoStore } from '@/store/useUndoStore';
-import { CartIcon } from '@/components/CartIcon';
+import { NotificationIcon } from '@/components/NotificationIcon';
+import { ProfileIcon } from '@/components/ProfileIcon';
 import { MealCard } from '@/components/MealCard';
 import { WeekStrip } from '@/components/WeekStrip';
 import { EditMealScreen } from '@/components/EditMealScreen';
@@ -157,7 +158,8 @@ export default function HomeScreen() {
                 <Text style={styles.streakText}>{streak} day streak</Text>
               </View>
             )}
-            <CartIcon />
+            <ProfileIcon />
+            <NotificationIcon />
           </View>
         </View>
 

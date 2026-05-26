@@ -2,16 +2,27 @@ import { router } from 'expo-router';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { CartIcon } from '@/components/CartIcon';
 import { COLORS } from '@/constants/theme';
 
 export default function ProfileScreen() {
+  const handleBack = () => {
+    if (router.canGoBack()) router.back();
+    else router.replace('/(tabs)');
+  };
+
   return (
-    <SafeAreaView style={styles.safe} edges={['top']}>
-      {/* Header with cart icon in top-right */}
+    <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
       <View style={styles.header}>
+        <TouchableOpacity
+          onPress={handleBack}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          style={styles.backBtn}
+          activeOpacity={0.7}
+        >
+          <Text style={styles.backArrow}>←</Text>
+        </TouchableOpacity>
         <Text style={styles.title}>Profile</Text>
-        <CartIcon />
+        <View style={styles.backBtn} />
       </View>
 
       <ScrollView contentContainerStyle={styles.scroll}>
@@ -45,11 +56,24 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingTop: 12,
-    paddingBottom: 8,
+    paddingHorizontal: 12,
+    paddingTop: 6,
+    paddingBottom: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: COLORS.border,
   },
-  title: { fontSize: 22, fontWeight: '700', color: COLORS.text },
+  backBtn: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  backArrow: {
+    color: COLORS.text,
+    fontSize: 22,
+    fontWeight: '600',
+  },
+  title: { fontSize: 18, fontWeight: '700', color: COLORS.text },
 
   scroll: {
     paddingHorizontal: 16,

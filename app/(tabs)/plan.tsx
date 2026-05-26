@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useState } from 'react';
 import {
   Alert,
   Modal,
@@ -12,26 +12,17 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { COLORS } from '@/constants/theme';
-import { isTemplateApplicableOnDate, toIsoDate, useMealStore } from '@/store/useMealStore';
+import { toIsoDate, useMealStore } from '@/store/useMealStore';
 import { useUndoStore } from '@/store/useUndoStore';
 import type { Ingredient, MealTemplate, RecurrenceRule } from '@/store/types';
 import { DayDetailModal } from '@/components/DayDetailModal';
 import { AddMealScreen } from '@/components/addMeal/AddMealScreen';
 import { CartIcon } from '@/components/CartIcon';
+import { ProfileIcon } from '@/components/ProfileIcon';
 import { PlannedIngredientsSection } from '@/components/grocery/PlannedIngredientsSection';
 
-const MONTHS = ['J', 'F', 'M', 'A', 'M', 'J', 'J', 'A', 'S', 'O', 'N', 'D'];
 const SHORT_DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const WEEK_START_MON = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-
-// Heatmap fixed sizing — horizontal scroll, no shrink-to-fit needed
-const H_CELL        = 11;  // cell square size (px)
-const H_COL_GAP     = 2;   // gap between columns
-const H_ROW_GAP     = 3;   // gap between rows (slightly more vertical space)
-const H_MONTH_DIV   = 3;   // extra left margin before each new month (tight)
-const H_LABEL_W     = 16;  // width of the fixed day-label column
-const H_LABEL_GAP   = 5;   // gap between label column and grid
-const H_MON_LABEL_H = 16;  // height reserved for the month letter row
 
 type ScopeChoice = 'this' | 'future' | 'all' | 'cancel';
 
@@ -114,14 +105,6 @@ function chooseScope(title: string): Promise<ScopeChoice> {
   });
 }
 
-function getIntensity(planned: number, completed: number): 0 | 1 | 2 | 3 {
-  if (planned <= 0 || completed <= 0) return 0;
-  const pct = Math.round((completed / planned) * 100);
-  if (pct <= 33) return 1;
-  if (pct <= 99) return 2;
-  return 3;
-}
-
 export default function PlanScreen() {
   const templates = useMealStore(s => s.templates);
   const logs = useMealStore(s => s.logs);
@@ -155,18 +138,6 @@ export default function PlanScreen() {
   const [monthlyEvery, setMonthlyEvery] = useState('1');
   const [formError, setFormError] = useState<string | null>(null);
 
-  const yearsWithCompletions = useMemo(() => {
-    const currentYear = new Date().getFullYear();
-    const years = new Set<number>();
-    Object.keys(logs).forEach(iso => {
-      if (logs[iso]?.meals.some(m => m.status === 'completed')) years.add(Number(iso.slice(0, 4)));
-    });
-    if (years.size === 0) years.add(currentYear);
-    if (years.size === 1 && !years.has(currentYear)) years.add(currentYear);
-    return Array.from(years).sort((a, b) => a - b);
-  }, [logs]);
-  const [selectedYear, setSelectedYear] = useState(() => yearsWithCompletions[yearsWithCompletions.length - 1]);
-
   const weekStartIso = mondayOfWeek(selectedDate);
   const weekDates = Array.from({ length: 7 }, (_, i) => shiftIso(weekStartIso, i));
 
@@ -177,84 +148,6 @@ export default function PlanScreen() {
     const pct = planned === 0 ? 0 : Math.round((completed / planned) * 100);
     return { planned, completed, pct };
   }, [logs]);
-
-  const heatmapColumns = useMemo(() => {
-    const columns: {
-      weekStartIso: string;
-      isMonthStart: boolean;
-      monthIdx: number;
-      cells: { iso: string; isFiller: boolean; hidden: boolean; intensity: 0 | 1 | 2 | 3 }[];
-    }[] = [];
-
-    for (let month = 0; month < 12; month++) {
-      // Month boundary dates using local time (consistent with toIsoDate)
-      const monthStart = new Date(selectedYear, month, 1);
-      const monthEnd   = new Date(selectedYear, month + 1, 0);
-
-      // First Sunday on or before the 1st of the month
-      const startDow   = monthStart.getDay();
-      const firstSun   = new Date(monthStart);
-      firstSun.setDate(monthStart.getDate() - startDow);
-
-      // Last Saturday on or after the last day of the month
-      const endDow     = monthEnd.getDay();
-      const lastSat    = new Date(monthEnd);
-      lastSat.setDate(monthEnd.getDate() + (6 - endDow));
-
-      const totalDays = Math.round((lastSat.getTime() - firstSun.getTime()) / 86400000) + 1;
-      const numCols   = totalDays / 7;
-
-      for (let w = 0; w < numCols; w++) {
-        const weekSun = new Date(firstSun);
-        weekSun.setDate(firstSun.getDate() + w * 7);
-
-        const cells: { iso: string; isFiller: boolean; hidden: boolean; intensity: 0 | 1 | 2 | 3 }[] = [];
-
-        for (let d = 0; d < 7; d++) {
-          const current = new Date(weekSun);
-          current.setDate(weekSun.getDate() + d);
-          const iso = toIsoDate(current);
-
-          // Filler = day doesn't belong to this month's block
-          const isFiller = current.getMonth() !== month || current.getFullYear() !== selectedYear;
-          // Future = real day of this month but not yet reached
-          const hidden = !isFiller && iso > todayIso;
-
-          let intensity: 0 | 1 | 2 | 3 = 0;
-          if (!isFiller && !hidden) {
-            const { planned, completed } = getDayProgress(iso);
-            intensity = getIntensity(planned, completed);
-          }
-
-          cells.push({ iso, isFiller, hidden, intensity });
-        }
-
-        columns.push({
-          weekStartIso: toIsoDate(weekSun),
-          isMonthStart: w === 0,
-          monthIdx: month,
-          cells,
-        });
-      }
-    }
-
-    return columns;
-  }, [getDayProgress, selectedYear, todayIso]);
-
-  const monthAnchors = useMemo(() => {
-    // Walk every column left-to-right, accumulating the exact pixel position,
-    // and record the start position of each month block.
-    const labels: { monthIdx: number; leftPx: number }[] = [];
-    let leftPos = 0;
-    heatmapColumns.forEach((col, idx) => {
-      // Month divider gap is added before each month-start column except the very first
-      if (idx > 0 && col.isMonthStart) leftPos += H_MONTH_DIV;
-      if (col.isMonthStart) labels.push({ monthIdx: col.monthIdx, leftPx: leftPos });
-      // Advance by one cell width + column gap (last col has no trailing gap)
-      leftPos += H_CELL + (idx < heatmapColumns.length - 1 ? H_COL_GAP : 0);
-    });
-    return labels;
-  }, [heatmapColumns]);
 
   const openCreateTemplate = (forDate: string) => {
     setEditingTemplate(null);
@@ -403,129 +296,8 @@ export default function PlanScreen() {
             <TouchableOpacity style={styles.headerBtn} onPress={() => openCreateTemplate(selectedDate)}>
               <Text style={styles.headerBtnText}>+ Add</Text>
             </TouchableOpacity>
+            <ProfileIcon />
             <CartIcon />
-          </View>
-        </View>
-
-        <View style={styles.sectionCard}>
-          <View style={styles.sectionHeaderRow}>
-            <View>
-              <Text style={styles.sectionTitle}>Progress</Text>
-            </View>
-            <View style={styles.yearRow}>
-              {yearsWithCompletions.length > 1 && (
-                <TouchableOpacity
-                  onPress={() => {
-                    const idx = yearsWithCompletions.indexOf(selectedYear);
-                    if (idx > 0) setSelectedYear(yearsWithCompletions[idx - 1]);
-                  }}
-                >
-                  <Text style={styles.yearNav}>←</Text>
-                </TouchableOpacity>
-              )}
-              <Text style={styles.yearText}>{selectedYear}</Text>
-              {yearsWithCompletions.length > 1 && (
-                <TouchableOpacity
-                  onPress={() => {
-                    const idx = yearsWithCompletions.indexOf(selectedYear);
-                    if (idx < yearsWithCompletions.length - 1) setSelectedYear(yearsWithCompletions[idx + 1]);
-                  }}
-                >
-                  <Text style={styles.yearNav}>→</Text>
-                </TouchableOpacity>
-              )}
-            </View>
-          </View>
-
-          {/* Heatmap: fixed label column on left, horizontal-scrollable grid on right */}
-          <View style={styles.heatmapOuter}>
-            {/* Fixed day-of-week labels — offset down by month label row height */}
-            <View style={[styles.dayLegendCol, { width: H_LABEL_W, marginRight: H_LABEL_GAP, paddingTop: H_MON_LABEL_H + 4 }]}>
-              {(['S', 'M', 'T', 'W', 'T', 'F', 'S'] as const).map((label, rowIdx) => (
-                <View
-                  key={`legend-${rowIdx}`}
-                  style={{
-                    height: H_CELL,
-                    marginBottom: rowIdx === 6 ? 0 : H_ROW_GAP,
-                    justifyContent: 'center',
-                    alignItems: 'center',
-                  }}
-                >
-                  <Text style={styles.dayLegendText}>{label}</Text>
-                </View>
-              ))}
-            </View>
-
-            {/* Horizontally scrollable: month letters + cell grid */}
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              bounces={false}
-              nestedScrollEnabled
-              style={{ flex: 1 }}
-            >
-              <View>
-                {/* Month letter row */}
-                <View style={{ height: H_MON_LABEL_H, position: 'relative', marginBottom: 4 }}>
-                  {monthAnchors.map(anchor => (
-                    <Text
-                      key={`month-${anchor.monthIdx}`}
-                      style={[styles.monthLabelAbs, { left: anchor.leftPx }]}
-                    >
-                      {MONTHS[anchor.monthIdx]}
-                    </Text>
-                  ))}
-                </View>
-
-                {/* Cell grid — 7 rows, one per day of week */}
-                {Array.from({ length: 7 }, (_, rowIdx) => (
-                  <View
-                    key={`row-${rowIdx}`}
-                    style={{ flexDirection: 'row', marginBottom: rowIdx === 6 ? 0 : H_ROW_GAP }}
-                  >
-                    {heatmapColumns.map((column, colIdx) => {
-                      const cell = column.cells[rowIdx];
-                      const isFirst = colIdx === 0;
-                      const isLast = colIdx === heatmapColumns.length - 1;
-                      return (
-                        <View
-                          key={`${column.weekStartIso}-${rowIdx}-${colIdx}`}
-                          style={[
-                            styles.heatCell,
-                            {
-                              width: H_CELL,
-                              height: H_CELL,
-                              marginLeft: !isFirst && column.isMonthStart ? H_MONTH_DIV : 0,
-                              marginRight: isLast ? 0 : H_COL_GAP,
-                            },
-                            (cell.isFiller || cell.hidden) && styles.heatFuture,
-                            !cell.isFiller && !cell.hidden && cell.intensity === 0 && styles.heat0,
-                            !cell.isFiller && !cell.hidden && cell.intensity === 1 && styles.heat1,
-                            !cell.isFiller && !cell.hidden && cell.intensity === 2 && styles.heat2,
-                            !cell.isFiller && !cell.hidden && cell.intensity === 3 && styles.heat3,
-                          ]}
-                        />
-                      );
-                    })}
-                  </View>
-                ))}
-              </View>
-            </ScrollView>
-          </View>
-
-          {/* Legend: Fewer → More */}
-          <View style={styles.heatLegendRow}>
-            <Text style={styles.heatLegendLabel}>Fewer</Text>
-            {([
-              styles.heatFuture,
-              styles.heat0,
-              styles.heat1,
-              styles.heat2,
-              styles.heat3,
-            ] as const).map((s, i) => (
-              <View key={`leg-${i}`} style={[styles.heatLegendCell, s]} />
-            ))}
-            <Text style={styles.heatLegendLabel}>More</Text>
           </View>
         </View>
 
@@ -727,22 +499,7 @@ const styles = StyleSheet.create({
   sectionHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
   sectionTitle: { color: COLORS.text, fontWeight: '700', fontSize: 14 },
   muted: { color: COLORS.textSecondary, fontSize: 12 },
-  yearRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   yearNav: { color: COLORS.text, fontSize: 16, fontWeight: '600', paddingHorizontal: 4 },
-  yearText: { color: COLORS.text, fontSize: 13, fontWeight: '600' },
-  heatmapOuter: { flexDirection: 'row', alignItems: 'flex-start' },
-  monthLabelAbs: { color: COLORS.textSecondary, fontSize: 10, position: 'absolute', top: 3 },
-  dayLegendCol: { alignItems: 'center' },
-  dayLegendText: { color: COLORS.textSecondary, fontSize: 8, fontWeight: '600' },
-  heatCell: { borderRadius: 2 },
-  heatFuture: { backgroundColor: '#212123' },   // solid very-dark — filler/future slots
-  heat0: { backgroundColor: COLORS.elevated },  // in-year past, no completions
-  heat1: { backgroundColor: COLORS.green + '44' },
-  heat2: { backgroundColor: COLORS.green + '88' },
-  heat3: { backgroundColor: COLORS.green },
-  heatLegendRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 4, marginTop: 8 },
-  heatLegendLabel: { color: COLORS.textSecondary, fontSize: 10 },
-  heatLegendCell: { width: 10, height: 10, borderRadius: 2 },
   monthNavRow: { flexDirection: 'row', justifyContent: 'flex-end', gap: 12, marginBottom: 8 },
   miniWeekLabels: { flexDirection: 'row', marginBottom: 4 },
   miniWeekLabel: { flex: 1, color: COLORS.textSecondary, fontSize: 10, textAlign: 'center' },

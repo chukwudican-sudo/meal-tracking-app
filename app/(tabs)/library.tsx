@@ -3,6 +3,7 @@ import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-nati
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { CartIcon } from '@/components/CartIcon';
+import { ProfileIcon } from '@/components/ProfileIcon';
 import { KitchenSection } from '@/components/grocery/KitchenSection';
 import { COLORS } from '@/constants/theme';
 import { useNavSourceStore } from '@/store/useNavSourceStore';
@@ -35,7 +36,10 @@ export default function LibraryScreen() {
           <View style={styles.backBtn} />
         )}
         <Text style={styles.title}>Library</Text>
-        <CartIcon />
+        <View style={styles.headerActions}>
+          <ProfileIcon />
+          <CartIcon />
+        </View>
       </View>
 
       <ScrollView contentContainerStyle={styles.scroll}>
@@ -75,6 +79,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   title: { fontSize: 22, fontWeight: '700', color: COLORS.text },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 6 },
 
   scroll: {
     paddingHorizontal: 16,
