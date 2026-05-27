@@ -3,12 +3,24 @@ import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-nati
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { COLORS } from '@/constants/theme';
+import { useMealStore } from '@/store/useMealStore';
 
 export default function ProfileScreen() {
+  const profile = useMealStore(s => s.profile);
+
   const handleBack = () => {
     if (router.canGoBack()) router.back();
     else router.replace('/(tabs)');
   };
+
+  const dietaryLabel =
+    profile.dietaryRestrictions.length > 0
+      ? profile.dietaryRestrictions.join(', ')
+      : 'None set';
+  const allergyLabel =
+    profile.allergies.length > 0
+      ? profile.allergies.join(', ')
+      : 'None set';
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
@@ -31,6 +43,24 @@ export default function ProfileScreen() {
           <Text style={styles.placeholderBody}>
             Your account, preferences, and goals will live here.
           </Text>
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionLabel}>DIETARY</Text>
+          <View style={styles.row}>
+            <View style={styles.rowBody}>
+              <Text style={styles.rowText}>Dietary restrictions</Text>
+              <Text style={styles.rowSub}>{dietaryLabel}</Text>
+            </View>
+            <Text style={styles.soonTag}>Coming soon</Text>
+          </View>
+          <View style={styles.row}>
+            <View style={styles.rowBody}>
+              <Text style={styles.rowText}>Allergies</Text>
+              <Text style={styles.rowSub}>{allergyLabel}</Text>
+            </View>
+            <Text style={styles.soonTag}>Coming soon</Text>
+          </View>
         </View>
 
         <View style={styles.section}>
@@ -127,6 +157,18 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: COLORS.border,
   },
+  rowBody: { flex: 1 },
   rowText: { color: COLORS.text, fontSize: 15 },
+  rowSub: { color: COLORS.textSecondary, fontSize: 12, marginTop: 2 },
   rowArrow: { color: COLORS.textSecondary, fontSize: 22, fontWeight: '300' },
+  soonTag: {
+    color: COLORS.textSecondary,
+    fontSize: 11,
+    fontWeight: '600',
+    backgroundColor: COLORS.elevated,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    overflow: 'hidden',
+  },
 });

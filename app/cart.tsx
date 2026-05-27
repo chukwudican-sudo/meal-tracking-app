@@ -17,7 +17,6 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { COLORS } from '@/constants/theme';
 import type { GroceryItem } from '@/store/types';
 import { useMealStore, mondayOfWeek } from '@/store/useMealStore';
-import { useNavSourceStore } from '@/store/useNavSourceStore';
 
 const ACCENT = {
   green: '#30D158',
@@ -40,7 +39,6 @@ export default function CartScreen() {
   const removeGroceryItem = useMealStore(s => s.removeGroceryItem);
   const doneShopping = useMealStore(s => s.doneShopping);
   const resolveOldCartItems = useMealStore(s => s.resolveOldCartItems);
-  const setKitchenSource = useNavSourceStore(s => s.setKitchenSource);
 
   const [cartInput, setCartInput] = useState('');
 
@@ -112,11 +110,9 @@ export default function CartScreen() {
   };
 
   const handleViewKitchen = () => {
-    // Mark cart as the source so Library's back arrow returns to /cart.
-    setKitchenSource('/cart');
-    // Replace cart with Library tab (Kitchen). User can come back via the
-    // Library back arrow.
-    router.replace('/(tabs)/library');
+    // Kitchen is its own modal route. router.push stacks it on top of Cart,
+    // so the back arrow naturally returns to Cart.
+    router.push('/kitchen');
   };
 
   const handleBack = () => {

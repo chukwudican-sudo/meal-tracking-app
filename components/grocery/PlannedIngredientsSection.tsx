@@ -12,7 +12,6 @@ import {
 import { COLORS } from '@/constants/theme';
 import type { GroceryItem } from '@/store/types';
 import { useMealStore } from '@/store/useMealStore';
-import { useNavSourceStore } from '@/store/useNavSourceStore';
 import { useToastStore } from '@/store/useToastStore';
 
 const ACCENT = {
@@ -21,20 +20,12 @@ const ACCENT = {
   underline: '#FF9F0A',
 };
 
-interface Props {
-  // Tab path that the Library tab should treat as the "back to" target
-  // when the user taps "Go to Kitchen" from inside this section. Defaults
-  // to the Plan tab.
-  sourceTab?: '/(tabs)' | '/(tabs)/plan' | '/(tabs)/library' | '/(tabs)/profile';
-}
-
-export function PlannedIngredientsSection({ sourceTab = '/(tabs)/plan' }: Props) {
+export function PlannedIngredientsSection() {
   const grocery = useMealStore(s => s.grocery);
   const sortIngredient = useMealStore(s => s.sortIngredient);
   const skipIngredient = useMealStore(s => s.skipIngredient);
   const dismissGroceryTip = useMealStore(s => s.dismissGroceryTip);
   const showToast = useToastStore(s => s.showToast);
-  const setKitchenSource = useNavSourceStore(s => s.setKitchenSource);
 
   const planned = useMemo(
     () =>
@@ -91,8 +82,7 @@ export function PlannedIngredientsSection({ sourceTab = '/(tabs)/plan' }: Props)
   };
 
   const goToKitchen = () => {
-    setKitchenSource(sourceTab);
-    router.navigate('/(tabs)/library');
+    router.push('/kitchen');
   };
 
   return (

@@ -40,7 +40,9 @@ export interface UserGoals {
 }
 
 export interface UserProfile {
-  name: string;         // First name, used in AI greetings ("Hey Alex!")
+  name: string;                       // First name, used in AI greetings ("Hey Alex!")
+  dietaryRestrictions: string[];      // e.g. ['Vegetarian','Halal']. Read by AI shells.
+  allergies: string[];                // e.g. ['Peanuts','Shellfish']. Read by AI shells.
 }
 
 // ─── Recurrence & templates ───────────────────────────────────────────────────
@@ -106,6 +108,40 @@ export interface SavedMeal {
   lastUsed: string;     // ISO date
 }
 
+// ─── Recipes ─────────────────────────────────────────────────────────────────
+
+export type RecipeCategory = 'Breakfast' | 'Lunch' | 'Dinner' | 'Snacks';
+
+export interface RecipeTemplate {
+  id: string;                 // Stable id (e.g. 'premade-bf-oats')
+  name: string;
+  category: RecipeCategory;
+  calories: number;
+  cookTimeMin: number;        // estimated cooking time in minutes
+  macros: Macros;
+  ingredients: Ingredient[];
+  steps: string[];            // numbered cooking steps in order
+}
+
+export type SavedRecipeSource = 'premade' | 'ai' | 'manual';
+
+// A user-saved recipe. Recipes auto-save when added to plan/today, and can be
+// explicitly favourited via the heart icon.
+export interface SavedRecipe {
+  id: string;                    // unique within savedRecipes
+  recipeId?: string;             // source RecipeTemplate id when source==='premade'
+  name: string;
+  category?: RecipeCategory;
+  calories: number;
+  cookTimeMin?: number;
+  macros: Macros;
+  ingredients: Ingredient[];
+  steps?: string[];
+  source: SavedRecipeSource;
+  favourited: boolean;           // explicit heart tap
+  addedAt: string;               // ISO timestamp — drives "Recently Added" order
+}
+
 // ─── Zustand store shape ──────────────────────────────────────────────────────
 
 export interface AppStore {
@@ -116,6 +152,8 @@ export interface AppStore {
   templates: MealTemplate[];
   library: SavedMeal[];
   grocery: GroceryState;
+  recipes: RecipeTemplate[];          // premade catalog (seeded)
+  savedRecipes: SavedRecipe[];        // user's saved + favourited recipes
 
   toggleMealStatus:       (date: string, mealId: string) => void;
   logWater:               (date: string, ml: number) => void;
@@ -149,4 +187,15 @@ export interface AppStore {
   dismissGroceryTip:             () => void;
   ingestMidWeekIngredients:      (ingredients: { name: string; mealName: string }[]) => void;
   cleanupRemovedMealIngredients: (mealIngredientNames: string[], remainingMealNames: string[]) => void;
+
+  // ─── Recipe actions ──────────────────────────────────────────────────────
+  // Auto-save a recipe (idempotent on `recipeId` when source==='premade',
+  // otherwise on `id`). Returns the resulting saved recipe.
+  ensureRecipeSaved: (recipe: Omit<SavedRecipe, 'id' | 'addedAt' | 'favourited'> & { id?: string; favourited?: boolean }) => SavedRecipe;
+  toggleFavouriteRecipe: (recipe: Omit<SavedRecipe, 'id' | 'addedAt' | 'favourited'> & { id?: string }) => SavedRecipe;
+  removeSavedRecipe: (id: string) => void;
+  // Add a recipe to today's log immediately. Auto-saves and ingests ingredients.
+  addRecipeToToday: (recipe: Pick<SavedRecipe, 'name' | 'calories' | 'macros' | 'ingredients'> & { recipeId?: string; cookTimeMin?: number; steps?: string[]; category?: RecipeCategory; source?: SavedRecipeSource }) => MealEntry;
+  // Add a recipe to a future date by creating a one-off MealTemplate.
+  addRecipeToPlan: (recipe: Pick<SavedRecipe, 'name' | 'calories' | 'macros' | 'ingredients'> & { recipeId?: string; cookTimeMin?: number; steps?: string[]; category?: RecipeCategory; source?: SavedRecipeSource }, dateIso: string, time: string) => MealTemplate;
 }

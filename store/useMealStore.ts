@@ -9,13 +9,16 @@ import type {
   DailyLog,
   GroceryItem,
   GroceryState,
+  Ingredient,
   MealEntry,
   MealTemplate,
   RecurrenceRule,
   SavedMeal,
+  SavedRecipe,
   UserGoals,
   UserProfile,
 } from './types';
+import { RECIPE_SEED } from '@/constants/recipeSeed';
 import { classifyIngredient, normalizeIngredientName } from '@/constants/ingredientCategories';
 
 // ─── Date helpers ─────────────────────────────────────────────────────────────
@@ -25,6 +28,38 @@ export function toIsoDate(d: Date): string {
   const m   = String(d.getMonth() + 1).padStart(2, '0');
   const day = String(d.getDate()).padStart(2, '0');
   return `${y}-${m}-${day}`;
+}
+
+// Round a Date forward to the next :00 or :30 mark, returned as "HH:MM".
+function roundToNextHalfHour(d: Date): string {
+  const minutes = d.getMinutes();
+  const target = new Date(d);
+  if (minutes < 30) target.setMinutes(30, 0, 0);
+  else { target.setHours(target.getHours() + 1); target.setMinutes(0, 0, 0); }
+  const hh = String(target.getHours()).padStart(2, '0');
+  const mm = String(target.getMinutes()).padStart(2, '0');
+  return `${hh}:${mm}`;
+}
+
+// Deep-clone ingredients with fresh ids so multiple meals don't share refs.
+function cloneIngredients(items: Ingredient[]): Ingredient[] {
+  return items.map((i, idx) => ({
+    ...i,
+    id: `ing-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 6)}`,
+  }));
+}
+
+// Match priority: by recipeId (premade source of truth), then by lowercased name.
+function findExistingSavedRecipe(
+  list: SavedRecipe[],
+  candidate: { recipeId?: string; name: string }
+): SavedRecipe | undefined {
+  if (candidate.recipeId) {
+    const byRecipeId = list.find(r => r.recipeId === candidate.recipeId);
+    if (byRecipeId) return byRecipeId;
+  }
+  const lower = candidate.name.trim().toLowerCase();
+  return list.find(r => r.name.trim().toLowerCase() === lower);
 }
 
 export function getDayOfWeek(isoDate: string): number {
@@ -125,6 +160,8 @@ const DEFAULT_GOALS: UserGoals = {
 
 const DEFAULT_PROFILE: UserProfile = {
   name: '',
+  dietaryRestrictions: [],
+  allergies: [],
 };
 
 // ─── Templates ────────────────────────────────────────────────────────────────
@@ -321,13 +358,15 @@ const appStorage = Platform.OS === 'web' ? webStorage : nativeStorage;
 export const useMealStore = create<AppStore>()(
   persist(
     (set, get) => ({
-      logs:      SEED_LOGS,
-      goals:     DEFAULT_GOALS,
-      profile:   DEFAULT_PROFILE,
-      streak:    5,
-      templates: SEED_TEMPLATES,
-      library:   SEED_LIBRARY,
-      grocery:   INITIAL_GROCERY,
+      logs:         SEED_LOGS,
+      goals:        DEFAULT_GOALS,
+      profile:      DEFAULT_PROFILE,
+      streak:       5,
+      templates:    SEED_TEMPLATES,
+      library:      SEED_LIBRARY,
+      grocery:      INITIAL_GROCERY,
+      recipes:      RECIPE_SEED,
+      savedRecipes: [],
 
       // ── Toggle completion ──────────────────────────────────────────────────
       toggleMealStatus: (date, mealId) => {
@@ -896,6 +935,137 @@ export const useMealStore = create<AppStore>()(
 
           return { grocery: { ...state.grocery, items: nextItems } };
         });
+      },
+
+      // ─── Recipe actions ─────────────────────────────────────────────────
+      ensureRecipeSaved: (recipe) => {
+        const state = get();
+        const existing = findExistingSavedRecipe(state.savedRecipes, recipe);
+        if (existing) return existing;
+
+        const next: SavedRecipe = {
+          id: `sav-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          recipeId: recipe.recipeId,
+          name: recipe.name,
+          category: recipe.category,
+          calories: recipe.calories,
+          cookTimeMin: recipe.cookTimeMin,
+          macros: recipe.macros,
+          ingredients: cloneIngredients(recipe.ingredients),
+          steps: recipe.steps ? [...recipe.steps] : undefined,
+          source: recipe.source ?? 'manual',
+          favourited: recipe.favourited ?? false,
+          addedAt: new Date().toISOString(),
+        };
+        set({ savedRecipes: [next, ...state.savedRecipes] });
+        return next;
+      },
+
+      toggleFavouriteRecipe: (recipe) => {
+        const state = get();
+        const existing = findExistingSavedRecipe(state.savedRecipes, recipe);
+        if (existing) {
+          // Flip the heart on the existing entry.
+          const updated: SavedRecipe = { ...existing, favourited: !existing.favourited };
+          set({
+            savedRecipes: state.savedRecipes.map(r =>
+              r.id === existing.id ? updated : r
+            ),
+          });
+          return updated;
+        }
+        // No existing — create one as favourited.
+        const next: SavedRecipe = {
+          id: `sav-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          recipeId: recipe.recipeId,
+          name: recipe.name,
+          category: recipe.category,
+          calories: recipe.calories,
+          cookTimeMin: recipe.cookTimeMin,
+          macros: recipe.macros,
+          ingredients: cloneIngredients(recipe.ingredients),
+          steps: recipe.steps ? [...recipe.steps] : undefined,
+          source: recipe.source ?? 'manual',
+          favourited: true,
+          addedAt: new Date().toISOString(),
+        };
+        set({ savedRecipes: [next, ...state.savedRecipes] });
+        return next;
+      },
+
+      removeSavedRecipe: (id) => {
+        set(state => ({
+          savedRecipes: state.savedRecipes.filter(r => r.id !== id),
+        }));
+      },
+
+      addRecipeToToday: (recipe) => {
+        const todayIso = toIsoDate(new Date());
+        const entry: MealEntry = {
+          id: `meal-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          name: recipe.name,
+          time: roundToNextHalfHour(new Date()),
+          calories: recipe.calories,
+          ingredients: cloneIngredients(recipe.ingredients),
+          macros: recipe.macros,
+          status: 'pending',
+        };
+        get().addMealToDay(todayIso, entry);
+
+        // Ingest ingredients into the grocery system (no-op for items already in Kitchen).
+        if (recipe.ingredients.length > 0) {
+          get().ingestMidWeekIngredients(
+            recipe.ingredients.map(i => ({ name: i.name, mealName: recipe.name }))
+          );
+        }
+
+        // Auto-save the recipe to savedRecipes.
+        get().ensureRecipeSaved({
+          recipeId: recipe.recipeId,
+          name: recipe.name,
+          category: recipe.category,
+          calories: recipe.calories,
+          cookTimeMin: recipe.cookTimeMin,
+          macros: recipe.macros,
+          ingredients: recipe.ingredients,
+          steps: recipe.steps,
+          source: recipe.source ?? 'manual',
+        });
+
+        return entry;
+      },
+
+      addRecipeToPlan: (recipe, dateIso, time) => {
+        const template: MealTemplate = {
+          id: `tpl-rcp-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          name: recipe.name,
+          time,
+          calories: recipe.calories,
+          ingredients: cloneIngredients(recipe.ingredients),
+          macros: recipe.macros,
+          recurrence: { type: 'once', date: dateIso },
+        };
+        get().addTemplate(template);
+
+        if (recipe.ingredients.length > 0) {
+          get().ingestMidWeekIngredients(
+            recipe.ingredients.map(i => ({ name: i.name, mealName: recipe.name }))
+          );
+        }
+
+        get().ensureRecipeSaved({
+          recipeId: recipe.recipeId,
+          name: recipe.name,
+          category: recipe.category,
+          calories: recipe.calories,
+          cookTimeMin: recipe.cookTimeMin,
+          macros: recipe.macros,
+          ingredients: recipe.ingredients,
+          steps: recipe.steps,
+          source: recipe.source ?? 'manual',
+        });
+
+        return template;
       },
     }),
     {
