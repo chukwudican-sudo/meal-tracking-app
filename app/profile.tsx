@@ -1,22 +1,69 @@
 import { router } from 'expo-router';
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import {
+  Alert,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { COLORS } from '@/constants/theme';
+import { GOAL_LABEL, kgToLbs, lbsToKg } from '@/constants/goalCalc';
 import { useMealStore } from '@/store/useMealStore';
 
 export default function ProfileScreen() {
-  const profile = useMealStore(s => s.profile);
+  const profile      = useMealStore(s => s.profile);
+  const updateProfile = useMealStore(s => s.updateProfile);
+  const logWeight    = useMealStore(s => s.logWeight);
 
   const handleBack = () => {
     if (router.canGoBack()) router.back();
     else router.replace('/(tabs)');
   };
 
-  const dietary = profile.dietaryRestrictions ?? [];
-  const allergies = profile.allergies ?? [];
-  const dietaryLabel = dietary.length > 0 ? dietary.join(', ') : 'None set';
-  const allergyLabel = allergies.length > 0 ? allergies.join(', ') : 'None set';
+  const unit = profile.weightUnit ?? 'lbs';
+  const weightDisplay = profile.weightKg != null
+    ? unit === 'lbs'
+      ? `${Math.round(kgToLbs(profile.weightKg))} lbs`
+      : `${Math.round(profile.weightKg)} kg`
+    : 'Not set';
+
+  const goalDisplay = profile.goalType ? GOAL_LABEL[profile.goalType] : 'Not set';
+  const displayName = profile.firstName || profile.name || 'Add your name';
+
+  const promptUpdateWeight = () => {
+    Alert.prompt(
+      'Update weight',
+      `Current: ${weightDisplay}`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Save',
+          onPress: (input) => {
+            const raw = (input ?? '').trim();
+            const value = Number(raw);
+            if (!Number.isFinite(value) || value <= 0) return;
+            const kg = unit === 'lbs' ? lbsToKg(value) : value;
+            logWeight(kg);
+          },
+        },
+      ],
+      'plain-text',
+      profile.weightKg != null
+        ? unit === 'lbs'
+          ? Math.round(kgToLbs(profile.weightKg)).toString()
+          : Math.round(profile.weightKg).toString()
+        : '',
+      'numeric'
+    );
+  };
+
+  const setUnit = (next: 'lbs' | 'kg') => {
+    if (unit === next) return;
+    updateProfile({ weightUnit: next });
+  };
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
@@ -24,54 +71,122 @@ export default function ProfileScreen() {
         <TouchableOpacity
           onPress={handleBack}
           hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-          style={styles.backBtn}
+          style={styles.iconBtn}
           activeOpacity={0.7}
         >
           <Text style={styles.backArrow}>←</Text>
         </TouchableOpacity>
         <Text style={styles.title}>Profile</Text>
-        <View style={styles.backBtn} />
+        <TouchableOpacity
+          onPress={() => router.push('/settings')}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          style={styles.iconBtn}
+          activeOpacity={0.7}
+        >
+          <Text style={styles.gearIcon}>⚙</Text>
+        </TouchableOpacity>
       </View>
 
       <ScrollView contentContainerStyle={styles.scroll}>
-        <View style={styles.placeholderCard}>
-          <Text style={styles.placeholderTitle}>Profile coming soon</Text>
-          <Text style={styles.placeholderBody}>
-            Your account, preferences, and goals will live here.
-          </Text>
-        </View>
-
-        <View style={styles.section}>
-          <Text style={styles.sectionLabel}>DIETARY</Text>
-          <View style={styles.row}>
-            <View style={styles.rowBody}>
-              <Text style={styles.rowText}>Dietary restrictions</Text>
-              <Text style={styles.rowSub}>{dietaryLabel}</Text>
-            </View>
-            <Text style={styles.soonTag}>Coming soon</Text>
+        {/* User info card */}
+        <View style={styles.userCard}>
+          <View style={styles.avatarWrap}>
+            <Text style={styles.avatarEmoji}>👤</Text>
           </View>
-          <View style={styles.row}>
-            <View style={styles.rowBody}>
-              <Text style={styles.rowText}>Allergies</Text>
-              <Text style={styles.rowSub}>{allergyLabel}</Text>
+          <View style={styles.nameRow}>
+            <Text style={styles.userName} numberOfLines={1}>{displayName}</Text>
+            <View style={[
+              styles.subPill,
+              profile.subscription === 'premium' ? styles.subPillPremium : styles.subPillFree,
+            ]}>
+              <Text style={[
+                styles.subPillText,
+                profile.subscription === 'premium' ? styles.subPillTextPremium : styles.subPillTextFree,
+              ]}>
+                {profile.subscription === 'premium' ? 'Premium' : 'Free'}
+              </Text>
             </View>
-            <Text style={styles.soonTag}>Coming soon</Text>
           </View>
-        </View>
+          {profile.age != null ? <Text style={styles.userMeta}>Age {profile.age}</Text> : null}
 
-        <View style={styles.section}>
-          <Text style={styles.sectionLabel}>SETTINGS</Text>
+          <View style={styles.userGrid}>
+            <TouchableOpacity style={styles.userGridCell} onPress={promptUpdateWeight} activeOpacity={0.7}>
+              <Text style={styles.userGridLabel}>Weight</Text>
+              <Text style={styles.userGridValue}>{weightDisplay}</Text>
+            </TouchableOpacity>
+            <View style={styles.userGridDivider} />
+            <TouchableOpacity
+              style={styles.userGridCell}
+              onPress={() => router.push('/profile/edit-goal')}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.userGridLabel}>Goal</Text>
+              <Text style={styles.userGridValue}>{goalDisplay}</Text>
+            </TouchableOpacity>
+          </View>
+
           <TouchableOpacity
-            style={styles.row}
-            onPress={() => router.push('/settings')}
-            activeOpacity={0.7}
+            style={styles.subscriptionBtn}
+            onPress={() => router.push({ pathname: '/settings/coming-soon', params: { title: 'Subscription' } })}
+            activeOpacity={0.85}
           >
-            <Text style={styles.rowText}>App settings</Text>
-            <Text style={styles.rowArrow}>›</Text>
+            <Text style={styles.subscriptionBtnText}>
+              {profile.subscription === 'premium' ? 'Manage Subscription' : 'Upgrade to Premium'}
+            </Text>
           </TouchableOpacity>
+        </View>
+
+        {/* Body & goals */}
+        <Text style={styles.sectionLabel}>BODY & GOALS</Text>
+        <View style={styles.section}>
+          <NavRow label="Edit Goal" onPress={() => router.push('/profile/edit-goal')} />
+          <NavRow label="Personal Details" onPress={() => router.push('/profile/personal-details')} />
+        </View>
+
+        {/* Nutrition */}
+        <Text style={styles.sectionLabel}>NUTRITION</Text>
+        <View style={styles.section}>
+          <NavRow label="Dietary Needs & Allergies" onPress={() => router.push('/profile/dietary')} />
+          <NavRow label="Nutrition Goals" onPress={() => router.push('/profile/nutrition-goals')} />
+        </View>
+
+        {/* Preferences */}
+        <Text style={styles.sectionLabel}>PREFERENCES</Text>
+        <View style={styles.section}>
+          <View style={styles.row}>
+            <View style={styles.rowBody}>
+              <Text style={styles.rowText}>Weight Unit</Text>
+              <Text style={styles.rowSub}>Affects weight display app-wide.</Text>
+            </View>
+            <View style={styles.unitToggle}>
+              <TouchableOpacity
+                style={[styles.unitBtn, unit === 'lbs' && styles.unitBtnActive]}
+                onPress={() => setUnit('lbs')}
+                activeOpacity={0.8}
+              >
+                <Text style={[styles.unitBtnText, unit === 'lbs' && styles.unitBtnTextActive]}>lbs</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.unitBtn, unit === 'kg' && styles.unitBtnActive]}
+                onPress={() => setUnit('kg')}
+                activeOpacity={0.8}
+              >
+                <Text style={[styles.unitBtnText, unit === 'kg' && styles.unitBtnTextActive]}>kg</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
         </View>
       </ScrollView>
     </SafeAreaView>
+  );
+}
+
+function NavRow({ label, onPress }: { label: string; onPress: () => void }) {
+  return (
+    <TouchableOpacity style={styles.row} onPress={onPress} activeOpacity={0.7}>
+      <Text style={styles.rowText}>{label}</Text>
+      <Text style={styles.rowArrow}>›</Text>
+    </TouchableOpacity>
   );
 }
 
@@ -88,61 +203,79 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: COLORS.border,
   },
-  backBtn: {
-    width: 40,
-    height: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  backArrow: {
-    color: COLORS.text,
-    fontSize: 22,
-    fontWeight: '600',
-  },
+  iconBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  backArrow: { color: COLORS.text, fontSize: 22, fontWeight: '600' },
+  gearIcon: { color: COLORS.text, fontSize: 20 },
   title: { fontSize: 18, fontWeight: '700', color: COLORS.text },
 
-  scroll: {
-    paddingHorizontal: 16,
-    paddingTop: 16,
-    paddingBottom: 40,
-    gap: 16,
-  },
+  scroll: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 40, gap: 12 },
 
-  placeholderCard: {
+  // User info card
+  userCard: {
     backgroundColor: COLORS.card,
     borderRadius: 16,
-    padding: 20,
-    alignItems: 'center',
     borderWidth: 1,
     borderColor: COLORS.border,
+    padding: 18,
+    alignItems: 'center',
+    gap: 6,
   },
-  placeholderTitle: {
-    color: COLORS.text,
-    fontSize: 16,
-    fontWeight: '700',
+  avatarWrap: {
+    width: 72, height: 72, borderRadius: 36,
+    backgroundColor: COLORS.elevated,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 4,
   },
-  placeholderBody: {
-    color: COLORS.textSecondary,
-    fontSize: 13,
-    marginTop: 6,
-    textAlign: 'center',
-  },
+  avatarEmoji: { fontSize: 36 },
+  nameRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  userName: { color: COLORS.text, fontSize: 18, fontWeight: '700' },
+  userMeta: { color: COLORS.textSecondary, fontSize: 13 },
+  subPill: { paddingHorizontal: 10, paddingVertical: 3, borderRadius: 10 },
+  subPillFree:    { backgroundColor: COLORS.elevated },
+  subPillPremium: { backgroundColor: COLORS.green + '33' },
+  subPillText: { fontSize: 11, fontWeight: '700', letterSpacing: 0.5 },
+  subPillTextFree:    { color: COLORS.textSecondary },
+  subPillTextPremium: { color: COLORS.green },
 
+  userGrid: {
+    marginTop: 12,
+    flexDirection: 'row',
+    backgroundColor: COLORS.elevated,
+    borderRadius: 12,
+    overflow: 'hidden',
+    width: '100%',
+  },
+  userGridCell: { flex: 1, paddingVertical: 12, alignItems: 'center' },
+  userGridDivider: { width: StyleSheet.hairlineWidth, backgroundColor: COLORS.border },
+  userGridLabel: { color: COLORS.textSecondary, fontSize: 11, fontWeight: '600', letterSpacing: 0.5 },
+  userGridValue: { color: COLORS.text, fontSize: 14, fontWeight: '700', marginTop: 4 },
+
+  subscriptionBtn: {
+    marginTop: 12,
+    width: '100%',
+    paddingVertical: 11,
+    alignItems: 'center',
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: COLORS.green,
+  },
+  subscriptionBtnText: { color: COLORS.green, fontSize: 13, fontWeight: '700' },
+
+  sectionLabel: {
+    color: COLORS.textSecondary,
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 1,
+    paddingHorizontal: 4,
+    marginTop: 8,
+  },
   section: {
     backgroundColor: COLORS.card,
     borderRadius: 16,
     borderWidth: 1,
     borderColor: COLORS.border,
     overflow: 'hidden',
-  },
-  sectionLabel: {
-    color: COLORS.textSecondary,
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 1,
-    paddingHorizontal: 16,
-    paddingTop: 14,
-    paddingBottom: 6,
   },
   row: {
     paddingHorizontal: 16,
@@ -155,16 +288,20 @@ const styles = StyleSheet.create({
   },
   rowBody: { flex: 1 },
   rowText: { color: COLORS.text, fontSize: 15 },
-  rowSub: { color: COLORS.textSecondary, fontSize: 12, marginTop: 2 },
+  rowSub:  { color: COLORS.textSecondary, fontSize: 12, marginTop: 2 },
   rowArrow: { color: COLORS.textSecondary, fontSize: 22, fontWeight: '300' },
-  soonTag: {
-    color: COLORS.textSecondary,
-    fontSize: 11,
-    fontWeight: '600',
+
+  unitToggle: {
+    flexDirection: 'row',
     backgroundColor: COLORS.elevated,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
     borderRadius: 8,
     overflow: 'hidden',
   },
+  unitBtn: {
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+  },
+  unitBtnActive: { backgroundColor: COLORS.green },
+  unitBtnText: { color: COLORS.textSecondary, fontSize: 13, fontWeight: '600' },
+  unitBtnTextActive: { color: '#fff' },
 });

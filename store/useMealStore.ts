@@ -17,6 +17,7 @@ import type {
   SavedRecipe,
   UserGoals,
   UserProfile,
+  WeightLogEntry,
 } from './types';
 import { RECIPE_SEED } from '@/constants/recipeSeed';
 import { classifyIngredient, normalizeIngredientName } from '@/constants/ingredientCategories';
@@ -152,16 +153,34 @@ function toMinutesFromHHMM(value: string): number | null {
 // ─── Goals ────────────────────────────────────────────────────────────────────
 
 const DEFAULT_GOALS: UserGoals = {
-  dailyCalories: 2200,
-  protein: 165,
-  carbs:   220,
-  fats:     65,
+  dailyCalories:    2200,
+  protein:           165,
+  carbs:             220,
+  fats:               65,
+  waterTargetCups:     8,
+  isCalculated:    false,
 };
 
 const DEFAULT_PROFILE: UserProfile = {
   name: '',
+  firstName: undefined,
+  lastName:  undefined,
+  email:     undefined,
+
+  age:           undefined,
+  heightCm:      undefined,
+  weightKg:      undefined,
+  gender:        undefined,
+  activityLevel: undefined,
+  goalType:      undefined,
+
+  weightUnit: 'lbs',
+  subscription: 'free',
   dietaryRestrictions: [],
   allergies: [],
+
+  mealRemindersEnabled: true,
+  remindMinutesBefore:  15,
 };
 
 // ─── Templates ────────────────────────────────────────────────────────────────
@@ -367,6 +386,7 @@ export const useMealStore = create<AppStore>()(
       grocery:      INITIAL_GROCERY,
       recipes:      RECIPE_SEED,
       savedRecipes: [],
+      weightLog:    [],
 
       // ── Toggle completion ──────────────────────────────────────────────────
       toggleMealStatus: (date, mealId) => {
@@ -583,6 +603,40 @@ export const useMealStore = create<AppStore>()(
       // ── Profile ───────────────────────────────────────────────────────────
       updateProfile: partial =>
         set(state => ({ profile: { ...state.profile, ...partial } })),
+
+      // ── Weight log ─────────────────────────────────────────────────────────
+      // Records a weight entry (also used by the Progress chart) and updates
+      // the canonical profile.weightKg in one transaction. If an entry already
+      // exists for today, it's replaced (last write wins).
+      logWeight: (weightKg) => {
+        if (!Number.isFinite(weightKg) || weightKg <= 0) return;
+        const today = toIsoDate(new Date());
+        set(state => {
+          const filtered = state.weightLog.filter(e => e.date !== today);
+          const next: WeightLogEntry[] = [...filtered, { date: today, weightKg }]
+            .sort((a, b) => a.date.localeCompare(b.date));
+          return {
+            weightLog: next,
+            profile:   { ...state.profile, weightKg },
+          };
+        });
+      },
+
+      // Reset of all user-entered data (used by Settings → Delete Account).
+      // Keeps the seeded recipes catalog and grocery initial state intact.
+      resetUserData: () => {
+        set({
+          logs:         {},
+          goals:        DEFAULT_GOALS,
+          profile:      DEFAULT_PROFILE,
+          streak:       0,
+          templates:    [],
+          library:      [],
+          grocery:      INITIAL_GROCERY,
+          savedRecipes: [],
+          weightLog:    [],
+        });
+      },
 
       // ── Streak ────────────────────────────────────────────────────────────
       recalcStreak: () => {
@@ -1085,10 +1139,22 @@ export const useMealStore = create<AppStore>()(
             ...(p.profile ?? {}),
             dietaryRestrictions: p.profile?.dietaryRestrictions ?? [],
             allergies:           p.profile?.allergies           ?? [],
+            // New fields fall back to defaults if persisted store predates them.
+            weightUnit:           p.profile?.weightUnit           ?? DEFAULT_PROFILE.weightUnit,
+            subscription:         p.profile?.subscription         ?? DEFAULT_PROFILE.subscription,
+            mealRemindersEnabled: p.profile?.mealRemindersEnabled ?? DEFAULT_PROFILE.mealRemindersEnabled,
+            remindMinutesBefore: (p.profile?.remindMinutesBefore  ?? DEFAULT_PROFILE.remindMinutesBefore),
+          },
+          goals: {
+            ...DEFAULT_GOALS,
+            ...(p.goals ?? {}),
+            // Older stores didn't carry waterTargetCups.
+            waterTargetCups: p.goals?.waterTargetCups ?? DEFAULT_GOALS.waterTargetCups,
           },
           recipes:      p.recipes      ?? current.recipes,
           savedRecipes: p.savedRecipes ?? current.savedRecipes,
           grocery:      p.grocery      ?? current.grocery,
+          weightLog:    p.weightLog    ?? current.weightLog ?? [],
         } as AppStore;
       },
     }

@@ -18,7 +18,7 @@ export default function RootLayout() {
       <View style={{ flex: 1 }}>
         <Stack>
           <Stack.Screen name="(tabs)"        options={{ headerShown: false }} />
-          <Stack.Screen name="settings"      options={{ presentation: 'modal', headerShown: false }} />
+          <Stack.Screen name="settings"      options={{ presentation: 'modal', headerShown: false, animation: 'slide_from_bottom' }} />
           <Stack.Screen name="meal/[id]"     options={{ presentation: 'modal', headerShown: false }} />
           <Stack.Screen name="cart"          options={{ presentation: 'modal', headerShown: false, animation: 'slide_from_bottom' }} />
           <Stack.Screen name="profile"       options={{ presentation: 'modal', headerShown: false, animation: 'slide_from_bottom' }} />
@@ -29,6 +29,21 @@ export default function RootLayout() {
           <Stack.Screen name="recipe/[id]"               options={{ presentation: 'modal', headerShown: false, animation: 'slide_from_bottom' }} />
           <Stack.Screen name="ai/what-can-i-make"        options={{ presentation: 'modal', headerShown: false, animation: 'slide_from_bottom' }} />
           <Stack.Screen name="ai/custom"                 options={{ presentation: 'modal', headerShown: false, animation: 'slide_from_bottom' }} />
+
+          {/* Profile sub-pages */}
+          <Stack.Screen name="profile/edit-goal"         options={{ presentation: 'modal', headerShown: false, animation: 'slide_from_bottom' }} />
+          <Stack.Screen name="profile/personal-details"  options={{ presentation: 'modal', headerShown: false, animation: 'slide_from_bottom' }} />
+          <Stack.Screen name="profile/dietary"           options={{ presentation: 'modal', headerShown: false, animation: 'slide_from_bottom' }} />
+          <Stack.Screen name="profile/nutrition-goals"   options={{ presentation: 'modal', headerShown: false, animation: 'slide_from_bottom' }} />
+
+          {/* Settings sub-pages */}
+          <Stack.Screen name="settings/account"                 options={{ presentation: 'modal', headerShown: false, animation: 'slide_from_bottom' }} />
+          <Stack.Screen name="settings/account-delete-confirm"  options={{ presentation: 'modal', headerShown: false, animation: 'slide_from_bottom' }} />
+          <Stack.Screen name="settings/notifications"           options={{ presentation: 'modal', headerShown: false, animation: 'slide_from_bottom' }} />
+          <Stack.Screen name="settings/help"                    options={{ presentation: 'modal', headerShown: false, animation: 'slide_from_bottom' }} />
+          <Stack.Screen name="settings/feedback"                options={{ presentation: 'modal', headerShown: false, animation: 'slide_from_bottom' }} />
+          <Stack.Screen name="settings/coming-soon"             options={{ presentation: 'modal', headerShown: false, animation: 'slide_from_bottom' }} />
+
           <Stack.Screen name="modal"         options={{ presentation: 'modal', title: 'Modal' }} />
         </Stack>
         <UndoSnackbarHost />

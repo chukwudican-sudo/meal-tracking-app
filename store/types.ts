@@ -34,15 +34,57 @@ export interface DailyLog {
 
 export interface UserGoals {
   dailyCalories: number;
-  protein: number;      // grams
-  carbs: number;        // grams
-  fats: number;         // grams
+  protein: number;          // grams
+  carbs: number;            // grams
+  fats: number;             // grams
+  waterTargetCups: number;  // daily water target in cups (8oz)
+  isCalculated?: boolean;   // true when set by Edit Goal flow; cleared when manually edited
+}
+
+// ─── Goal / activity / unit enums ────────────────────────────────────────────
+
+export type GoalType = 'lose_weight' | 'maintain' | 'gain_muscle' | 'lean_bulk';
+export type ActivityLevel =
+  | 'sedentary'
+  | 'lightly_active'
+  | 'moderately_active'
+  | 'very_active'
+  | 'extra_active';
+export type WeightUnit = 'lbs' | 'kg';
+export type Gender = 'male' | 'female' | 'other';
+export type GoalPace = 'slow' | 'moderate' | 'aggressive';
+export type SubscriptionTier = 'free' | 'premium';
+export type RemindMinutes = 5 | 10 | 15 | 30;
+
+export interface WeightLogEntry {
+  date: string;       // ISO yyyy-mm-dd
+  weightKg: number;
 }
 
 export interface UserProfile {
+  // Identity
   name: string;                       // First name, used in AI greetings ("Hey Alex!")
-  dietaryRestrictions: string[];      // e.g. ['Vegetarian','Halal']. Read by AI shells.
+  firstName?: string;                 // Settings → Account form
+  lastName?: string;
+  email?: string;
+
+  // Body & goals
+  age?: number;
+  heightCm?: number;
+  weightKg?: number;
+  gender?: Gender;
+  activityLevel?: ActivityLevel;
+  goalType?: GoalType;
+
+  // Preferences
+  weightUnit: WeightUnit;             // 'lbs' default — switch from Profile or Settings
+  subscription: SubscriptionTier;     // shell only for MVP
+  dietaryRestrictions: string[];      // e.g. ['Vegetarian']. Read by AI shells.
   allergies: string[];                // e.g. ['Peanuts','Shellfish']. Read by AI shells.
+
+  // Notifications
+  mealRemindersEnabled: boolean;
+  remindMinutesBefore: RemindMinutes;
 }
 
 // ─── Recurrence & templates ───────────────────────────────────────────────────
@@ -154,6 +196,7 @@ export interface AppStore {
   grocery: GroceryState;
   recipes: RecipeTemplate[];          // premade catalog (seeded)
   savedRecipes: SavedRecipe[];        // user's saved + favourited recipes
+  weightLog: WeightLogEntry[];        // chronological weight history (Profile + Progress)
 
   toggleMealStatus:       (date: string, mealId: string) => void;
   logWater:               (date: string, ml: number) => void;
@@ -171,6 +214,8 @@ export interface AppStore {
   updateLibraryMeal:      (meal: SavedMeal) => void;
   updateGoals:            (goals: Partial<UserGoals>) => void;
   updateProfile:          (profile: Partial<UserProfile>) => void;
+  logWeight:              (weightKg: number) => void;
+  resetUserData:          () => void;
   recalcStreak:           () => void;
 
   // ─── Grocery actions ──────────────────────────────────────────────────────
