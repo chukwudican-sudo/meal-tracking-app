@@ -1071,6 +1071,26 @@ export const useMealStore = create<AppStore>()(
     {
       name:    'meal-app-store-v2',
       storage: createJSONStorage(() => appStorage),
+      // Shallow merge by default discards any new top-level/profile fields
+      // we add in later releases (e.g. dietaryRestrictions/allergies, recipes,
+      // savedRecipes). Provide an explicit merge that fills in defaults for
+      // any field missing on persisted state.
+      merge: (persisted, current) => {
+        const p = (persisted ?? {}) as Partial<AppStore>;
+        return {
+          ...current,
+          ...p,
+          profile: {
+            ...DEFAULT_PROFILE,
+            ...(p.profile ?? {}),
+            dietaryRestrictions: p.profile?.dietaryRestrictions ?? [],
+            allergies:           p.profile?.allergies           ?? [],
+          },
+          recipes:      p.recipes      ?? current.recipes,
+          savedRecipes: p.savedRecipes ?? current.savedRecipes,
+          grocery:      p.grocery      ?? current.grocery,
+        } as AppStore;
+      },
     }
   )
 );

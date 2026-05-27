@@ -13,14 +13,10 @@ export default function ProfileScreen() {
     else router.replace('/(tabs)');
   };
 
-  const dietaryLabel =
-    profile.dietaryRestrictions.length > 0
-      ? profile.dietaryRestrictions.join(', ')
-      : 'None set';
-  const allergyLabel =
-    profile.allergies.length > 0
-      ? profile.allergies.join(', ')
-      : 'None set';
+  const dietary = profile.dietaryRestrictions ?? [];
+  const allergies = profile.allergies ?? [];
+  const dietaryLabel = dietary.length > 0 ? dietary.join(', ') : 'None set';
+  const allergyLabel = allergies.length > 0 ? allergies.join(', ') : 'None set';
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
