@@ -11,6 +11,8 @@ import type {
   GroceryState,
   Ingredient,
   MealEntry,
+  MealPlan,
+  MealSlot,
   MealTemplate,
   RecurrenceRule,
   SavedMeal,
@@ -20,6 +22,7 @@ import type {
   WeightLogEntry,
 } from './types';
 import { RECIPE_SEED } from '@/constants/recipeSeed';
+import { PLAN_SEED } from '@/constants/planSeed';
 import { classifyIngredient, normalizeIngredientName } from '@/constants/ingredientCategories';
 
 // ─── Date helpers ─────────────────────────────────────────────────────────────
@@ -161,6 +164,14 @@ const DEFAULT_GOALS: UserGoals = {
   isCalculated:    false,
 };
 
+const DEFAULT_MEAL_SLOTS: MealSlot[] = [
+  { id: 'slot-bf',  name: 'Breakfast',          time: '07:30' },
+  { id: 'slot-am',  name: 'Mid-morning Snack',  time: '10:30' },
+  { id: 'slot-ln',  name: 'Lunch',              time: '13:00' },
+  { id: 'slot-pm',  name: 'Afternoon Snack',    time: '15:30' },
+  { id: 'slot-dn',  name: 'Dinner',             time: '19:00' },
+];
+
 const DEFAULT_PROFILE: UserProfile = {
   name: '',
   firstName: undefined,
@@ -181,6 +192,9 @@ const DEFAULT_PROFILE: UserProfile = {
 
   mealRemindersEnabled: true,
   remindMinutesBefore:  15,
+
+  mealSlots: DEFAULT_MEAL_SLOTS,
+  activePlanName: undefined,
 };
 
 // ─── Templates ────────────────────────────────────────────────────────────────
@@ -387,6 +401,8 @@ export const useMealStore = create<AppStore>()(
       recipes:      RECIPE_SEED,
       savedRecipes: [],
       weightLog:    [],
+      plans:        PLAN_SEED,
+      savedPlans:   [],
 
       // ── Toggle completion ──────────────────────────────────────────────────
       toggleMealStatus: (date, mealId) => {
@@ -635,6 +651,7 @@ export const useMealStore = create<AppStore>()(
           grocery:      INITIAL_GROCERY,
           savedRecipes: [],
           weightLog:    [],
+          savedPlans:   [],
         });
       },
 
@@ -1121,6 +1138,139 @@ export const useMealStore = create<AppStore>()(
 
         return template;
       },
+
+      // ─── Meal plan actions ─────────────────────────────────────────────
+      activatePlan: (plan) => {
+        const state = get();
+        const recipeById = new Map(state.recipes.map(r => [r.id, r]));
+
+        // Build one MealTemplate per (slotName + time + recipe) combo, with
+        // a weekly recurrence whose `days[]` is the set of weekdays that
+        // pairing appears on. Weekday convention: Mon=0..Sun=6.
+        type Bucket = {
+          slotName: string;
+          time: string;
+          recipeId: string;
+          recipeName: string;
+          days: number[];
+        };
+        const buckets = new Map<string, Bucket>();
+
+        plan.days.forEach((dayMeals, dayIdx) => {
+          dayMeals.forEach(m => {
+            const key = `${m.slotName}|${m.time}|${m.recipeId}|${m.recipeName}`;
+            const bucket = buckets.get(key);
+            if (bucket) {
+              bucket.days.push(dayIdx);
+            } else {
+              buckets.set(key, {
+                slotName: m.slotName,
+                time: m.time,
+                recipeId: m.recipeId,
+                recipeName: m.recipeName,
+                days: [dayIdx],
+              });
+            }
+          });
+        });
+
+        const now = Date.now();
+        let idCounter = 0;
+        const nextTemplates: MealTemplate[] = [];
+        // Track all ingredients to feed Planned Ingredients.
+        const ingredientFeed: { name: string; mealName: string }[] = [];
+
+        buckets.forEach(bucket => {
+          const recipe = recipeById.get(bucket.recipeId);
+          // Fall back to lightweight defaults if recipe is missing.
+          const calories      = recipe?.calories ?? 0;
+          const macros        = recipe?.macros ?? { protein: 0, carbs: 0, fats: 0 };
+          const ingredients   = recipe ? cloneIngredients(recipe.ingredients) : [];
+
+          const recurrence: RecurrenceRule = {
+            type: 'weekly',
+            days: [...new Set(bucket.days)].sort((a, b) => a - b),
+          };
+
+          nextTemplates.push({
+            id: `tpl-plan-${now}-${idCounter++}`,
+            name: bucket.recipeName,
+            time: bucket.time,
+            calories,
+            ingredients,
+            macros,
+            recurrence,
+          });
+
+          ingredients.forEach(ing => {
+            ingredientFeed.push({ name: ing.name, mealName: bucket.recipeName });
+          });
+        });
+
+        set({
+          templates: nextTemplates,
+          profile: { ...state.profile, activePlanName: plan.name },
+        });
+
+        if (ingredientFeed.length > 0) {
+          get().ingestMidWeekIngredients(ingredientFeed);
+        }
+      },
+
+      saveCurrentPlanAs: (name) => {
+        const state = get();
+        // Reverse-map templates -> 7-day plan structure using each template's
+        // weekly recurrence days (falling back to "every day" for `daily`).
+        const days: PlanDayMeal[][] = Array.from({ length: 7 }, () => [] as PlanDayMeal[]);
+        state.templates.forEach(t => {
+          const targetDays: number[] = (() => {
+            switch (t.recurrence.type) {
+              case 'weekly':  return t.recurrence.days;
+              case 'daily':   return [0, 1, 2, 3, 4, 5, 6];
+              case 'monthly': return []; // not representable in a weekly plan snapshot
+              case 'once':    return []; // one-off entries are not part of the snapshot
+              default:        return [];
+            }
+          })();
+          targetDays.forEach(d => {
+            days[d].push({
+              slotName: t.name,
+              time: t.time,
+              recipeId: 'custom',
+              recipeName: t.name,
+            });
+          });
+        });
+        days.forEach(d => d.sort((a, b) => a.time.localeCompare(b.time)));
+
+        const plan: MealPlan = {
+          id: `plan-user-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          name,
+          description: undefined,
+          disclaimer: undefined,
+          category: undefined,
+          days,
+          targets: undefined,
+          savedAt: new Date().toISOString(),
+          source: 'user',
+        };
+        set({ savedPlans: [plan, ...state.savedPlans] });
+        return plan;
+      },
+
+      renameSavedPlan: (id, name) => {
+        set(state => ({
+          savedPlans: state.savedPlans.map(p =>
+            p.id === id ? { ...p, name } : p,
+          ),
+        }));
+      },
+
+      removeSavedPlan: (id) => {
+        set(state => ({
+          savedPlans: state.savedPlans.filter(p => p.id !== id),
+        }));
+      },
     }),
     {
       name:    'meal-app-store-v2',
@@ -1144,6 +1294,10 @@ export const useMealStore = create<AppStore>()(
             subscription:         p.profile?.subscription         ?? DEFAULT_PROFILE.subscription,
             mealRemindersEnabled: p.profile?.mealRemindersEnabled ?? DEFAULT_PROFILE.mealRemindersEnabled,
             remindMinutesBefore: (p.profile?.remindMinutesBefore  ?? DEFAULT_PROFILE.remindMinutesBefore),
+            mealSlots:            (p.profile?.mealSlots && p.profile.mealSlots.length > 0)
+                                    ? p.profile.mealSlots
+                                    : DEFAULT_PROFILE.mealSlots,
+            activePlanName:       p.profile?.activePlanName,
           },
           goals: {
             ...DEFAULT_GOALS,
@@ -1155,6 +1309,8 @@ export const useMealStore = create<AppStore>()(
           savedRecipes: p.savedRecipes ?? current.savedRecipes,
           grocery:      p.grocery      ?? current.grocery,
           weightLog:    p.weightLog    ?? current.weightLog ?? [],
+          plans:        p.plans        ?? current.plans,
+          savedPlans:   p.savedPlans   ?? current.savedPlans ?? [],
         } as AppStore;
       },
     }

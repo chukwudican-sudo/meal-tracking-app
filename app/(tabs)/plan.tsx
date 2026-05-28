@@ -11,6 +11,7 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { router } from 'expo-router';
 import { COLORS } from '@/constants/theme';
 import { toIsoDate, useMealStore } from '@/store/useMealStore';
 import { useUndoStore } from '@/store/useUndoStore';
@@ -20,6 +21,7 @@ import { AddMealScreen } from '@/components/addMeal/AddMealScreen';
 import { CartIcon } from '@/components/CartIcon';
 import { ProfileIcon } from '@/components/ProfileIcon';
 import { PlannedIngredientsSection } from '@/components/grocery/PlannedIngredientsSection';
+import { ActionTile } from '@/components/recipes/ActionTile';
 
 const SHORT_DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const WEEK_START_MON = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -122,6 +124,7 @@ export default function PlanScreen() {
   const [timePromptValue, setTimePromptValue] = useState('12:00');
   const [dayDetailDate, setDayDetailDate] = useState<string | null>(null);
   const [headerAddVisible, setHeaderAddVisible] = useState(false);
+  const [weekExpanded, setWeekExpanded] = useState(true);
 
   const [name, setName] = useState('');
   const [time, setTime] = useState('12:00');
@@ -354,13 +357,22 @@ export default function PlanScreen() {
 
         <View style={styles.sectionCard}>
           <View style={styles.sectionHeaderRow}>
-            <Text style={styles.sectionTitle}>Week schedule</Text>
-            <TouchableOpacity style={styles.dayAddBtn} onPress={() => setHeaderAddVisible(true)}>
-              <Text style={styles.dayAddText}>+ Day meal</Text>
+            <TouchableOpacity
+              style={styles.sectionTitleRow}
+              onPress={() => setWeekExpanded(v => !v)}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.sectionTitle}>Week schedule</Text>
+              <Text style={styles.chevron}>{weekExpanded ? '▾' : '▸'}</Text>
             </TouchableOpacity>
+            {weekExpanded && (
+              <TouchableOpacity style={styles.dayAddBtn} onPress={() => setHeaderAddVisible(true)}>
+                <Text style={styles.dayAddText}>+ Day meal</Text>
+              </TouchableOpacity>
+            )}
           </View>
 
-          {weekDates.map(iso => {
+          {weekExpanded && weekDates.map(iso => {
             const progress = getDayProgress(iso);
             return (
               <View key={iso} style={styles.dayCard}>
@@ -386,6 +398,23 @@ export default function PlanScreen() {
         </View>
 
         <PlannedIngredientsSection />
+
+        <View style={styles.bottomTilesRow}>
+          <ActionTile
+            icon="✨"
+            title="Build My Plan"
+            subtitle="Build a custom weekly plan tailored to your goals."
+            accent="green"
+            onPress={() => router.push('/plan/build')}
+          />
+          <ActionTile
+            icon="📋"
+            title="Find a Plan"
+            subtitle="Browse pre-made plans and your saved plans."
+            accent="purple"
+            onPress={() => router.push('/plan/find')}
+          />
+        </View>
       </ScrollView>
 
       <Modal visible={modalVisible} transparent animationType="slide" onRequestClose={() => setModalVisible(false)}>
@@ -497,7 +526,10 @@ const styles = StyleSheet.create({
   headerBtnText: { color: COLORS.text, fontSize: 12, fontWeight: '600' },
   sectionCard: { backgroundColor: COLORS.card, borderRadius: 12, padding: 12, marginBottom: 12 },
   sectionHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
+  sectionTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 },
   sectionTitle: { color: COLORS.text, fontWeight: '700', fontSize: 14 },
+  chevron: { color: COLORS.textSecondary, fontSize: 12 },
+  bottomTilesRow: { flexDirection: 'row', gap: 10, marginTop: 4 },
   muted: { color: COLORS.textSecondary, fontSize: 12 },
   yearNav: { color: COLORS.text, fontSize: 16, fontWeight: '600', paddingHorizontal: 4 },
   monthNavRow: { flexDirection: 'row', justifyContent: 'flex-end', gap: 12, marginBottom: 8 },

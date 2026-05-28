@@ -44,6 +44,12 @@ export default function RootLayout() {
           <Stack.Screen name="settings/feedback"                options={{ presentation: 'modal', headerShown: false, animation: 'slide_from_bottom' }} />
           <Stack.Screen name="settings/coming-soon"             options={{ presentation: 'modal', headerShown: false, animation: 'slide_from_bottom' }} />
 
+          {/* Plan sub-pages */}
+          <Stack.Screen name="plan/build"                       options={{ presentation: 'modal', headerShown: false, animation: 'slide_from_bottom' }} />
+          <Stack.Screen name="plan/find"                        options={{ presentation: 'modal', headerShown: false, animation: 'slide_from_bottom' }} />
+          <Stack.Screen name="plan/category/[type]"             options={{ presentation: 'modal', headerShown: false, animation: 'slide_from_bottom' }} />
+          <Stack.Screen name="plan/[id]"                        options={{ presentation: 'modal', headerShown: false, animation: 'slide_from_bottom' }} />
+
           <Stack.Screen name="modal"         options={{ presentation: 'modal', title: 'Modal' }} />
         </Stack>
         <UndoSnackbarHost />

@@ -61,6 +61,12 @@ export interface WeightLogEntry {
   weightKg: number;
 }
 
+export interface MealSlot {
+  id: string;
+  name: string;     // e.g. "Breakfast"
+  time: string;     // "HH:MM"
+}
+
 export interface UserProfile {
   // Identity
   name: string;                       // First name, used in AI greetings ("Hey Alex!")
@@ -85,6 +91,12 @@ export interface UserProfile {
   // Notifications
   mealRemindersEnabled: boolean;
   remindMinutesBefore: RemindMinutes;
+
+  // Meal slots (Build My Plan walks these in order; default to 5 slots).
+  mealSlots: MealSlot[];
+
+  // Name of the currently active plan (set when a plan is activated).
+  activePlanName?: string;
 }
 
 // ─── Recurrence & templates ───────────────────────────────────────────────────
@@ -184,6 +196,40 @@ export interface SavedRecipe {
   addedAt: string;               // ISO timestamp — drives "Recently Added" order
 }
 
+// ─── Meal plans ──────────────────────────────────────────────────────────────
+
+export type PlanCategory =
+  | 'Balanced'
+  | 'High Protein'
+  | 'Low Carb'
+  | 'High Fiber'
+  | 'Keto'
+  | 'Mediterranean';
+
+// One slot's meal in a plan day.
+export interface PlanDayMeal {
+  slotName: string;        // "Breakfast"
+  time: string;            // "HH:MM"
+  recipeId: string;        // refers to RecipeTemplate.id (or 'custom' for AI cards)
+  recipeName: string;
+}
+
+// A persisted plan (either premade or saved by the user).
+// `days` is exactly 7 entries indexed Monday=0 .. Sunday=6.
+export interface MealPlan {
+  id: string;
+  name: string;
+  description?: string;
+  disclaimer?: string;
+  category?: PlanCategory;
+  days: PlanDayMeal[][];
+  targets?: { calories: number; protein: number; carbs: number; fats: number };
+  savedAt: string;
+  source: 'premade' | 'user';
+}
+
+export type PlanTemplate = MealPlan;
+
 // ─── Zustand store shape ──────────────────────────────────────────────────────
 
 export interface AppStore {
@@ -197,6 +243,8 @@ export interface AppStore {
   recipes: RecipeTemplate[];          // premade catalog (seeded)
   savedRecipes: SavedRecipe[];        // user's saved + favourited recipes
   weightLog: WeightLogEntry[];        // chronological weight history (Profile + Progress)
+  plans: PlanTemplate[];              // premade plan catalog (seeded)
+  savedPlans: MealPlan[];             // user-snapshotted plans
 
   toggleMealStatus:       (date: string, mealId: string) => void;
   logWater:               (date: string, ml: number) => void;
@@ -243,4 +291,14 @@ export interface AppStore {
   addRecipeToToday: (recipe: Pick<SavedRecipe, 'name' | 'calories' | 'macros' | 'ingredients'> & { recipeId?: string; cookTimeMin?: number; steps?: string[]; category?: RecipeCategory; source?: SavedRecipeSource }) => MealEntry;
   // Add a recipe to a future date by creating a one-off MealTemplate.
   addRecipeToPlan: (recipe: Pick<SavedRecipe, 'name' | 'calories' | 'macros' | 'ingredients'> & { recipeId?: string; cookTimeMin?: number; steps?: string[]; category?: RecipeCategory; source?: SavedRecipeSource }, dateIso: string, time: string) => MealTemplate;
+
+  // ─── Meal plan actions ───────────────────────────────────────────────────
+  // Activates a plan: replaces templates[] with one MealTemplate per slot
+  // per day (weekly recurrence). Sets profile.activePlanName. Ingests any
+  // missing ingredients into Planned Ingredients.
+  activatePlan: (plan: MealPlan) => void;
+  // Snapshots current templates[] into a MealPlan and pushes onto savedPlans.
+  saveCurrentPlanAs: (name: string) => MealPlan;
+  renameSavedPlan: (id: string, name: string) => void;
+  removeSavedPlan: (id: string) => void;
 }
