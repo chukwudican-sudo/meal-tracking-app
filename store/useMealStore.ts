@@ -165,11 +165,11 @@ const DEFAULT_GOALS: UserGoals = {
 };
 
 const DEFAULT_MEAL_SLOTS: MealSlot[] = [
-  { id: 'slot-bf',  name: 'Breakfast',          time: '07:30' },
-  { id: 'slot-am',  name: 'Mid-morning Snack',  time: '10:30' },
-  { id: 'slot-ln',  name: 'Lunch',              time: '13:00' },
-  { id: 'slot-pm',  name: 'Afternoon Snack',    time: '15:30' },
-  { id: 'slot-dn',  name: 'Dinner',             time: '19:00' },
+  { id: 'slot-bf',  name: 'Breakfast',          time: '07:30', skipped: false },
+  { id: 'slot-am',  name: 'Mid-morning Snack',  time: '10:30', skipped: false },
+  { id: 'slot-ln',  name: 'Lunch',              time: '13:00', skipped: false },
+  { id: 'slot-pm',  name: 'Afternoon Snack',    time: '15:30', skipped: false },
+  { id: 'slot-dn',  name: 'Dinner',             time: '19:00', skipped: false },
 ];
 
 const DEFAULT_PROFILE: UserProfile = {
@@ -1295,7 +1295,8 @@ export const useMealStore = create<AppStore>()(
             mealRemindersEnabled: p.profile?.mealRemindersEnabled ?? DEFAULT_PROFILE.mealRemindersEnabled,
             remindMinutesBefore: (p.profile?.remindMinutesBefore  ?? DEFAULT_PROFILE.remindMinutesBefore),
             mealSlots:            (p.profile?.mealSlots && p.profile.mealSlots.length > 0)
-                                    ? p.profile.mealSlots
+                                    // Backfill skipped: false on slots persisted before that field existed.
+                                    ? p.profile.mealSlots.map(s => ({ ...s, skipped: s.skipped ?? false }))
                                     : DEFAULT_PROFILE.mealSlots,
             activePlanName:       p.profile?.activePlanName,
           },

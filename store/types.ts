@@ -65,6 +65,7 @@ export interface MealSlot {
   id: string;
   name: string;     // e.g. "Breakfast"
   time: string;     // "HH:MM"
+  skipped?: boolean; // if true, slot is excluded from Build My Plan and daily schedule
 }
 
 export interface UserProfile {

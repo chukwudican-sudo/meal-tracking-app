@@ -1,76 +1,10 @@
-import { useMemo } from 'react';
-import { Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 
 import { COLORS } from '@/constants/theme';
-import { useMealStore } from '@/store/useMealStore';
-import { useToastStore } from '@/store/useToastStore';
-import type { MealPlan, PlanCategory } from '@/store/types';
-import { PlanCard } from '@/components/plans/PlanCard';
 
-const CATEGORIES: PlanCategory[] = [
-  'Balanced',
-  'High Protein',
-  'Low Carb',
-  'High Fiber',
-  'Keto',
-  'Mediterranean',
-];
-
-export default function FindPlanScreen() {
-  const plans = useMealStore(s => s.plans);
-  const savedPlans = useMealStore(s => s.savedPlans);
-  const removeSavedPlan = useMealStore(s => s.removeSavedPlan);
-  const renameSavedPlan = useMealStore(s => s.renameSavedPlan);
-  const showToast = useToastStore(s => s.showToast);
-
-  const byCategory = useMemo(() => {
-    const map = new Map<PlanCategory, MealPlan[]>();
-    CATEGORIES.forEach(c => map.set(c, []));
-    plans.forEach(p => {
-      if (p.category && map.has(p.category)) {
-        map.get(p.category)!.push(p);
-      }
-    });
-    return map;
-  }, [plans]);
-
-  const handleSavedLongPress = (plan: MealPlan) => {
-    Alert.alert(
-      plan.name,
-      'What would you like to do with this saved plan?',
-      [
-        {
-          text: 'Rename',
-          onPress: () => {
-            Alert.prompt(
-              'Rename saved plan',
-              'Enter a new name for this plan.',
-              (next) => {
-                const trimmed = (next ?? '').trim();
-                if (!trimmed) return;
-                renameSavedPlan(plan.id, trimmed);
-                showToast('Plan renamed');
-              },
-              'plain-text',
-              plan.name,
-            );
-          },
-        },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: () => {
-            removeSavedPlan(plan.id);
-            showToast('Plan deleted');
-          },
-        },
-        { text: 'Cancel', style: 'cancel' },
-      ],
-    );
-  };
-
+export default function FindYourPlanScreen() {
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
       <View style={styles.header}>
@@ -81,68 +15,39 @@ export default function FindPlanScreen() {
         >
           <Text style={styles.headerBackText}>←</Text>
         </TouchableOpacity>
-        <Text style={styles.headerTitle} numberOfLines={1}>Find a Plan</Text>
+        <Text style={styles.headerTitle} numberOfLines={1}>Find Your Plan</Text>
         <View style={styles.headerBack} />
       </View>
 
       <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
-        <Text style={styles.intro}>
-          Browse pre-made plans by category, or pick one you saved earlier.
-        </Text>
+        <View style={styles.heroCard}>
+          <Text style={styles.heroEmoji}>🧭</Text>
+          <Text style={styles.heroTitle}>Coming soon</Text>
+          <Text style={styles.heroBody}>
+            Find Your Plan asks a few quick questions about your goals, schedule, and preferences,
+            then matches you to a plan from our pre-made library.
+          </Text>
+          <Text style={styles.heroBody}>
+            We&apos;re finishing the question flow now. In the meantime, you can browse plans by
+            category in <Text style={styles.heroEmphasis}>Explore Plans</Text> below the week
+            schedule, or build a fully custom plan tailored to your goals with{' '}
+            <Text style={styles.heroEmphasis}>Build My Plan</Text>.
+          </Text>
+        </View>
 
-        {CATEGORIES.map(cat => {
-          const list = byCategory.get(cat) ?? [];
-          if (list.length === 0) return null;
-          return (
-            <View key={cat} style={styles.section}>
-              <View style={styles.sectionHead}>
-                <Text style={styles.sectionTitle}>{cat}</Text>
-                <TouchableOpacity
-                  onPress={() => router.push({ pathname: '/plan/category/[type]', params: { type: cat } })}
-                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                >
-                  <Text style={styles.seeAll}>See all</Text>
-                </TouchableOpacity>
-              </View>
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.hScroll}
-              >
-                {list.map(p => (
-                  <PlanCard
-                    key={p.id}
-                    plan={p}
-                    onPress={() => router.push({ pathname: '/plan/[id]', params: { id: p.id } })}
-                  />
-                ))}
-              </ScrollView>
-            </View>
-          );
-        })}
-
-        <View style={styles.section}>
-          <View style={styles.sectionHead}>
-            <Text style={styles.sectionTitle}>Saved Plans</Text>
-          </View>
-          {savedPlans.length === 0 ? (
-            <View style={styles.emptyCard}>
-              <Text style={styles.emptyText}>
-                No saved plans yet. Saved plans show up here after you replace an active plan or save
-                your current plan in Build My Plan.
-              </Text>
-            </View>
-          ) : (
-            savedPlans.map(p => (
-              <PlanCard
-                key={p.id}
-                plan={p}
-                variant="row"
-                onPress={() => router.push({ pathname: '/plan/[id]', params: { id: p.id } })}
-                onLongPress={() => handleSavedLongPress(p)}
-              />
-            ))
-          )}
+        <View style={styles.bridgeCard}>
+          <Text style={styles.bridgeBadge}>Want to skip the wait?</Text>
+          <Text style={styles.bridgeTitle}>None of these fit?</Text>
+          <Text style={styles.bridgeBody}>
+            Build your own plan from scratch — pick the meals you actually want, slot by slot.
+          </Text>
+          <TouchableOpacity
+            style={styles.bridgeBtn}
+            onPress={() => router.replace('/plan/build')}
+            activeOpacity={0.85}
+          >
+            <Text style={styles.bridgeBtnText}>Try Build My Plan instead →</Text>
+          </TouchableOpacity>
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -164,28 +69,48 @@ const styles = StyleSheet.create({
   headerBackText: { color: COLORS.text, fontSize: 22, fontWeight: '600' },
   headerTitle: { flex: 1, color: COLORS.text, fontSize: 18, fontWeight: '700', textAlign: 'center' },
 
-  body: { padding: 16, paddingBottom: 40 },
+  body: { padding: 16, paddingBottom: 40, gap: 16 },
 
-  intro: { color: COLORS.textSecondary, fontSize: 13, marginBottom: 6, lineHeight: 19 },
-
-  section: { marginTop: 18 },
-  sectionHead: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 8,
-    paddingHorizontal: 4,
-  },
-  sectionTitle: { color: COLORS.text, fontSize: 16, fontWeight: '700' },
-  seeAll: { color: COLORS.green, fontSize: 13, fontWeight: '600' },
-  hScroll: { paddingHorizontal: 4, paddingBottom: 4 },
-
-  emptyCard: {
+  heroCard: {
     backgroundColor: COLORS.card,
-    borderRadius: 12,
-    padding: 14,
+    borderRadius: 16,
     borderWidth: 1,
     borderColor: COLORS.border,
+    padding: 20,
+    alignItems: 'center',
   },
-  emptyText: { color: COLORS.textSecondary, fontSize: 13, lineHeight: 19 },
+  heroEmoji: { fontSize: 44, marginBottom: 8 },
+  heroTitle: { color: COLORS.text, fontSize: 20, fontWeight: '700', marginBottom: 10 },
+  heroBody: {
+    color: COLORS.textSecondary,
+    fontSize: 13,
+    lineHeight: 19,
+    textAlign: 'center',
+    marginBottom: 12,
+  },
+  heroEmphasis: { color: COLORS.text, fontWeight: '700' },
+
+  bridgeCard: {
+    backgroundColor: COLORS.green + '14',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: COLORS.green,
+    padding: 20,
+  },
+  bridgeBadge: {
+    color: COLORS.green,
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 1,
+    marginBottom: 6,
+  },
+  bridgeTitle: { color: COLORS.text, fontSize: 17, fontWeight: '700', marginBottom: 6 },
+  bridgeBody: { color: COLORS.textSecondary, fontSize: 13, lineHeight: 19, marginBottom: 14 },
+  bridgeBtn: {
+    backgroundColor: COLORS.green,
+    borderRadius: 12,
+    paddingVertical: 13,
+    alignItems: 'center',
+  },
+  bridgeBtnText: { color: '#0E1A12', fontSize: 14, fontWeight: '700' },
 });

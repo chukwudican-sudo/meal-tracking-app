@@ -62,6 +62,16 @@ export default function PlanDetailScreen() {
     );
   }
 
+  // A plan is "current" when its name matches the user's activePlanName.
+  // Active plans show "View in Schedule" instead of "Start Plan".
+  const isCurrent = !!profile.activePlanName && plan.name === profile.activePlanName;
+
+  const handleViewInSchedule = () => {
+    // The Plan tab is the underlying screen; closing modals returns to it where
+    // the week schedule shows the active plan.
+    router.dismissAll();
+  };
+
   const handleStartPlan = () => {
     if (templates.length === 0) {
       activatePlan(plan);
@@ -183,9 +193,15 @@ export default function PlanDetailScreen() {
       </ScrollView>
 
       <View style={styles.footer}>
-        <TouchableOpacity style={styles.startBtn} onPress={handleStartPlan} activeOpacity={0.85}>
-          <Text style={styles.startBtnText}>Start Plan</Text>
-        </TouchableOpacity>
+        {isCurrent ? (
+          <TouchableOpacity style={styles.startBtn} onPress={handleViewInSchedule} activeOpacity={0.85}>
+            <Text style={styles.startBtnText}>View in Schedule</Text>
+          </TouchableOpacity>
+        ) : (
+          <TouchableOpacity style={styles.startBtn} onPress={handleStartPlan} activeOpacity={0.85}>
+            <Text style={styles.startBtnText}>Start Plan</Text>
+          </TouchableOpacity>
+        )}
       </View>
     </SafeAreaView>
   );

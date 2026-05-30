@@ -1,8 +1,9 @@
 import { router } from 'expo-router';
 import { useMemo, useState } from 'react';
-import { StyleSheet, Text, TextInput, View } from 'react-native';
+import { StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
 import { FormPage, FormSection, RadioRow } from '@/components/profile/FormPage';
+import { MealSlotModal } from '@/components/plans/MealSlotModal';
 import { COLORS } from '@/constants/theme';
 import {
   ACTIVITY_HINT,
@@ -54,6 +55,11 @@ export default function PersonalDetailsScreen() {
   );
   const [gender, setGender] = useState<Gender | undefined>(profile.gender);
   const [activity, setActivity] = useState<ActivityLevel | undefined>(profile.activityLevel);
+  const [slotsModalVisible, setSlotsModalVisible] = useState(false);
+
+  // Summary string for the meal slots row, e.g. "5 active · skipped: 0".
+  const activeSlotCount = profile.mealSlots.filter(s => !s.skipped).length;
+  const skippedSlotCount = profile.mealSlots.length - activeSlotCount;
 
   const canSave = useMemo(() => {
     return firstName.trim().length > 0;
@@ -158,6 +164,27 @@ export default function PersonalDetailsScreen() {
           </View>
         ))}
       </FormSection>
+
+      <FormSection label="MEAL SCHEDULE">
+        <TouchableOpacity
+          style={styles.slotsRow}
+          onPress={() => setSlotsModalVisible(true)}
+          activeOpacity={0.7}
+        >
+          <View style={{ flex: 1 }}>
+            <Text style={styles.slotsLabel}>Meal time slots</Text>
+            <Text style={styles.slotsHint}>
+              {activeSlotCount} active{skippedSlotCount > 0 ? ` · ${skippedSlotCount} skipped` : ''}
+            </Text>
+          </View>
+          <Text style={styles.slotsChevron}>›</Text>
+        </TouchableOpacity>
+      </FormSection>
+
+      <MealSlotModal
+        visible={slotsModalVisible}
+        onClose={() => setSlotsModalVisible(false)}
+      />
     </FormPage>
   );
 }
@@ -189,4 +216,14 @@ const styles = StyleSheet.create({
   },
   helper: { color: COLORS.textSecondary, fontSize: 11, marginTop: 6 },
   firstRow: {},
+
+  slotsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  slotsLabel: { color: COLORS.text, fontSize: 15, fontWeight: '500' },
+  slotsHint:  { color: COLORS.textSecondary, fontSize: 12, marginTop: 2 },
+  slotsChevron: { color: COLORS.textSecondary, fontSize: 22, paddingLeft: 8 },
 });
