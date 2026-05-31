@@ -24,6 +24,8 @@ export interface MealEntry {
   ingredients: Ingredient[];
   macros: Macros;
   status: MealStatus;
+  templateId?: string;  // id of the MealTemplate that generated this entry (planned meals only)
+  isAdHoc?: boolean;    // true if added outside the original plan structure (permanent flag)
 }
 
 export interface DailyLog {
@@ -251,6 +253,10 @@ export interface AppStore {
   logWater:               (date: string, ml: number) => void;
   addMealToDay:           (date: string, entry: MealEntry) => void;
   removeMealFromDay:      (date: string, mealId: string) => void;
+  // Recurrence-aware removal used by the Day Detail page X button.
+  // 'this' = single occurrence; 'future' = end the template at this date;
+  // 'all' = drop the template entirely.
+  removeDayMealWithScope: (date: string, mealId: string, scope: 'this' | 'future' | 'all') => void;
   restoreMealToDay:       (date: string, entry: MealEntry, index: number) => void;
   editMealOnDay:          (date: string, entry: MealEntry) => void;
   markPastDueMealsAsMissed:(date?: string) => void;

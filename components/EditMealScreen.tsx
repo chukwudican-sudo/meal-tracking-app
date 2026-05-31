@@ -392,6 +392,10 @@ export function EditMealScreen({
         ingredients: cleanIngredients,
         macros,
         status: 'pending',
+        templateId: tplId,
+        // User-initiated creation through Add Meal is ad-hoc relative to the
+        // original plan, even when it carries recurrence. Stays permanent.
+        isAdHoc: true,
       };
       addMealToDay(date, newEntry);
     } else {
@@ -405,6 +409,7 @@ export function EditMealScreen({
         ingredients: cleanIngredients,
         macros,
         status: 'pending',
+        isAdHoc: true,
       };
       addMealToDay(date, newEntry);
     }

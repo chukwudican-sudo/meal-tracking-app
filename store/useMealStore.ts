@@ -481,6 +481,43 @@ export const useMealStore = create<AppStore>()(
         }
       },
 
+      // Recurrence-aware removal for the Day Detail page X button.
+      // Mirrors the Google Calendar 3-option semantic.
+      removeDayMealWithScope: (date, mealId, scope) => {
+        const before = get();
+        const meal = before.logs[date]?.meals.find(m => m.id === mealId);
+        const templateId = meal?.templateId;
+
+        // Always drop the entry from this day.
+        before.removeMealFromDay(date, mealId);
+
+        if (!templateId) return;
+
+        if (scope === 'all') {
+          get().removeTemplate(templateId);
+          return;
+        }
+
+        if (scope === 'future') {
+          // End the recurrence the day before `date`. Once-templates are no-ops here
+          // since "this and future" reduces to "this only" for a single occurrence.
+          const prev = new Date(date + 'T00:00:00');
+          prev.setDate(prev.getDate() - 1);
+          const untilDate = toIsoDate(prev);
+          set(state => ({
+            templates: state.templates.map(t => {
+              if (t.id !== templateId) return t;
+              if (t.recurrence.type === 'once') return t;
+              return {
+                ...t,
+                recurrence: { ...t.recurrence, untilDate },
+              } as MealTemplate;
+            }),
+          }));
+        }
+        // scope === 'this' is already handled by the removeMealFromDay call above.
+      },
+
       restoreMealToDay: (date, entry, index) => {
         set(state => {
           const log = state.logs[date] ?? { date, meals: [], waterMl: 0 };
@@ -509,7 +546,16 @@ export const useMealStore = create<AppStore>()(
               ...state.logs,
               [date]: {
                 ...log,
-                meals: log.meals.map(m => m.id === entry.id ? entry : m),
+                meals: log.meals.map(m => {
+                  if (m.id !== entry.id) return m;
+                  // Preserve the permanent ad-hoc flag and templateId link from
+                  // the existing entry — callers may not include them in `entry`.
+                  return {
+                    ...entry,
+                    isAdHoc:    entry.isAdHoc    ?? m.isAdHoc,
+                    templateId: entry.templateId ?? m.templateId,
+                  };
+                }),
               },
             },
           };
@@ -592,6 +638,7 @@ export const useMealStore = create<AppStore>()(
             ingredients: t.ingredients,
             macros:      t.macros,
             status:      'pending',
+            templateId:  t.id,
           }));
           return {
             logs: {

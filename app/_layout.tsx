@@ -49,6 +49,7 @@ export default function RootLayout() {
           <Stack.Screen name="plan/find"                        options={{ presentation: 'modal', headerShown: false, animation: 'slide_from_bottom' }} />
           <Stack.Screen name="plan/category/[type]"             options={{ presentation: 'modal', headerShown: false, animation: 'slide_from_bottom' }} />
           <Stack.Screen name="plan/[id]"                        options={{ presentation: 'modal', headerShown: false, animation: 'slide_from_bottom' }} />
+          <Stack.Screen name="plan/day/[date]"                  options={{ presentation: 'modal', headerShown: false, animation: 'slide_from_bottom' }} />
 
           <Stack.Screen name="modal"         options={{ presentation: 'modal', title: 'Modal' }} />
         </Stack>

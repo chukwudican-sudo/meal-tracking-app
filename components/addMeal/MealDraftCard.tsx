@@ -129,6 +129,9 @@ export function MealDraftCard({
       ingredients: [],
       macros: draft.macros,
       status: 'pending',
+      templateId: id,
+      // Created through Add Meal flow — ad-hoc relative to the original plan.
+      isAdHoc: true,
     };
     useMealStore.getState().addMealToDay(date, entry);
 

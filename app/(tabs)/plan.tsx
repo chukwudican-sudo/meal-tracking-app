@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useState } from 'react';
 import {
   Pressable,
   ScrollView,
@@ -12,7 +12,6 @@ import { router } from 'expo-router';
 
 import { COLORS } from '@/constants/theme';
 import { toIsoDate, useMealStore } from '@/store/useMealStore';
-import { DayDetailModal } from '@/components/DayDetailModal';
 import { CartIcon } from '@/components/CartIcon';
 import { ProfileIcon } from '@/components/ProfileIcon';
 import { PlannedIngredientsSection } from '@/components/grocery/PlannedIngredientsSection';
@@ -26,23 +25,8 @@ function toMidnight(iso: string): Date {
   return new Date(iso + 'T00:00:00');
 }
 
-function shiftIso(iso: string, offsetDays: number): string {
-  const d = toMidnight(iso);
-  d.setDate(d.getDate() + offsetDays);
-  return toIsoDate(d);
-}
-
-function mondayOfWeek(iso: string): string {
-  const d = toMidnight(iso);
-  const dow = d.getDay();
-  const offset = dow === 0 ? -6 : 1 - dow;
-  d.setDate(d.getDate() + offset);
-  return toIsoDate(d);
-}
-
 // Returns 6 rows × 7 cols (Mon–Sun) for the month containing anchorIso.
-// Each row also carries its Monday ISO so we can match it to the selected week.
-function monthGridRows(anchorIso: string): { weekStartIso: string; cells: (string | null)[] }[] {
+function monthGridRows(anchorIso: string): (string | null)[][] {
   const d = toMidnight(anchorIso);
   d.setDate(1);
   const startDow = d.getDay();
@@ -53,12 +37,11 @@ function monthGridRows(anchorIso: string): { weekStartIso: string; cells: (strin
   return Array.from({ length: 6 }, (_, row) => {
     const monday = new Date(start);
     monday.setDate(start.getDate() + row * 7);
-    const cells: (string | null)[] = Array.from({ length: 7 }, (__, col) => {
+    return Array.from({ length: 7 }, (__, col) => {
       const cell = new Date(monday);
       cell.setDate(monday.getDate() + col);
       return cell.getMonth() === d.getMonth() ? toIsoDate(cell) : null;
     });
-    return { weekStartIso: toIsoDate(monday), cells };
   });
 }
 
@@ -76,19 +59,16 @@ export default function PlanScreen() {
   const todayIso = toIsoDate(new Date());
   const [selectedDate, setSelectedDate] = useState(todayIso);
   const [miniMonthAnchor, setMiniMonthAnchor] = useState(todayIso);
-  const [dayDetailDate, setDayDetailDate] = useState<string | null>(null);
-  const [weekExpanded, setWeekExpanded] = useState(true);
 
-  const weekStartIso = mondayOfWeek(selectedDate);
-  const weekDates = Array.from({ length: 7 }, (_, i) => shiftIso(weekStartIso, i));
-
-  const getDayProgress = useCallback((iso: string) => {
-    const dayMeals = logs[iso]?.meals ?? [];
-    const planned = dayMeals.length;
-    const completed = dayMeals.filter(m => m.status === 'completed').length;
-    const pct = planned === 0 ? 0 : Math.round((completed / planned) * 100);
-    return { planned, completed, pct };
-  }, [logs]);
+  // Day Detail button summary: derive directly from today's logs so the
+  // preview reflects every meal (planned + ad-hoc) on the selected day.
+  const dayMeals = logs[selectedDate]?.meals ?? [];
+  const dayCal = dayMeals.reduce((s, m) => s + (m.calories ?? 0), 0);
+  const dayLabel = toMidnight(selectedDate).toLocaleDateString('en-US', {
+    weekday: 'long',
+    month: 'short',
+    day: 'numeric',
+  });
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
@@ -123,7 +103,9 @@ export default function PlanScreen() {
         <View style={styles.sectionCard}>
           <View style={styles.sectionHeaderRow}>
             <Text style={styles.sectionTitle}>Mini month</Text>
-            <Text style={styles.muted}>{toMidnight(miniMonthAnchor).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</Text>
+            <Text style={styles.muted}>
+              {toMidnight(miniMonthAnchor).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
+            </Text>
           </View>
           <View style={styles.monthNavRow}>
             <TouchableOpacity onPress={() => setMiniMonthAnchor(shiftMonth(miniMonthAnchor, -1))}>
@@ -139,82 +121,48 @@ export default function PlanScreen() {
             ))}
           </View>
           <View style={styles.monthGrid}>
-            {monthGridRows(miniMonthAnchor).map((row, rowIdx) => {
-              const rowIsSelectedWeek = row.weekStartIso === weekStartIso;
-              return (
-                <View key={rowIdx} style={[styles.miniRow, rowIsSelectedWeek && styles.miniRowWeek]}>
-                  {row.cells.map((iso, colIdx) => (
-                    <Pressable
-                      key={`${iso ?? 'nil'}-${rowIdx}-${colIdx}`}
-                      onPress={() => {
-                        if (!iso) return;
-                        setSelectedDate(iso);
-                      }}
-                      style={[
-                        styles.monthCell,
-                        iso === selectedDate && styles.monthCellSelected,
-                      ]}
-                    >
-                      <Text style={[
-                        styles.monthCellText,
-                        !iso && styles.monthCellHiddenText,
-                        iso === selectedDate && styles.monthCellTextSelected,
-                      ]}>
-                        {iso ? toMidnight(iso).getDate() : ''}
-                      </Text>
-                    </Pressable>
-                  ))}
-                </View>
-              );
-            })}
+            {monthGridRows(miniMonthAnchor).map((row, rowIdx) => (
+              <View key={rowIdx} style={styles.miniRow}>
+                {row.map((iso, colIdx) => (
+                  <Pressable
+                    key={`${iso ?? 'nil'}-${rowIdx}-${colIdx}`}
+                    onPress={() => {
+                      if (!iso) return;
+                      setSelectedDate(iso);
+                    }}
+                    style={[
+                      styles.monthCell,
+                      iso === selectedDate && styles.monthCellSelected,
+                    ]}
+                  >
+                    <Text style={[
+                      styles.monthCellText,
+                      !iso && styles.monthCellHiddenText,
+                      iso === selectedDate && styles.monthCellTextSelected,
+                    ]}>
+                      {iso ? toMidnight(iso).getDate() : ''}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+            ))}
           </View>
         </View>
 
-        {/* Week schedule — collapsible, mirrors PlannedIngredientsSection layout. */}
-        <View style={styles.weekWrap}>
-          <Pressable
-            style={styles.weekHeaderRow}
-            onPress={() => setWeekExpanded(v => !v)}
-            hitSlop={6}
-          >
-            <Text style={styles.weekTitle}>Week schedule</Text>
-            <Text style={styles.weekChevron}>{weekExpanded ? '▾' : '▸'}</Text>
-          </Pressable>
-
-          {!weekExpanded && (
-            <Text style={styles.collapsedHint}>
-              {weekDates.length} days in current week
+        {/* Day Detail button — opens the full day detail page for selectedDate. */}
+        <TouchableOpacity
+          style={styles.dayDetailBtn}
+          onPress={() => router.push({ pathname: '/plan/day/[date]', params: { date: selectedDate } })}
+          activeOpacity={0.85}
+        >
+          <View style={{ flex: 1 }}>
+            <Text style={styles.dayDetailLabel} numberOfLines={1}>{dayLabel}</Text>
+            <Text style={styles.dayDetailMeta}>
+              {dayMeals.length} {dayMeals.length === 1 ? 'meal' : 'meals'} · {dayCal.toLocaleString()} cal
             </Text>
-          )}
-
-          {weekExpanded && (
-            <View style={styles.weekBody}>
-              {weekDates.map(iso => {
-                const progress = getDayProgress(iso);
-                return (
-                  <View key={iso} style={styles.dayCard}>
-                    <TouchableOpacity
-                      onPress={() => {
-                        setSelectedDate(iso);
-                        setDayDetailDate(iso);
-                      }}
-                      style={styles.dayHeader}
-                      activeOpacity={0.8}
-                    >
-                      <View>
-                        <Text style={styles.dayTitle}>
-                          {toMidnight(iso).toLocaleDateString('en-US', { weekday: 'short' })} {toMidnight(iso).getDate()}
-                        </Text>
-                        <Text style={styles.dayMeta}>{progress.planned} planned</Text>
-                      </View>
-                      <Text style={styles.dayPct}>{progress.pct}%</Text>
-                    </TouchableOpacity>
-                  </View>
-                );
-              })}
-            </View>
-          )}
-        </View>
+          </View>
+          <Text style={styles.dayDetailChevron}>›</Text>
+        </TouchableOpacity>
 
         <PlannedIngredientsSection />
 
@@ -222,8 +170,6 @@ export default function PlanScreen() {
 
         <SavedPlansSection />
       </ScrollView>
-
-      <DayDetailModal date={dayDetailDate} onClose={() => setDayDetailDate(null)} />
     </SafeAreaView>
   );
 }
@@ -248,35 +194,24 @@ const styles = StyleSheet.create({
   miniWeekLabels: { flexDirection: 'row', marginBottom: 4 },
   miniWeekLabel: { flex: 1, color: COLORS.textSecondary, fontSize: 10, textAlign: 'center' },
   monthGrid: { gap: 2 },
-  miniRow: { flexDirection: 'row', borderRadius: 13, overflow: 'hidden' },
-  miniRowWeek: { backgroundColor: COLORS.green + '20' },
+  miniRow: { flexDirection: 'row' },
   monthCell: { flex: 1, height: 26, alignItems: 'center', justifyContent: 'center', borderRadius: 13 },
   monthCellSelected: { backgroundColor: COLORS.green + '44' },
   monthCellHiddenText: { color: 'transparent' },
   monthCellText: { color: COLORS.textSecondary, fontSize: 12 },
   monthCellTextSelected: { color: COLORS.green, fontWeight: '700' },
 
-  // Week schedule — matches PlannedIngredientsSection wrapper exactly
-  weekWrap: {
+  // Day Detail button
+  dayDetailBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
     backgroundColor: COLORS.card,
-    borderRadius: 16,
-    padding: 16,
+    borderRadius: 14,
     borderWidth: 1,
     borderColor: COLORS.border,
+    padding: 14,
   },
-  weekHeaderRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  weekTitle: { color: COLORS.text, fontSize: 16, fontWeight: '700', flex: 1 },
-  weekChevron: { color: COLORS.textSecondary, fontSize: 16, paddingHorizontal: 6 },
-  collapsedHint: {
-    color: COLORS.textSecondary,
-    fontSize: 12,
-    marginTop: 6,
-    fontStyle: 'italic',
-  },
-  weekBody: { marginTop: 10 },
-  dayCard: { borderWidth: 1, borderColor: COLORS.border, borderRadius: 10, marginBottom: 8, overflow: 'hidden' },
-  dayHeader: { padding: 10, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  dayTitle: { color: COLORS.text, fontWeight: '600', fontSize: 13 },
-  dayMeta: { color: COLORS.textSecondary, fontSize: 11, marginTop: 2 },
-  dayPct: { color: COLORS.green, fontWeight: '700', fontSize: 13 },
+  dayDetailLabel: { color: COLORS.text, fontSize: 15, fontWeight: '700' },
+  dayDetailMeta: { color: COLORS.textSecondary, fontSize: 12, marginTop: 2 },
+  dayDetailChevron: { color: COLORS.textSecondary, fontSize: 22, paddingLeft: 8 },
 });

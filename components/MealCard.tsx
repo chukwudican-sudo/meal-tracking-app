@@ -64,6 +64,11 @@ export function MealCard({ entry, onToggle, onRemove, onEdit }: MealCardProps) {
                 <Text style={styles.missedText}>missed</Text>
               </View>
             )}
+            {entry.isAdHoc && (
+              <View style={styles.addedBadge}>
+                <Text style={styles.addedText}>Added</Text>
+              </View>
+            )}
           </View>
         </View>
 
@@ -186,6 +191,18 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '600',
     color: COLORS.red,
+  },
+  addedBadge: {
+    backgroundColor: COLORS.elevated,
+    borderRadius: 999,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  addedText: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: COLORS.textMuted,
+    letterSpacing: 0.4,
   },
   calories: {
     fontSize: 14,
