@@ -1318,6 +1318,19 @@ export const useMealStore = create<AppStore>()(
           savedPlans: state.savedPlans.filter(p => p.id !== id),
         }));
       },
+
+      updateSavedPlan: (id, plan) => {
+        // Replace the matching saved plan in-place. We only update `savedPlans`
+        // here — the active templates (used for week resolution) are untouched
+        // since the spec only requires the saved plan record to reflect the
+        // new structure for now. If a future change should also rewrite the
+        // user's day-by-day templates, it can be layered on top of this.
+        set(state => ({
+          savedPlans: state.savedPlans.map(p =>
+            p.id === id ? { ...plan, id, source: p.source } : p,
+          ),
+        }));
+      },
     }),
     {
       name:    'meal-app-store-v2',

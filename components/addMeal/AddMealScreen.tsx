@@ -7,7 +7,7 @@ import {
   StyleSheet,
   Pressable,
 } from 'react-native';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { COLORS } from '@/constants/theme';
 import { APP_LOGO, APP_NAME } from '@/constants/app';
@@ -112,9 +112,26 @@ export function AddMealScreen({ visible, date, onClose }: Props) {
           {activeTab === 'scan' && (
             <ScanTab
               context={context}
-              onDraftReady={(draft, src) =>
-                setPending({ draft, source: 'scan', imageUri: src.photoUri })
-              }
+              onDraftReady={(draft, src) => {
+                // ScanTab's "Log" path bypasses the draft card entirely:
+                // it logs the meal directly to today and closes the screen.
+                if (src.logImmediately) {
+                  const entryId = `${date}-scan-${Date.now()}`;
+                  useMealStore.getState().addMealToDay(date, {
+                    id: entryId,
+                    name: draft.name,
+                    time: draft.time,
+                    calories: draft.calories,
+                    ingredients: [],
+                    macros: draft.macros,
+                    status: 'pending',
+                    isAdHoc: true,
+                  });
+                  handleClose();
+                  return;
+                }
+                setPending({ draft, source: 'scan', imageUri: src.photoUri });
+              }}
             />
           )}
           {activeTab === 'ai' && (

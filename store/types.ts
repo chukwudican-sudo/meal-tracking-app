@@ -308,4 +308,6 @@ export interface AppStore {
   saveCurrentPlanAs: (name: string) => MealPlan;
   renameSavedPlan: (id: string, name: string) => void;
   removeSavedPlan: (id: string) => void;
+  /** Replace a saved plan in-place, e.g. after Customize Plan edits. */
+  updateSavedPlan: (id: string, plan: MealPlan) => void;
 }

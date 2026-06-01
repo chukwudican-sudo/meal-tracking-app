@@ -1,61 +1,40 @@
+import { useState } from 'react';
 import { Tabs } from 'expo-router';
-import { Text } from 'react-native';
 
-import { COLORS } from '@/constants/theme';
+import { CustomTabBar } from '@/components/CustomTabBar';
+import { AddMealScreen } from '@/components/addMeal/AddMealScreen';
+import { toIsoDate } from '@/store/useMealStore';
 
 export default function TabLayout() {
-  return (
-    <Tabs
-      screenOptions={{
-        headerShown: false,
-        tabBarActiveTintColor:   COLORS.green,
-        tabBarInactiveTintColor: COLORS.textSecondary,
-        tabBarStyle: {
-          backgroundColor: COLORS.card,
-          borderTopColor:  COLORS.border,
-          borderTopWidth:  1,
-          paddingBottom:   4,
-          height:          60,
-        },
-        tabBarLabelStyle: {
-          fontSize:   11,
-          fontWeight: '600',
-        },
-      }}
-    >
-      <Tabs.Screen
-        name="index"
-        options={{
-          title: 'Today',
-          tabBarIcon: ({ color }) => <TabIcon label="🏠" color={color} />,
-        }}
-      />
-      <Tabs.Screen
-        name="plan"
-        options={{
-          title: 'Plan',
-          tabBarIcon: ({ color }) => <TabIcon label="📋" color={color} />,
-        }}
-      />
-      <Tabs.Screen
-        name="progress"
-        options={{
-          title: 'Progress',
-          tabBarIcon: ({ color }) => <TabIcon label="📈" color={color} />,
-        }}
-      />
-      <Tabs.Screen
-        name="recipes"
-        options={{
-          title: 'Recipes',
-          tabBarIcon: ({ color }) => <TabIcon label="🍳" color={color} />,
-        }}
-      />
-    </Tabs>
-  );
-}
+  // Lifted here so the + button on the custom tab bar can open AddMealScreen
+  // from any tab and the main bar disappears underneath it.
+  const [addMealVisible, setAddMealVisible] = useState(false);
 
-// Minimal emoji icon — replace with vector icons in a later phase
-function TabIcon({ label, color }: { label: string; color: string }) {
-  return <Text style={{ fontSize: 20, opacity: color === COLORS.green ? 1 : 0.5 }}>{label}</Text>;
+  // The + button is "Add to today" by spec — pre-fill today's ISO date.
+  const todayIso = toIsoDate(new Date());
+
+  return (
+    <>
+      <Tabs
+        initialRouteName="index"
+        screenOptions={{ headerShown: false }}
+        tabBar={(props) => (
+          <CustomTabBar {...props} onPlusPress={() => setAddMealVisible(true)} />
+        )}
+      >
+        {/* Tabs are declared by file presence; visual order is controlled by
+            CustomTabBar.TAB_ORDER, not by the order of these declarations. */}
+        <Tabs.Screen name="index"    options={{ title: 'Home' }} />
+        <Tabs.Screen name="plan"     options={{ title: 'Plan' }} />
+        <Tabs.Screen name="progress" options={{ title: 'Progress' }} />
+        <Tabs.Screen name="recipes"  options={{ title: 'Recipes' }} />
+      </Tabs>
+
+      <AddMealScreen
+        visible={addMealVisible}
+        date={todayIso}
+        onClose={() => setAddMealVisible(false)}
+      />
+    </>
+  );
 }

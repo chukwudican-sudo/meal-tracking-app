@@ -41,9 +41,7 @@ type Tab = 'edit' | 'ai';
 
 type RecType = 'daily' | 'weekly' | 'every';
 type EveryUnit = 'days' | 'weeks';
-type OpenPicker = 'time' | 'duration' | null;
-
-const DURATION_PRESETS = [15, 30, 45, 60, 90, 120];
+type OpenPicker = 'time' | null;
 
 interface IngredientForm {
   id: string;
@@ -78,13 +76,6 @@ function formatTimeLabel(d: Date): string {
   h = h % 12;
   if (h === 0) h = 12;
   return `${h}:${m} ${period}`;
-}
-
-function formatDurationLabel(mins: number): string {
-  if (mins < 60) return `${mins} min`;
-  const h = Math.floor(mins / 60);
-  const m = mins % 60;
-  return m === 0 ? `${h}h` : `${h}h ${m}m`;
 }
 
 function formatDayPill(iso: string): string {
@@ -252,7 +243,6 @@ export function EditMealScreen({
   const [tab, setTab] = useState<Tab>('edit');
   const [name, setName] = useState('');
   const [time, setTime] = useState<Date>(new Date());
-  const [duration, setDuration] = useState<number>(30);
   const [openPicker, setOpenPicker] = useState<OpenPicker>(null);
   const [calories, setCalories] = useState('');
   const [protein, setProtein] = useState('');
@@ -276,7 +266,6 @@ export function EditMealScreen({
       setTab('edit');
       setName('');
       setTime(new Date());
-      setDuration(30);
       setOpenPicker(null);
       setCalories('');
       setProtein('');
@@ -296,7 +285,6 @@ export function EditMealScreen({
     setTab('edit');
     setName(entry.name);
     setTime(parseHHMMToDate(entry.time));
-    setDuration(entry.duration ?? 30);
     setOpenPicker(null);
     setCalories(String(entry.calories));
     setProtein(String(entry.macros.protein));
@@ -340,7 +328,6 @@ export function EditMealScreen({
       id: entry.id,
       name: name.trim() || entry.name,
       time: formatDateToHHMM(time),
-      duration,
       calories: toIntSafe(calories),
       ingredients: formsToIngredients(ingredients, entry.id),
       macros: {
@@ -376,7 +363,6 @@ export function EditMealScreen({
         id: tplId,
         name: trimmedName,
         time: timeStr,
-        duration,
         calories: cals,
         ingredients: cleanIngredients,
         macros,
@@ -387,7 +373,6 @@ export function EditMealScreen({
         id: entryId,
         name: trimmedName,
         time: timeStr,
-        duration,
         calories: cals,
         ingredients: cleanIngredients,
         macros,
@@ -404,7 +389,6 @@ export function EditMealScreen({
         id: entryId,
         name: trimmedName,
         time: timeStr,
-        duration,
         calories: cals,
         ingredients: cleanIngredients,
         macros,
@@ -530,7 +514,6 @@ export function EditMealScreen({
         id: oneOffId,
         name: next.name,
         time: next.time,
-        duration: next.duration,
         calories: next.calories,
         ingredients: next.ingredients,
         macros: next.macros,
@@ -575,7 +558,6 @@ export function EditMealScreen({
         id: newId,
         name: next.name,
         time: next.time,
-        duration: next.duration,
         calories: next.calories,
         ingredients: next.ingredients,
         macros: next.macros,
@@ -612,7 +594,6 @@ export function EditMealScreen({
       ...previousTemplate,
       name: next.name,
       time: next.time,
-      duration: next.duration,
       calories: next.calories,
       ingredients: next.ingredients,
       macros: next.macros,
@@ -630,7 +611,6 @@ export function EditMealScreen({
             id: m.id,
             name: next.name,
             time: next.time,
-            duration: next.duration,
             calories: next.calories,
             ingredients: next.ingredients,
             macros: next.macros,
@@ -720,7 +700,7 @@ export function EditMealScreen({
                   placeholderTextColor={COLORS.textMuted}
                 />
 
-                {/* When — Date | Time | Duration pills (Google Calendar pattern) */}
+                {/* When — Date | Time pills (Google Calendar pattern) */}
                 <Label text="When" />
                 <View style={styles.whenRow}>
                   <View style={styles.whenPillStatic}>
@@ -742,24 +722,9 @@ export function EditMealScreen({
                       {formatTimeLabel(time)}
                     </Text>
                   </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.whenPill, openPicker === 'duration' && styles.whenPillActive]}
-                    onPress={() => setOpenPicker(openPicker === 'duration' ? null : 'duration')}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={styles.whenPillLabel}>Duration</Text>
-                    <Text
-                      style={[
-                        styles.whenPillValue,
-                        openPicker === 'duration' && styles.whenPillValueActive,
-                      ]}
-                    >
-                      {formatDurationLabel(duration)}
-                    </Text>
-                  </TouchableOpacity>
                 </View>
 
-                {/* Inline expansion area (only one open at a time) */}
+                {/* Inline expansion area */}
                 {openPicker === 'time' && (
                   Platform.OS === 'ios' ? (
                     <View style={styles.timeWrap}>
@@ -785,27 +750,6 @@ export function EditMealScreen({
                       />
                     </View>
                   )
-                )}
-
-                {openPicker === 'duration' && (
-                  <View style={styles.durationWrap}>
-                    {DURATION_PRESETS.map(mins => (
-                      <TouchableOpacity
-                        key={mins}
-                        style={[styles.durationChip, duration === mins && styles.durationChipActive]}
-                        onPress={() => setDuration(mins)}
-                      >
-                        <Text
-                          style={[
-                            styles.durationChipText,
-                            duration === mins && styles.durationChipTextActive,
-                          ]}
-                        >
-                          {formatDurationLabel(mins)}
-                        </Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
                 )}
 
                 <Label text="Calories" />
@@ -1196,28 +1140,6 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   timePicker: { width: '100%' },
-
-  durationWrap: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginTop: 8,
-    marginBottom: 4,
-  },
-  durationChip: {
-    backgroundColor: COLORS.card,
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-  },
-  durationChipActive: {
-    backgroundColor: COLORS.green,
-    borderColor: COLORS.green,
-  },
-  durationChipText: { color: COLORS.text, fontSize: 13, fontWeight: '600' },
-  durationChipTextActive: { color: '#0E1A12', fontWeight: '700' },
 
   row3: { flexDirection: 'row', gap: 8 },
   col: { flex: 1 },

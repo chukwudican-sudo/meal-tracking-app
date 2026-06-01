@@ -18,7 +18,6 @@ import { ProfileIcon } from '@/components/ProfileIcon';
 import { MealCard } from '@/components/MealCard';
 import { WeekStrip } from '@/components/WeekStrip';
 import { EditMealScreen } from '@/components/EditMealScreen';
-import { AddMealScreen } from '@/components/addMeal/AddMealScreen';
 import type { MealEntry } from '@/store/types';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -53,7 +52,6 @@ const ML_PER_CUP      = 250;
 export default function HomeScreen() {
   const [viewingDate, setViewingDate] = useState(toIsoDate(new Date()));
   const [editingEntry, setEditingEntry] = useState<MealEntry | null>(null);
-  const [addingVisible, setAddingVisible] = useState(false);
 
   const {
     logs,
@@ -150,7 +148,7 @@ export default function HomeScreen() {
 
         {/* ── Header ──────────────────────────────────────────────────── */}
         <View style={styles.header}>
-          <Text style={styles.appTitle}>MEAL PLAN</Text>
+          <Text style={styles.appTitle}>HOME</Text>
           <View style={styles.headerRight}>
             {streak > 0 && (
               <View style={styles.streakBadge}>
@@ -261,13 +259,6 @@ export default function HomeScreen() {
         {/* ── Meals Section ───────────────────────────────────────────── */}
         <View style={styles.mealsSectionHeader}>
           <Text style={styles.mealsSectionTitle}>MEALS</Text>
-          <TouchableOpacity
-            style={styles.addBtn}
-            activeOpacity={0.7}
-            onPress={() => setAddingVisible(true)}
-          >
-            <Text style={styles.addBtnText}>+ Add meal</Text>
-          </TouchableOpacity>
         </View>
 
         {/* Meal list */}
@@ -275,7 +266,7 @@ export default function HomeScreen() {
           <View style={styles.emptyState}>
             <Text style={styles.emptyIcon}>🍽️</Text>
             <Text style={styles.emptyText}>No meals for this day</Text>
-            <Text style={styles.emptySubtext}>Tap + Add meal to get started</Text>
+            <Text style={styles.emptySubtext}>Tap the + button below to add one</Text>
           </View>
         ) : (
           sortedMeals.map(entry => (
@@ -295,12 +286,6 @@ export default function HomeScreen() {
         date={viewingDate}
         entry={editingEntry}
         onClose={() => setEditingEntry(null)}
-      />
-
-      <AddMealScreen
-        visible={addingVisible}
-        date={viewingDate}
-        onClose={() => setAddingVisible(false)}
       />
     </SafeAreaView>
   );
@@ -522,19 +507,6 @@ const styles = StyleSheet.create({
     color: COLORS.textSecondary,
     letterSpacing: 1,
   },
-  addBtn: {
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    borderRadius: 8,
-    paddingHorizontal: 14,
-    paddingVertical: 7,
-  },
-  addBtnText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: COLORS.text,
-  },
-
   // ── Empty state ────────────────────────────────────────────────────────────────
   emptyState: {
     alignItems: 'center',

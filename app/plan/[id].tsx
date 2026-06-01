@@ -1,11 +1,12 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 
 import { COLORS } from '@/constants/theme';
-import { useMealStore } from '@/store/useMealStore';
+import { useMealStore, toIsoDate } from '@/store/useMealStore';
 import { useToastStore } from '@/store/useToastStore';
+import { useUndoStore } from '@/store/useUndoStore';
 import type { MealPlan, RecipeTemplate } from '@/store/types';
 
 const WEEKDAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -21,12 +22,29 @@ export default function PlanDetailScreen() {
   const profile = useMealStore(s => s.profile);
   const activatePlan = useMealStore(s => s.activatePlan);
   const saveCurrentPlanAs = useMealStore(s => s.saveCurrentPlanAs);
+  const updateSavedPlan = useMealStore(s => s.updateSavedPlan);
   const showToast = useToastStore(s => s.showToast);
+  const showUndo = useUndoStore(s => s.showUndo);
 
-  const plan: MealPlan | undefined = useMemo(
+  const storedPlan: MealPlan | undefined = useMemo(
     () => plans.find(p => p.id === id) ?? savedPlans.find(p => p.id === id),
     [plans, savedPlans, id],
   );
+
+  // ── Customize Plan state ────────────────────────────────────────────
+  // We deep-clone the stored plan when entering customize mode so the user
+  // can freely edit until they hit Save (commits via updateSavedPlan) or
+  // discard via the back arrow.
+  const [isCustomizing, setIsCustomizing] = useState(false);
+  const [draftPlan, setDraftPlan] = useState<MealPlan | null>(null);
+
+  // Reset the draft if the underlying plan id changes while mounted.
+  useEffect(() => {
+    if (!isCustomizing) setDraftPlan(null);
+  }, [isCustomizing, id]);
+
+  // The plan we render — draft when customizing, otherwise the stored copy.
+  const plan: MealPlan | undefined = isCustomizing && draftPlan ? draftPlan : storedPlan;
 
   const recipeById = useMemo(() => {
     const m = new Map<string, RecipeTemplate>();
@@ -63,12 +81,90 @@ export default function PlanDetailScreen() {
   }
 
   // A plan is "current" when its name matches the user's activePlanName.
-  // Active plans show "View in Schedule" instead of "Start Plan".
+  // Only current plans get the Customize Plan flow.
   const isCurrent = !!profile.activePlanName && plan.name === profile.activePlanName;
 
+  // ── Customize handlers ──────────────────────────────────────────────
+
+  const handleStartCustomize = () => {
+    // Deep clone via JSON to ensure nested arrays are independent from the
+    // store snapshot. The plan is small (≤7 days × ~5 meals) so this is fine.
+    const clone: MealPlan = JSON.parse(JSON.stringify(storedPlan));
+    setDraftPlan(clone);
+    setIsCustomizing(true);
+  };
+
+  const handleSaveCustomize = () => {
+    if (!draftPlan || !storedPlan) return;
+    updateSavedPlan(storedPlan.id, draftPlan);
+    setIsCustomizing(false);
+    setDraftPlan(null);
+    showToast('Plan updated');
+  };
+
+  const handleCancelCustomize = () => {
+    Alert.alert(
+      'Discard changes?',
+      'All unsaved changes will be lost.',
+      [
+        { text: 'Go back', style: 'cancel' },
+        {
+          text: 'Discard',
+          style: 'destructive',
+          onPress: () => {
+            setIsCustomizing(false);
+            setDraftPlan(null);
+          },
+        },
+      ],
+    );
+  };
+
+  const handleBackPress = () => {
+    if (isCustomizing) {
+      handleCancelCustomize();
+      return;
+    }
+    router.back();
+  };
+
+  // Globally remove every occurrence of a recipe across all 7 days.
+  // Days that lose a meal show a "Removed" placeholder so the user can see
+  // exactly where the gaps are and decide what to swap in.
+  const handleGlobalRemove = (recipeId: string, recipeName: string) => {
+    if (!draftPlan) return;
+    // Snapshot for the 5-second undo.
+    const snapshot: MealPlan = JSON.parse(JSON.stringify(draftPlan));
+    setDraftPlan({
+      ...draftPlan,
+      days: draftPlan.days.map(day =>
+        day.map(m =>
+          m.recipeId === recipeId
+            ? { ...m, recipeName: 'Removed', recipeId: '__removed__' }
+            : m,
+        ),
+      ),
+    });
+    showUndo({
+      message: `Removed ${recipeName} from plan`,
+      undo: () => setDraftPlan(snapshot),
+    });
+  };
+
+  // Map weekday index (Mon=0..Sun=6) to the next ISO date for that weekday.
+  // This lets day cards in customize mode jump to the existing Day Detail
+  // page (which keys off real ISO dates).
+  const isoForDay = (dayIdx: number): string => {
+    const today = new Date();
+    const todayDow = today.getDay();              // Sun=0..Sat=6
+    const todayMon = todayDow === 0 ? 6 : todayDow - 1; // Mon=0..Sun=6
+    const diff = ((dayIdx - todayMon) + 7) % 7;
+    const target = new Date(today);
+    target.setDate(today.getDate() + diff);
+    return toIsoDate(target);
+  };
+
   const handleViewInSchedule = () => {
-    // The Plan tab is the underlying screen; closing modals returns to it where
-    // the week schedule shows the active plan.
     router.dismissAll();
   };
 
@@ -111,13 +207,15 @@ export default function PlanDetailScreen() {
     <SafeAreaView style={styles.safe} edges={['top']}>
       <View style={styles.header}>
         <TouchableOpacity
-          onPress={() => router.back()}
+          onPress={handleBackPress}
           style={styles.headerBack}
           hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
         >
-          <Text style={styles.headerBackText}>←</Text>
+          <Text style={styles.headerBackText}>{isCustomizing ? '✕' : '←'}</Text>
         </TouchableOpacity>
-        <Text style={styles.headerTitle} numberOfLines={1}>{plan.name}</Text>
+        <Text style={styles.headerTitle} numberOfLines={1}>
+          {isCustomizing ? 'Customize Plan' : plan.name}
+        </Text>
         <View style={styles.headerBack} />
       </View>
 
@@ -146,57 +244,120 @@ export default function PlanDetailScreen() {
 
         <Text style={styles.sectionTitle}>Meals in this plan</Text>
         <View style={styles.mealList}>
-          {distinctMeals.map((m, idx) => {
-            const r = recipeById.get(m.recipeId);
-            return (
-              <TouchableOpacity
-                key={`${m.recipeId}-${idx}`}
-                style={styles.mealRow}
-                activeOpacity={0.7}
-                onPress={() => {
-                  if (r) router.push({ pathname: '/recipe/[id]', params: { id: r.id } });
-                }}
-                disabled={!r}
-              >
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.mealName} numberOfLines={1}>{m.recipeName}</Text>
-                  {r ? (
-                    <Text style={styles.mealMeta}>
-                      {r.calories} cal · {r.cookTimeMin}m · {r.category}
-                    </Text>
-                  ) : (
-                    <Text style={styles.mealMeta}>Custom recipe</Text>
-                  )}
+          {distinctMeals
+            // Hide globally-removed placeholders from this list (they only
+            // surface in the day-by-day weekly schedule below).
+            .filter(m => m.recipeId !== '__removed__')
+            .map((m, idx) => {
+              const r = recipeById.get(m.recipeId);
+              return (
+                <View key={`${m.recipeId}-${idx}`} style={styles.mealRow}>
+                  <TouchableOpacity
+                    style={{ flex: 1 }}
+                    activeOpacity={0.7}
+                    onPress={() => {
+                      if (isCustomizing) return;
+                      if (r) router.push({ pathname: '/recipe/[id]', params: { id: r.id } });
+                    }}
+                    disabled={!r || isCustomizing}
+                  >
+                    <Text style={styles.mealName} numberOfLines={1}>{m.recipeName}</Text>
+                    {r ? (
+                      <Text style={styles.mealMeta}>
+                        {r.calories} cal · {r.cookTimeMin}m · {r.category}
+                      </Text>
+                    ) : (
+                      <Text style={styles.mealMeta}>Custom recipe</Text>
+                    )}
+                  </TouchableOpacity>
+                  {isCustomizing ? (
+                    <TouchableOpacity
+                      onPress={() => handleGlobalRemove(m.recipeId, m.recipeName)}
+                      hitSlop={10}
+                      style={styles.removeBtn}
+                    >
+                      <Text style={styles.removeBtnText}>✕</Text>
+                    </TouchableOpacity>
+                  ) : r ? (
+                    <Text style={styles.chevron}>›</Text>
+                  ) : null}
                 </View>
-                {r ? <Text style={styles.chevron}>›</Text> : null}
-              </TouchableOpacity>
-            );
-          })}
+              );
+            })}
         </View>
 
         <Text style={styles.sectionTitle}>Weekly schedule</Text>
-        {plan.days.map((day, dayIdx) => (
-          <View key={dayIdx} style={styles.dayBlock}>
-            <Text style={styles.dayName}>{WEEKDAY_LABELS[dayIdx]}</Text>
-            {day.length === 0 ? (
-              <Text style={styles.daySkip}>Rest day</Text>
-            ) : (
-              day.map((m, mi) => (
-                <View key={mi} style={styles.dayMealRow}>
-                  <Text style={styles.dayMealTime}>{m.time}</Text>
-                  <Text style={styles.dayMealName} numberOfLines={1}>{m.recipeName}</Text>
-                </View>
-              ))
-            )}
-          </View>
-        ))}
+        {plan.days.map((day, dayIdx) => {
+          const dayCard = (
+            <>
+              <View style={styles.dayHeaderRow}>
+                <Text style={styles.dayName}>{WEEKDAY_LABELS[dayIdx]}</Text>
+                {isCustomizing && <Text style={styles.dayChevron}>›</Text>}
+              </View>
+              {day.length === 0 ? (
+                <Text style={styles.daySkip}>Rest day</Text>
+              ) : (
+                day.map((m, mi) => {
+                  const removed = m.recipeId === '__removed__';
+                  return (
+                    <View key={mi} style={styles.dayMealRow}>
+                      <Text style={styles.dayMealTime}>{m.time}</Text>
+                      <Text
+                        style={[styles.dayMealName, removed && styles.dayMealRemoved]}
+                        numberOfLines={1}
+                      >
+                        {m.recipeName}
+                      </Text>
+                      {removed && <View style={styles.removedTag}><Text style={styles.removedTagText}>Removed</Text></View>}
+                    </View>
+                  );
+                })
+              )}
+            </>
+          );
+
+          if (isCustomizing) {
+            return (
+              <TouchableOpacity
+                key={dayIdx}
+                style={[styles.dayBlock, styles.dayBlockCustomizing]}
+                activeOpacity={0.7}
+                onPress={() =>
+                  router.push({ pathname: '/plan/day/[date]', params: { date: isoForDay(dayIdx) } })
+                }
+              >
+                {dayCard}
+              </TouchableOpacity>
+            );
+          }
+          return (
+            <View key={dayIdx} style={styles.dayBlock}>{dayCard}</View>
+          );
+        })}
       </ScrollView>
 
       <View style={styles.footer}>
-        {isCurrent ? (
-          <TouchableOpacity style={styles.startBtn} onPress={handleViewInSchedule} activeOpacity={0.85}>
-            <Text style={styles.startBtnText}>View in Schedule</Text>
+        {isCustomizing ? (
+          <TouchableOpacity style={styles.startBtn} onPress={handleSaveCustomize} activeOpacity={0.85}>
+            <Text style={styles.startBtnText}>Save</Text>
           </TouchableOpacity>
+        ) : isCurrent ? (
+          <View style={styles.footerRow}>
+            <TouchableOpacity
+              style={styles.viewBtn}
+              onPress={handleViewInSchedule}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.viewBtnText}>View in Schedule</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.startBtn}
+              onPress={handleStartCustomize}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.startBtnText}>Customize Plan</Text>
+            </TouchableOpacity>
+          </View>
         ) : (
           <TouchableOpacity style={styles.startBtn} onPress={handleStartPlan} activeOpacity={0.85}>
             <Text style={styles.startBtnText}>Start Plan</Text>
@@ -275,6 +436,13 @@ const styles = StyleSheet.create({
   mealName: { color: COLORS.text, fontSize: 14, fontWeight: '600' },
   mealMeta: { color: COLORS.textSecondary, fontSize: 12, marginTop: 2 },
   chevron: { color: COLORS.textSecondary, fontSize: 20 },
+  removeBtn: {
+    width: 28, height: 28, borderRadius: 14,
+    backgroundColor: COLORS.elevated,
+    alignItems: 'center', justifyContent: 'center',
+    marginLeft: 8,
+  },
+  removeBtnText: { color: COLORS.orange, fontSize: 14, fontWeight: '700' },
 
   dayBlock: {
     backgroundColor: COLORS.card,
@@ -284,11 +452,20 @@ const styles = StyleSheet.create({
     padding: 12,
     marginBottom: 8,
   },
-  dayName: { color: COLORS.text, fontSize: 14, fontWeight: '700', marginBottom: 8 },
+  dayBlockCustomizing: { borderColor: COLORS.green + '66' },
+  dayHeaderRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
+  dayName: { color: COLORS.text, fontSize: 14, fontWeight: '700' },
+  dayChevron: { color: COLORS.green, fontSize: 18, fontWeight: '700' },
   daySkip: { color: COLORS.textMuted, fontSize: 12, fontStyle: 'italic' },
-  dayMealRow: { flexDirection: 'row', paddingVertical: 4, gap: 10 },
+  dayMealRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 4, gap: 10 },
   dayMealTime: { color: COLORS.textSecondary, fontSize: 12, width: 56 },
   dayMealName: { color: COLORS.text, fontSize: 13, flex: 1 },
+  dayMealRemoved: { color: COLORS.textMuted, fontStyle: 'italic' },
+  removedTag: {
+    backgroundColor: COLORS.orange + '22',
+    paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8,
+  },
+  removedTagText: { color: COLORS.orange, fontSize: 10, fontWeight: '700' },
 
   footer: {
     paddingHorizontal: 16,
@@ -299,10 +476,22 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.bg,
   },
   startBtn: {
+    flex: 1,
     backgroundColor: COLORS.green,
     borderRadius: 12,
     paddingVertical: 14,
     alignItems: 'center',
   },
   startBtnText: { color: '#0E1A12', fontSize: 14, fontWeight: '700' },
+  footerRow: { flexDirection: 'row', gap: 8 },
+  viewBtn: {
+    flex: 1,
+    backgroundColor: COLORS.card,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  viewBtnText: { color: COLORS.text, fontSize: 14, fontWeight: '700' },
 });

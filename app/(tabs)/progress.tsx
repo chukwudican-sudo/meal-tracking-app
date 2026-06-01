@@ -1,5 +1,8 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ActionSheetIOS,
+  Alert,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -7,6 +10,7 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useFocusEffect } from 'expo-router';
 
 import { NotificationIcon } from '@/components/NotificationIcon';
 import { ProfileIcon } from '@/components/ProfileIcon';
@@ -51,6 +55,19 @@ export default function ProgressScreen() {
   }, [logs]);
   const [selectedYear, setSelectedYear] = useState(
     () => yearsWithCompletions[yearsWithCompletions.length - 1]
+  );
+
+  // Horizontal scroll ref + per-month x-offsets, used to auto-snap the
+  // heatmap to the current month on first load and on every tab visit.
+  const heatmapScrollRef = useRef<ScrollView>(null);
+
+  // Reset to current year + re-snap the scroll position on every focus.
+  // The heatmap should always feel "fresh" when the user comes back here.
+  useFocusEffect(
+    useCallback(() => {
+      const currentYear = new Date().getFullYear();
+      setSelectedYear(prev => (prev === currentYear ? prev : currentYear));
+    }, []),
   );
 
   const getDayProgress = useCallback(
@@ -133,6 +150,53 @@ export default function ProgressScreen() {
     return labels;
   }, [heatmapColumns]);
 
+  // Auto-snap the horizontal heatmap scroll to today's month when the
+  // selected year is the current year. We center the month on screen as
+  // best we can without knowing the viewport width — `scrollTo` clamps
+  // automatically if the offset overshoots the content.
+  useEffect(() => {
+    const now = new Date();
+    if (selectedYear !== now.getFullYear()) return;
+    const anchor = monthAnchors.find(a => a.monthIdx === now.getMonth());
+    if (!anchor) return;
+    // Defer so the ScrollView has measured its content.
+    const t = setTimeout(() => {
+      heatmapScrollRef.current?.scrollTo({ x: Math.max(0, anchor.leftPx - 12), animated: false });
+    }, 0);
+    return () => clearTimeout(t);
+  }, [monthAnchors, selectedYear]);
+
+  // Year picker — iOS gets a native action sheet, Android falls back to Alert.
+  const openYearPicker = useCallback(() => {
+    if (yearsWithCompletions.length <= 1) return;
+    if (Platform.OS === 'ios') {
+      const options = [...yearsWithCompletions.map(String), 'Cancel'];
+      ActionSheetIOS.showActionSheetWithOptions(
+        {
+          options,
+          cancelButtonIndex: options.length - 1,
+          title: 'Select year',
+        },
+        idx => {
+          if (idx === options.length - 1) return;
+          setSelectedYear(yearsWithCompletions[idx]);
+        },
+      );
+    } else {
+      Alert.alert(
+        'Select year',
+        undefined,
+        [
+          ...yearsWithCompletions.map(y => ({
+            text: String(y),
+            onPress: () => setSelectedYear(y),
+          })),
+          { text: 'Cancel', style: 'cancel' as const },
+        ],
+      );
+    }
+  }, [yearsWithCompletions]);
+
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
       <View style={styles.headerRow}>
@@ -150,31 +214,16 @@ export default function ProgressScreen() {
         <View style={styles.sectionCard}>
           <View style={styles.sectionHeaderRow}>
             <Text style={styles.sectionTitle}>Yearly heatmap</Text>
-            <View style={styles.yearRow}>
-              {yearsWithCompletions.length > 1 && (
-                <TouchableOpacity
-                  onPress={() => {
-                    const idx = yearsWithCompletions.indexOf(selectedYear);
-                    if (idx > 0) setSelectedYear(yearsWithCompletions[idx - 1]);
-                  }}
-                >
-                  <Text style={styles.yearNav}>←</Text>
-                </TouchableOpacity>
-              )}
+            {/* Year is a dropdown only when there's more than one year of data;
+                otherwise it's a plain static label. */}
+            {yearsWithCompletions.length > 1 ? (
+              <TouchableOpacity onPress={openYearPicker} hitSlop={8} style={styles.yearChip}>
+                <Text style={styles.yearText}>{selectedYear}</Text>
+                <Text style={styles.yearChipChevron}>▾</Text>
+              </TouchableOpacity>
+            ) : (
               <Text style={styles.yearText}>{selectedYear}</Text>
-              {yearsWithCompletions.length > 1 && (
-                <TouchableOpacity
-                  onPress={() => {
-                    const idx = yearsWithCompletions.indexOf(selectedYear);
-                    if (idx < yearsWithCompletions.length - 1) {
-                      setSelectedYear(yearsWithCompletions[idx + 1]);
-                    }
-                  }}
-                >
-                  <Text style={styles.yearNav}>→</Text>
-                </TouchableOpacity>
-              )}
-            </View>
+            )}
           </View>
 
           {/* Heatmap: fixed label column on left, horizontal-scrollable grid on right */}
@@ -201,6 +250,7 @@ export default function ProgressScreen() {
             </View>
 
             <ScrollView
+              ref={heatmapScrollRef}
               horizontal
               showsHorizontalScrollIndicator={false}
               bounces={false}
@@ -318,9 +368,17 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   sectionTitle: { color: COLORS.text, fontWeight: '700', fontSize: 14 },
-  yearRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  yearNav: { color: COLORS.text, fontSize: 16, fontWeight: '600', paddingHorizontal: 4 },
   yearText: { color: COLORS.text, fontSize: 13, fontWeight: '600' },
+  yearChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: COLORS.elevated,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 14,
+  },
+  yearChipChevron: { color: COLORS.textSecondary, fontSize: 10 },
 
   heatmapOuter: { flexDirection: 'row', alignItems: 'flex-start' },
   monthLabelAbs: {

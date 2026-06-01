@@ -45,6 +45,14 @@ function monthGridRows(anchorIso: string): (string | null)[][] {
   });
 }
 
+// Friendly "started on" date for the Current Plan card.
+function formatSavedDate(iso: string): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
 // Navigate by exactly one calendar month (handles month-length differences correctly)
 function shiftMonth(iso: string, months: number): string {
   const d = toMidnight(iso);
@@ -55,10 +63,17 @@ function shiftMonth(iso: string, months: number): string {
 
 export default function PlanScreen() {
   const logs = useMealStore(s => s.logs);
+  const profile = useMealStore(s => s.profile);
+  const savedPlans = useMealStore(s => s.savedPlans);
 
   const todayIso = toIsoDate(new Date());
   const [selectedDate, setSelectedDate] = useState(todayIso);
   const [miniMonthAnchor, setMiniMonthAnchor] = useState(todayIso);
+
+  // Active plan card — only renders when a plan is active.
+  const activePlan = profile.activePlanName
+    ? savedPlans.find(p => p.name === profile.activePlanName)
+    : undefined;
 
   // Day Detail button summary: derive directly from today's logs so the
   // preview reflects every meal (planned + ad-hoc) on the selected day.
@@ -80,6 +95,23 @@ export default function PlanScreen() {
             <CartIcon />
           </View>
         </View>
+
+        {/* Current Plan card — sits above Build/Find when a plan is active. */}
+        {activePlan && (
+          <TouchableOpacity
+            style={styles.currentPlanCard}
+            onPress={() => router.push({ pathname: '/plan/[id]', params: { id: activePlan.id } })}
+            activeOpacity={0.85}
+          >
+            <View style={styles.currentPlanBadge}>
+              <Text style={styles.currentPlanBadgeText}>Current</Text>
+            </View>
+            <Text style={styles.currentPlanName} numberOfLines={1}>{activePlan.name}</Text>
+            <Text style={styles.currentPlanMeta}>
+              Started {formatSavedDate(activePlan.savedAt)}
+            </Text>
+          </TouchableOpacity>
+        )}
 
         {/* Build / Find tiles — top of the tab, always visible. */}
         <View style={styles.tilesRow}>
@@ -200,6 +232,27 @@ const styles = StyleSheet.create({
   monthCellHiddenText: { color: 'transparent' },
   monthCellText: { color: COLORS.textSecondary, fontSize: 12 },
   monthCellTextSelected: { color: COLORS.green, fontWeight: '700' },
+
+  // Current Plan card
+  currentPlanCard: {
+    backgroundColor: COLORS.card,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: COLORS.green + '55',
+    padding: 14,
+    gap: 4,
+  },
+  currentPlanBadge: {
+    alignSelf: 'flex-start',
+    backgroundColor: COLORS.green + '22',
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    marginBottom: 4,
+  },
+  currentPlanBadgeText: { color: COLORS.green, fontSize: 11, fontWeight: '700', letterSpacing: 0.5 },
+  currentPlanName: { color: COLORS.text, fontSize: 17, fontWeight: '700' },
+  currentPlanMeta: { color: COLORS.textSecondary, fontSize: 12 },
 
   // Day Detail button
   dayDetailBtn: {
