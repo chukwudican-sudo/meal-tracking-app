@@ -12,45 +12,54 @@ export const unstable_settings = {
   anchor: '(tabs)',
 };
 
+// Shared options for full-screen "modal" pages: they slide up from the bottom
+// like a modal but fill the entire screen (no card-sheet gap at the top).
+const fullScreenSlide = {
+  presentation: 'fullScreenModal',
+  headerShown: false,
+  animation: 'slide_from_bottom',
+} as const;
+
 export default function RootLayout() {
   return (
     <ThemeProvider value={AppDarkTheme}>
       <View style={{ flex: 1 }}>
         <Stack>
           <Stack.Screen name="(tabs)"        options={{ headerShown: false }} />
-          <Stack.Screen name="settings"      options={{ presentation: 'modal', headerShown: false, animation: 'slide_from_bottom' }} />
-          <Stack.Screen name="meal/[id]"     options={{ presentation: 'modal', headerShown: false }} />
-          <Stack.Screen name="cart"          options={{ presentation: 'modal', headerShown: false, animation: 'slide_from_bottom' }} />
-          <Stack.Screen name="profile"       options={{ presentation: 'modal', headerShown: false, animation: 'slide_from_bottom' }} />
-          <Stack.Screen name="notifications" options={{ presentation: 'modal', headerShown: false, animation: 'slide_from_bottom' }} />
-          <Stack.Screen name="kitchen"       options={{ presentation: 'modal', headerShown: false, animation: 'slide_from_bottom' }} />
-          <Stack.Screen name="recipes/saved"             options={{ presentation: 'modal', headerShown: false, animation: 'slide_from_bottom' }} />
-          <Stack.Screen name="recipes/category/[type]"   options={{ presentation: 'modal', headerShown: false, animation: 'slide_from_bottom' }} />
-          <Stack.Screen name="recipe/[id]"               options={{ presentation: 'modal', headerShown: false, animation: 'slide_from_bottom' }} />
-          <Stack.Screen name="ai/what-can-i-make"        options={{ presentation: 'modal', headerShown: false, animation: 'slide_from_bottom' }} />
-          <Stack.Screen name="ai/custom"                 options={{ presentation: 'modal', headerShown: false, animation: 'slide_from_bottom' }} />
+          <Stack.Screen name="settings"      options={fullScreenSlide} />
+          <Stack.Screen name="meal/[id]"     options={{ presentation: 'fullScreenModal', headerShown: false }} />
+          <Stack.Screen name="cart"          options={fullScreenSlide} />
+          <Stack.Screen name="profile"       options={fullScreenSlide} />
+          <Stack.Screen name="notifications" options={fullScreenSlide} />
+          <Stack.Screen name="kitchen"       options={fullScreenSlide} />
+          <Stack.Screen name="recipes/saved"             options={fullScreenSlide} />
+          <Stack.Screen name="recipes/category/[type]"   options={fullScreenSlide} />
+          <Stack.Screen name="recipe/[id]"               options={fullScreenSlide} />
+          <Stack.Screen name="ai/what-can-i-make"        options={fullScreenSlide} />
+          <Stack.Screen name="ai/custom"                 options={fullScreenSlide} />
 
           {/* Profile sub-pages */}
-          <Stack.Screen name="profile/edit-goal"         options={{ presentation: 'modal', headerShown: false, animation: 'slide_from_bottom' }} />
-          <Stack.Screen name="profile/personal-details"  options={{ presentation: 'modal', headerShown: false, animation: 'slide_from_bottom' }} />
-          <Stack.Screen name="profile/dietary"           options={{ presentation: 'modal', headerShown: false, animation: 'slide_from_bottom' }} />
-          <Stack.Screen name="profile/nutrition-goals"   options={{ presentation: 'modal', headerShown: false, animation: 'slide_from_bottom' }} />
+          <Stack.Screen name="profile/edit-goal"         options={fullScreenSlide} />
+          <Stack.Screen name="profile/personal-details"  options={fullScreenSlide} />
+          <Stack.Screen name="profile/dietary"           options={fullScreenSlide} />
+          <Stack.Screen name="profile/nutrition-goals"   options={fullScreenSlide} />
 
           {/* Settings sub-pages */}
-          <Stack.Screen name="settings/account"                 options={{ presentation: 'modal', headerShown: false, animation: 'slide_from_bottom' }} />
-          <Stack.Screen name="settings/account-delete-confirm"  options={{ presentation: 'modal', headerShown: false, animation: 'slide_from_bottom' }} />
-          <Stack.Screen name="settings/notifications"           options={{ presentation: 'modal', headerShown: false, animation: 'slide_from_bottom' }} />
-          <Stack.Screen name="settings/help"                    options={{ presentation: 'modal', headerShown: false, animation: 'slide_from_bottom' }} />
-          <Stack.Screen name="settings/feedback"                options={{ presentation: 'modal', headerShown: false, animation: 'slide_from_bottom' }} />
-          <Stack.Screen name="settings/coming-soon"             options={{ presentation: 'modal', headerShown: false, animation: 'slide_from_bottom' }} />
+          <Stack.Screen name="settings/account"                 options={fullScreenSlide} />
+          <Stack.Screen name="settings/account-delete-confirm"  options={fullScreenSlide} />
+          <Stack.Screen name="settings/notifications"           options={fullScreenSlide} />
+          <Stack.Screen name="settings/help"                    options={fullScreenSlide} />
+          <Stack.Screen name="settings/feedback"                options={fullScreenSlide} />
+          <Stack.Screen name="settings/coming-soon"             options={fullScreenSlide} />
 
           {/* Plan sub-pages */}
-          <Stack.Screen name="plan/build"                       options={{ presentation: 'modal', headerShown: false, animation: 'slide_from_bottom' }} />
-          <Stack.Screen name="plan/find"                        options={{ presentation: 'modal', headerShown: false, animation: 'slide_from_bottom' }} />
-          <Stack.Screen name="plan/category/[type]"             options={{ presentation: 'modal', headerShown: false, animation: 'slide_from_bottom' }} />
-          <Stack.Screen name="plan/[id]"                        options={{ presentation: 'modal', headerShown: false, animation: 'slide_from_bottom' }} />
-          <Stack.Screen name="plan/day/[date]"                  options={{ presentation: 'modal', headerShown: false, animation: 'slide_from_bottom' }} />
+          <Stack.Screen name="plan/build"                       options={fullScreenSlide} />
+          <Stack.Screen name="plan/find"                        options={fullScreenSlide} />
+          <Stack.Screen name="plan/category/[type]"             options={fullScreenSlide} />
+          <Stack.Screen name="plan/[id]"                        options={fullScreenSlide} />
+          <Stack.Screen name="plan/day/[date]"                  options={fullScreenSlide} />
 
+          {/* Generic fallback `modal` route stays as a card-sheet. */}
           <Stack.Screen name="modal"         options={{ presentation: 'modal', title: 'Modal' }} />
         </Stack>
         <UndoSnackbarHost />

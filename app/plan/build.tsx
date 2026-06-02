@@ -30,8 +30,18 @@ import type {
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 const WEEKDAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-const PAGE_SIZE = 4;
+const PAGE_SIZE = 5;
 const AUTO_PAGE_CAP = 3;
+// Friendly label used on the guide page + summary copy.
+const GOAL_LABELS: Record<string, string> = {
+  lose_weight: 'Lose Weight',
+  maintain: 'Maintain',
+  gain_muscle: 'Gain Muscle',
+  lean_bulk: 'Lean Bulk',
+};
+function goalTypeLabel(goalType: string | undefined): string {
+  return GOAL_LABELS[goalType ?? ''] ?? 'Not set';
+}
 
 function categoryForSlot(slotName: string): RecipeCategory {
   const lc = slotName.toLowerCase();
@@ -148,6 +158,7 @@ type Mode =
   | { kind: 'summary-swap'; slotIdx: number; oldRecipeId: string };
 
 type Step =
+  | { kind: 'guide' }
   | { kind: 'pick'; slotIdx: number }
   | { kind: 'summary'; slotIdx: number }
   | { kind: 'preview' };
@@ -179,15 +190,20 @@ export default function BuildPlanScreen() {
   }, [dietaryFiltered, profile]);
 
   // ── Wizard state ────────────────────────────────────────────────────────
-  const [step, setStep] = useState<Step>({ kind: 'pick', slotIdx: 0 });
+  // The wizard always opens on the guide page so the user knows what's
+  // about to happen before being dropped into meal selection.
+  const [step, setStep] = useState<Step>({ kind: 'guide' });
   const [mode, setMode] = useState<Mode>({ kind: 'normal' });
+  // Describe popup state — opened from the bottom button on each pick page.
+  const [describeModalVisible, setDescribeModalVisible] = useState(false);
+  const [describeModalText, setDescribeModalText] = useState('');
+  // Preview "Meals in this plan" collapse state.
+  const [previewMealsExpanded, setPreviewMealsExpanded] = useState(false);
   // Per-slot: pages of recipe cards. Keyed by slot.id so it survives even if
   // active slots are recomputed (e.g. user toggles a slot mid-session).
   const [pagesBySlot, setPagesBySlot] = useState<Record<string, Page[]>>({});
   // Per-slot selected recipes preserved in user-pick order.
   const [selectionsBySlot, setSelectionsBySlot] = useState<Record<string, RecipeTemplate[]>>({});
-  // Per-slot describe input current value (preserved when paging).
-  const [describeBySlot, setDescribeBySlot] = useState<Record<string, string>>({});
   // Per-slot active page index in the horizontal pager.
   const [pageIdxBySlot, setPageIdxBySlot] = useState<Record<string, number>>({});
   // Preview state
@@ -222,6 +238,108 @@ export default function BuildPlanScreen() {
       pagerRef.current?.scrollTo({ x: idx * pageWidth, animated: true });
     });
   }, [step, activeSlots, pageWidth, pageIdxBySlot]);
+
+  // ── Guide preview (initial step) ────────────────────────────────────────
+  // Sits in front of the meal selection wizard so the user has a moment to
+  // see their goal/preferences and understand what's about to happen.
+  if (step.kind === 'guide') {
+    const dietary = profile.dietaryRestrictions ?? [];
+    const allergies = profile.allergies ?? [];
+    const hasPrefs = dietary.length > 0 || allergies.length > 0;
+    const slotCount = activeSlots.length;
+
+    return (
+      <SafeAreaView style={styles.safe} edges={['top']}>
+        <Header title="Build My Plan" onBack={() => router.back()} />
+
+        <ScrollView contentContainerStyle={styles.guideBody} showsVerticalScrollIndicator={false}>
+          <Text style={styles.guideHero}>Let&apos;s build your week</Text>
+          <Text style={styles.guideHeroSub}>
+            Based on your goal{profile.firstName ? `, ${profile.firstName}` : ''}, we&apos;ll suggest meals tailored just for you.
+          </Text>
+
+          <View style={styles.guideCard}>
+            <View style={styles.guideRow}>
+              <Text style={styles.guideRowLabel}>Goal</Text>
+              <View style={styles.guidePill}>
+                <Text style={styles.guidePillText}>{goalTypeLabel(profile.goalType)}</Text>
+              </View>
+            </View>
+
+            <View style={styles.guideDivider} />
+
+            <View style={styles.guideRow}>
+              <Text style={styles.guideRowLabel}>Diet</Text>
+              <View style={styles.guidePillGroup}>
+                {dietary.length === 0 ? (
+                  <Text style={styles.guideMuted}>No restrictions</Text>
+                ) : (
+                  dietary.map(d => (
+                    <View key={d} style={styles.guidePill}><Text style={styles.guidePillText}>{d}</Text></View>
+                  ))
+                )}
+              </View>
+            </View>
+
+            <View style={styles.guideDivider} />
+
+            <View style={styles.guideRow}>
+              <Text style={styles.guideRowLabel}>Allergies</Text>
+              <View style={styles.guidePillGroup}>
+                {allergies.length === 0 ? (
+                  <Text style={styles.guideMuted}>None</Text>
+                ) : (
+                  allergies.map(a => (
+                    <View key={a} style={[styles.guidePill, styles.guidePillWarn]}>
+                      <Text style={[styles.guidePillText, styles.guidePillTextWarn]}>{a}</Text>
+                    </View>
+                  ))
+                )}
+              </View>
+            </View>
+          </View>
+
+          {!hasPrefs && (
+            <Text style={styles.guideHint}>
+              You can update your dietary preferences or allergies any time in your Profile.
+            </Text>
+          )}
+
+          <View style={styles.guideStepsCard}>
+            <Text style={styles.guideStepsTitle}>How it works</Text>
+            <View style={styles.guideStepRow}>
+              <View style={styles.guideStepBullet}><Text style={styles.guideStepBulletText}>1</Text></View>
+              <Text style={styles.guideStepText}>
+                We&apos;ll walk you through your {slotCount} meal {slotCount === 1 ? 'slot' : 'slots'} for the day.
+              </Text>
+            </View>
+            <View style={styles.guideStepRow}>
+              <View style={styles.guideStepBullet}><Text style={styles.guideStepBulletText}>2</Text></View>
+              <Text style={styles.guideStepText}>
+                Pick your favourites from the suggestions, or describe what you want.
+              </Text>
+            </View>
+            <View style={styles.guideStepRow}>
+              <View style={styles.guideStepBullet}><Text style={styles.guideStepBulletText}>3</Text></View>
+              <Text style={styles.guideStepText}>
+                We&apos;ll rotate them through the week into a balanced plan.
+              </Text>
+            </View>
+          </View>
+        </ScrollView>
+
+        <View style={styles.footer}>
+          <TouchableOpacity
+            style={[styles.primaryBtn, styles.guideCta]}
+            onPress={() => setStep({ kind: 'pick', slotIdx: 0 })}
+            activeOpacity={0.85}
+          >
+            <Text style={styles.primaryBtnText}>Let&apos;s go</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   // ── All-slots-skipped guard ─────────────────────────────────────────────
   if (activeSlots.length === 0) {
@@ -288,8 +406,9 @@ export default function BuildPlanScreen() {
     }));
   }
 
-  function addDescribePage(slot: MealSlot) {
-    const text = (describeBySlot[slot.id] ?? '').trim();
+  // Append a Describe-generated page using the user's free-form text.
+  function addDescribePage(slot: MealSlot, rawText: string) {
+    const text = rawText.trim();
     if (!text) return;
     const cards = [generateCustomCard(text, categoryForSlot(slot.name))];
     setPagesBySlot(prev => {
@@ -301,7 +420,6 @@ export default function BuildPlanScreen() {
       const newPageIdx = (pagesBySlot[slot.id] ?? []).length; // index of the page we just appended
       return { ...prev, [slot.id]: Math.max(current, newPageIdx) };
     });
-    setDescribeBySlot(prev => ({ ...prev, [slot.id]: '' }));
     showToast('Generated new options');
   }
 
@@ -400,7 +518,8 @@ export default function BuildPlanScreen() {
 
   function handleBackFromPick(slotIdx: number) {
     if (slotIdx === 0) {
-      router.back();
+      // First slot's pick → return to the guide page.
+      setStep({ kind: 'guide' });
       return;
     }
     // Go back to the previous slot's summary.
@@ -480,13 +599,19 @@ export default function BuildPlanScreen() {
       ? `Swap meal · ${slot.name}`
       : mode.kind === 'summary-swap'
       ? `Swap meal · ${slot.name}`
-      : `Step ${step.slotIdx + 1} of ${activeSlots.length}`;
-    const counterText = mode.kind === 'normal'
-      ? `${sel.length} selected`
-      : 'Tap a card to swap';
+      : undefined;
 
     return (
       <SafeAreaView style={styles.safe} edges={['top']}>
+        {/* Progress bar — only in normal flow. Suppressed in swap modes. */}
+        {mode.kind === 'normal' && (
+          <StepProgressBar
+            step={step.slotIdx + 1}
+            total={activeSlots.length}
+            label={slot.name}
+          />
+        )}
+
         <Header
           title={headerTitle}
           subtitle={headerSubtitle}
@@ -507,17 +632,27 @@ export default function BuildPlanScreen() {
           }
         />
 
-        <View style={styles.subHeaderRow}>
-          <Text style={styles.subHeaderCounter}>{counterText}</Text>
-          {slotPages.length > 1 && (
-            <View style={styles.dotsRow}>
-              {slotPages.map((_, idx) => (
-                <View
-                  key={idx}
-                  style={[styles.dot, currentPageIdx === idx && styles.dotActive]}
-                />
-              ))}
-            </View>
+        {/* Dots — centered, just below the header. */}
+        {slotPages.length > 1 && (
+          <View style={styles.dotsCenterRow}>
+            {slotPages.map((_, idx) => (
+              <View
+                key={idx}
+                style={[styles.dot, currentPageIdx === idx && styles.dotActive]}
+              />
+            ))}
+          </View>
+        )}
+
+        {/* Explanatory copy + selection counter. */}
+        <View style={styles.pickIntro}>
+          <Text style={styles.pickIntroText}>
+            {mode.kind === 'normal'
+              ? `Pick your favourites. We'll rotate them through the week.`
+              : `Tap a card to swap.`}
+          </Text>
+          {mode.kind === 'normal' && (
+            <Text style={styles.pickCounter}>{sel.length} selected</Text>
           )}
         </View>
 
@@ -562,7 +697,7 @@ export default function BuildPlanScreen() {
                         onPress={() => handleCardPress(slot, r)}
                       />
                     ))}
-                    {/* "Find more" card or replacement message at the bottom of each page. */}
+                    {/* "Suggest more" card or replacement message at the bottom of each page. */}
                     {pageIdx === slotPages.length - 1 && (
                       findMoreLocked ? (
                         <View style={styles.findMoreLocked}>
@@ -578,7 +713,7 @@ export default function BuildPlanScreen() {
                           activeOpacity={0.85}
                         >
                           <Text style={styles.findMoreEmoji}>✨</Text>
-                          <Text style={styles.findMoreText}>Find more</Text>
+                          <Text style={styles.findMoreText}>Suggest more</Text>
                         </TouchableOpacity>
                       )
                     )}
@@ -588,25 +723,19 @@ export default function BuildPlanScreen() {
             )}
           </View>
 
-          {/* Always-on Describe input + skip row */}
+          {/* Bottom bar: Describe button + skip link. */}
           <View style={styles.bottomBar}>
-            <View style={styles.describeBox}>
-              <TextInput
-                style={styles.describeInput}
-                value={describeBySlot[slot.id] ?? ''}
-                onChangeText={text => setDescribeBySlot(prev => ({ ...prev, [slot.id]: text }))}
-                placeholder={`Describe what you want for ${slot.name.toLowerCase()}`}
-                placeholderTextColor={COLORS.textMuted}
-                multiline
-              />
-              <TouchableOpacity
-                style={[styles.describeBtn, !(describeBySlot[slot.id] ?? '').trim() && styles.disabledBtn]}
-                disabled={!(describeBySlot[slot.id] ?? '').trim()}
-                onPress={() => addDescribePage(slot)}
-              >
-                <Text style={styles.describeBtnText}>Generate</Text>
-              </TouchableOpacity>
-            </View>
+            <TouchableOpacity
+              style={styles.describeOpenBtn}
+              activeOpacity={0.85}
+              onPress={() => {
+                setDescribeModalText('');
+                setDescribeModalVisible(true);
+              }}
+            >
+              <Text style={styles.describeOpenIcon}>✎</Text>
+              <Text style={styles.describeOpenBtnText}>Describe what you want</Text>
+            </TouchableOpacity>
             {mode.kind === 'normal' && (
               <TouchableOpacity
                 style={styles.skipRow}
@@ -617,6 +746,60 @@ export default function BuildPlanScreen() {
             )}
           </View>
         </KeyboardAvoidingView>
+
+        {/* Describe popup overlay. Lives inside the pick render so we have
+            `slot` in scope and can route the generated page to the right slot. */}
+        <Modal
+          transparent
+          animationType="fade"
+          visible={describeModalVisible}
+          onRequestClose={() => setDescribeModalVisible(false)}
+        >
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            style={{ flex: 1 }}
+          >
+            <Pressable style={styles.describeOverlay} onPress={() => setDescribeModalVisible(false)}>
+              <Pressable style={styles.describeCard} onPress={e => e.stopPropagation?.()}>
+                <View style={styles.describeCardHeader}>
+                  <Text style={styles.describeCardTitle}>Describe what you want</Text>
+                  <TouchableOpacity
+                    onPress={() => setDescribeModalVisible(false)}
+                    hitSlop={10}
+                    style={styles.describeCloseBtn}
+                  >
+                    <Text style={styles.describeCloseText}>✕</Text>
+                  </TouchableOpacity>
+                </View>
+                <Text style={styles.describeCardHint}>
+                  Tell us what you&apos;re craving for {slot.name.toLowerCase()} and we&apos;ll generate options.
+                </Text>
+                <TextInput
+                  style={styles.describeTextArea}
+                  value={describeModalText}
+                  onChangeText={setDescribeModalText}
+                  placeholder="e.g. high-protein breakfast under 500 cal"
+                  placeholderTextColor={COLORS.textMuted}
+                  multiline
+                  autoFocus
+                />
+                <TouchableOpacity
+                  style={[styles.describeGenBtn, !describeModalText.trim() && styles.disabledBtn]}
+                  disabled={!describeModalText.trim()}
+                  onPress={() => {
+                    const text = describeModalText.trim();
+                    if (!text) return;
+                    addDescribePage(slot, text);
+                    setDescribeModalVisible(false);
+                    setDescribeModalText('');
+                  }}
+                >
+                  <Text style={styles.describeGenBtnText}>Generate</Text>
+                </TouchableOpacity>
+              </Pressable>
+            </Pressable>
+          </KeyboardAvoidingView>
+        </Modal>
       </SafeAreaView>
     );
   }
@@ -630,9 +813,17 @@ export default function BuildPlanScreen() {
 
     return (
       <SafeAreaView style={styles.safe} edges={['top']}>
+        {/* Progress bar — same step number as the corresponding pick page,
+            since the summary belongs to that meal type. */}
+        <StepProgressBar
+          step={step.slotIdx + 1}
+          total={activeSlots.length}
+          label={`${slot.name} · Summary`}
+        />
+
         <Header
           title={slot.name}
-          subtitle={`Step ${step.slotIdx + 1} of ${activeSlots.length} · Summary`}
+          subtitle="Summary"
           onBack={() => handleBackFromSummary(step.slotIdx)}
           rightAction={
             <TouchableOpacity
@@ -682,6 +873,52 @@ export default function BuildPlanScreen() {
   }
 
   // ── Render: PREVIEW step ───────────────────────────────────────────────
+
+  // Plan-wide totals + the unique meal list shown at the top of the preview.
+  // Recipes are looked up by id so we can render calorie/macro details for
+  // catalogue items; custom (Describe-generated) picks fall back to the
+  // PlanDayMeal name only.
+  const recipeById = new Map<string, RecipeTemplate>();
+  recipes.forEach(r => recipeById.set(r.id, r));
+  // Walk every selection list — not previewDays — so meals the user picked
+  // but happened to land on a non-rotation day still surface here.
+  const distinctMeals: { recipe: RecipeTemplate | undefined; name: string; slotName: string }[] = [];
+  const seenIds = new Set<string>();
+  activeSlots.forEach(slot => {
+    (selectionsBySlot[slot.id] ?? []).forEach(r => {
+      if (seenIds.has(r.id)) return;
+      seenIds.add(r.id);
+      distinctMeals.push({ recipe: r, name: r.name, slotName: slot.name });
+    });
+  });
+
+  const totalCalsAcrossWeek = previewDays.reduce(
+    (sum, day) => sum + day.reduce((s, m) => s + (recipeById.get(m.recipeId)?.calories ?? 0), 0),
+    0,
+  );
+  const avgDailyCal = Math.round(totalCalsAcrossWeek / 7);
+  const avgDailyProtein = Math.round(
+    previewDays.reduce(
+      (sum, day) => sum + day.reduce((s, m) => s + (recipeById.get(m.recipeId)?.macros.protein ?? 0), 0),
+      0,
+    ) / 7,
+  );
+  const avgDailyCarbs = Math.round(
+    previewDays.reduce(
+      (sum, day) => sum + day.reduce((s, m) => s + (recipeById.get(m.recipeId)?.macros.carbs ?? 0), 0),
+      0,
+    ) / 7,
+  );
+  const avgDailyFats = Math.round(
+    previewDays.reduce(
+      (sum, day) => sum + day.reduce((s, m) => s + (recipeById.get(m.recipeId)?.macros.fats ?? 0), 0),
+      0,
+    ) / 7,
+  );
+
+  const visibleDistinct = previewMealsExpanded ? distinctMeals : distinctMeals.slice(0, 3);
+  const collapsibleNeeded = distinctMeals.length > 3;
+
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
       <Header
@@ -691,11 +928,54 @@ export default function BuildPlanScreen() {
       />
 
       <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
+        {/* Plan name + daily target — mirrors the plan detail page header. */}
+        <View style={styles.planNameCard}>
+          <Text style={styles.planNameLabel}>YOUR PLAN</Text>
+          <Text style={styles.planNameText}>{autoPlanName()}</Text>
+          <Text style={styles.planNameSub}>
+            {activeSlots.length} meal {activeSlots.length === 1 ? 'type' : 'types'} · 7 days
+          </Text>
+        </View>
+
+        <View style={styles.targetsCard}>
+          <Text style={styles.targetsLabel}>Daily target</Text>
+          <Text style={styles.targetsCalories}>{avgDailyCal} cal</Text>
+          <View style={styles.targetsMacroRow}>
+            <Text style={styles.targetsMacroPill}>P {avgDailyProtein}g</Text>
+            <Text style={styles.targetsMacroPill}>C {avgDailyCarbs}g</Text>
+            <Text style={styles.targetsMacroPill}>F {avgDailyFats}g</Text>
+          </View>
+        </View>
+
+        <Text style={styles.previewSection}>Meals in this plan</Text>
+        <View style={styles.previewMealList}>
+          {visibleDistinct.map((m, idx) => (
+            <View key={`${m.recipe?.id ?? m.name}-${idx}`} style={styles.previewMealListRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.previewMealListName} numberOfLines={1}>{m.name}</Text>
+                <Text style={styles.previewMealListMeta}>
+                  {m.recipe
+                    ? `${m.recipe.calories} cal · ${m.recipe.cookTimeMin}m · ${m.slotName}`
+                    : `Custom · ${m.slotName}`}
+                </Text>
+              </View>
+            </View>
+          ))}
+          {collapsibleNeeded && (
+            <TouchableOpacity
+              style={styles.previewSeeMoreBtn}
+              onPress={() => setPreviewMealsExpanded(prev => !prev)}
+            >
+              <Text style={styles.previewSeeMoreText}>
+                {previewMealsExpanded ? 'See less' : `See more (${distinctMeals.length - 3})`}
+              </Text>
+            </TouchableOpacity>
+          )}
+        </View>
+
+        <Text style={styles.previewSection}>Weekly schedule</Text>
         {previewDays.map((day, dayIdx) => {
           const expanded = expandedDays.has(dayIdx);
-          const recipeById = new Map<string, RecipeTemplate>();
-          recipes.forEach(r => recipeById.set(r.id, r));
-          // Custom cards aren't in `recipes` — fall back to PlanDayMeal for display only.
           const totalCal = day.reduce((sum, m) => sum + (recipeById.get(m.recipeId)?.calories ?? 0), 0);
           return (
             <View key={dayIdx} style={styles.dayBlock}>
@@ -738,14 +1018,13 @@ export default function BuildPlanScreen() {
                           <TouchableOpacity
                             style={styles.findDifferentBtn}
                             onPress={() => {
-                              // Open the slot's pick step in preview-swap mode.
                               const slotIdx = activeSlots.findIndex(s => s.name === meal.slotName);
                               if (slotIdx === -1) return;
                               setMode({ kind: 'preview-swap', dayIdx, mealIdx });
                               setStep({ kind: 'pick', slotIdx });
                             }}
                           >
-                            <Text style={styles.findDifferentText}>New</Text>
+                            <Text style={styles.findDifferentText}>Find different meal</Text>
                           </TouchableOpacity>
                         </View>
                       );
@@ -758,12 +1037,10 @@ export default function BuildPlanScreen() {
         })}
       </ScrollView>
 
+      {/* Single Confirm Plan button — Back is the header arrow. */}
       <View style={styles.footer}>
-        <TouchableOpacity style={styles.secondaryBtn} onPress={() => setStep({ kind: 'summary', slotIdx: activeSlots.length - 1 })}>
-          <Text style={styles.secondaryBtnText}>Back</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.primaryBtn} onPress={handleActivate}>
-          <Text style={styles.primaryBtnText}>Activate Plan</Text>
+        <TouchableOpacity style={[styles.primaryBtn, styles.primaryBtnFull]} onPress={handleActivate}>
+          <Text style={styles.primaryBtnText}>Confirm Plan</Text>
         </TouchableOpacity>
       </View>
 
@@ -830,6 +1107,22 @@ export default function BuildPlanScreen() {
 }
 
 // ─── Sub-components ─────────────────────────────────────────────────────────
+
+function StepProgressBar({ step, total, label }: { step: number; total: number; label: string }) {
+  // Step number is 1-indexed and never exceeds `total`. Width is clamped so a
+  // small rounding hiccup can't push the fill past the track.
+  const pct = Math.max(0, Math.min(100, total > 0 ? (step / total) * 100 : 0));
+  return (
+    <View style={styles.progressWrap}>
+      <View style={styles.progressTrack}>
+        <View style={[styles.progressFill, { width: `${pct}%` }]} />
+      </View>
+      <Text style={styles.progressLabel}>
+        Step {step} of {total} — {label}
+      </Text>
+    </View>
+  );
+}
 
 function Header({
   title,
@@ -914,17 +1207,53 @@ const styles = StyleSheet.create({
   headerSubtitle: { color: COLORS.textSecondary, fontSize: 11, textAlign: 'center', marginTop: 2 },
   headerRightText: { color: COLORS.green, fontSize: 14, fontWeight: '700' },
 
-  subHeaderRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+  // Step progress bar (above Header)
+  progressWrap: {
     paddingHorizontal: 16,
-    paddingVertical: 8,
+    paddingTop: 10,
+    paddingBottom: 6,
+    gap: 5,
   },
-  subHeaderCounter: { color: COLORS.textSecondary, fontSize: 12, fontWeight: '600' },
-  dotsRow: { flexDirection: 'row', gap: 6 },
+  progressTrack: {
+    height: 4,
+    backgroundColor: COLORS.elevated,
+    borderRadius: 2,
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: 4,
+    backgroundColor: COLORS.green,
+    borderRadius: 2,
+  },
+  progressLabel: { color: COLORS.textSecondary, fontSize: 11, fontWeight: '600' },
+
+  // Pick page chrome
+  dotsCenterRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 6,
+    paddingTop: 10,
+    paddingBottom: 4,
+  },
   dot: { width: 6, height: 6, borderRadius: 3, backgroundColor: COLORS.border },
   dotActive: { backgroundColor: COLORS.green, width: 14 },
+  pickIntro: {
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 4,
+    gap: 4,
+  },
+  pickIntroText: {
+    color: COLORS.textSecondary,
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  pickCounter: {
+    color: COLORS.text,
+    fontSize: 13,
+    fontWeight: '700',
+  },
 
   body: { padding: 16, paddingBottom: 40 },
   pageBody: { padding: 16, paddingBottom: 16 },
@@ -999,35 +1328,67 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: COLORS.border,
     backgroundColor: COLORS.bg,
+    gap: 4,
   },
-  describeBox: {
+  // Bottom button that opens the Describe popup
+  describeOpenBtn: {
     flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
     gap: 8,
-    alignItems: 'flex-end',
-    marginBottom: 8,
-  },
-  describeInput: {
-    flex: 1,
-    backgroundColor: COLORS.elevated,
-    borderRadius: 10,
-    paddingHorizontal: 10,
-    paddingVertical: 10,
-    color: COLORS.text,
-    fontSize: 13,
-    minHeight: 42,
-    maxHeight: 96,
-    textAlignVertical: 'top',
-  },
-  describeBtn: {
-    backgroundColor: COLORS.green + '22',
-    borderRadius: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 11,
+    backgroundColor: COLORS.green + '14',
+    borderRadius: 12,
     borderWidth: 1,
     borderColor: COLORS.green,
+    paddingVertical: 12,
   },
-  describeBtnText: { color: COLORS.green, fontSize: 12, fontWeight: '700' },
+  describeOpenIcon: { color: COLORS.green, fontSize: 14 },
+  describeOpenBtnText: { color: COLORS.green, fontSize: 13, fontWeight: '700' },
   disabledBtn: { opacity: 0.4 },
+
+  // Describe popup overlay
+  describeOverlay: {
+    flex: 1,
+    backgroundColor: '#000B',
+    justifyContent: 'center',
+    paddingHorizontal: 20,
+  },
+  describeCard: {
+    backgroundColor: COLORS.card,
+    borderRadius: 16,
+    padding: 16,
+    gap: 12,
+  },
+  describeCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  describeCardTitle: { color: COLORS.text, fontSize: 16, fontWeight: '700' },
+  describeCloseBtn: {
+    width: 30, height: 30, borderRadius: 15,
+    backgroundColor: COLORS.elevated,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  describeCloseText: { color: COLORS.text, fontSize: 14 },
+  describeCardHint: { color: COLORS.textSecondary, fontSize: 12, lineHeight: 17 },
+  describeTextArea: {
+    backgroundColor: COLORS.elevated,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    color: COLORS.text,
+    fontSize: 14,
+    minHeight: 110,
+    textAlignVertical: 'top',
+  },
+  describeGenBtn: {
+    backgroundColor: COLORS.green,
+    borderRadius: 12,
+    paddingVertical: 13,
+    alignItems: 'center',
+  },
+  describeGenBtnText: { color: '#0E1A12', fontSize: 14, fontWeight: '700' },
 
   skipRow: { alignItems: 'center', paddingVertical: 8 },
   skipText: { color: COLORS.textSecondary, fontSize: 13, fontWeight: '600' },
@@ -1134,6 +1495,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   primaryBtnText: { color: '#0E1A12', fontSize: 14, fontWeight: '700' },
+  // Used when primaryBtn is the only button in a footer (no secondary action).
+  primaryBtnFull: { flex: 1 },
   secondaryBtn: {
     flex: 1,
     borderWidth: 1,
@@ -1143,6 +1506,146 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   secondaryBtnText: { color: COLORS.text, fontSize: 14, fontWeight: '600' },
+
+  // Guide page
+  guideBody: { padding: 16, paddingBottom: 24, gap: 16 },
+  guideHero: { color: COLORS.text, fontSize: 24, fontWeight: '700', marginTop: 6 },
+  guideHeroSub: { color: COLORS.textSecondary, fontSize: 13, lineHeight: 19 },
+  guideCard: {
+    backgroundColor: COLORS.card,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    padding: 14,
+  },
+  guideRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    paddingVertical: 6,
+    gap: 10,
+  },
+  guideRowLabel: {
+    color: COLORS.textSecondary,
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+    paddingTop: 6,
+    width: 80,
+  },
+  guideDivider: { height: 1, backgroundColor: COLORS.border, opacity: 0.6 },
+  guidePillGroup: {
+    flex: 1,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    justifyContent: 'flex-end',
+  },
+  guidePill: {
+    backgroundColor: COLORS.green + '22',
+    borderColor: COLORS.green,
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  guidePillText: { color: COLORS.green, fontSize: 12, fontWeight: '700' },
+  guidePillWarn: {
+    backgroundColor: COLORS.orange + '22',
+    borderColor: COLORS.orange,
+  },
+  guidePillTextWarn: { color: COLORS.orange },
+  guideMuted: { color: COLORS.textMuted, fontSize: 12, fontStyle: 'italic', paddingTop: 6 },
+  guideHint: { color: COLORS.textMuted, fontSize: 11, lineHeight: 16, marginTop: -4 },
+  guideStepsCard: {
+    backgroundColor: COLORS.elevated,
+    borderRadius: 14,
+    padding: 14,
+    gap: 10,
+  },
+  guideStepsTitle: { color: COLORS.text, fontSize: 14, fontWeight: '700', marginBottom: 2 },
+  guideStepRow: { flexDirection: 'row', gap: 10, alignItems: 'flex-start' },
+  guideStepBullet: {
+    width: 22, height: 22, borderRadius: 11,
+    backgroundColor: COLORS.green,
+    alignItems: 'center', justifyContent: 'center',
+    marginTop: 1,
+  },
+  guideStepBulletText: { color: '#0E1A12', fontSize: 12, fontWeight: '700' },
+  guideStepText: { color: COLORS.text, fontSize: 13, lineHeight: 19, flex: 1 },
+  guideCta: { flex: 1 },
+
+  // Preview header cards
+  planNameCard: {
+    backgroundColor: COLORS.card,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: COLORS.green + '55',
+    padding: 14,
+    marginBottom: 12,
+  },
+  planNameLabel: {
+    color: COLORS.green,
+    fontSize: 11,
+    letterSpacing: 1,
+    fontWeight: '700',
+  },
+  planNameText: { color: COLORS.text, fontSize: 22, fontWeight: '700', marginTop: 6 },
+  planNameSub: { color: COLORS.textSecondary, fontSize: 12, marginTop: 4 },
+
+  targetsCard: {
+    backgroundColor: COLORS.card,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    padding: 14,
+    marginBottom: 16,
+  },
+  targetsLabel: { color: COLORS.textSecondary, fontSize: 11, letterSpacing: 1, fontWeight: '700' },
+  targetsCalories: { color: COLORS.text, fontSize: 26, fontWeight: '700', marginTop: 4 },
+  targetsMacroRow: { flexDirection: 'row', gap: 6, marginTop: 10 },
+  targetsMacroPill: {
+    color: COLORS.textSecondary,
+    fontSize: 11,
+    backgroundColor: COLORS.elevated,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 999,
+  },
+
+  previewSection: {
+    color: COLORS.text,
+    fontSize: 15,
+    fontWeight: '700',
+    marginTop: 4,
+    marginBottom: 8,
+  },
+  previewMealList: {
+    backgroundColor: COLORS.card,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    overflow: 'hidden',
+    marginBottom: 16,
+  },
+  previewMealListRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: COLORS.border,
+  },
+  previewMealListName: { color: COLORS.text, fontSize: 14, fontWeight: '600' },
+  previewMealListMeta: { color: COLORS.textSecondary, fontSize: 12, marginTop: 2 },
+  previewSeeMoreBtn: {
+    paddingVertical: 12,
+    alignItems: 'center',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: COLORS.border,
+  },
+  previewSeeMoreText: { color: COLORS.green, fontSize: 13, fontWeight: '700' },
 
   // Guard
   guardWrap: { flex: 1, padding: 24, alignItems: 'center', justifyContent: 'center' },
