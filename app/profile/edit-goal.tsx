@@ -9,7 +9,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { Screen } from '@/components/Screen';
 
 import { COLORS } from '@/constants/theme';
 import {
@@ -43,6 +43,8 @@ export default function EditGoalScreen() {
   const updateProfile = useMealStore(s => s.updateProfile);
   const updateGoals   = useMealStore(s => s.updateGoals);
   const logWeight     = useMealStore(s => s.logWeight);
+  const templates        = useMealStore(s => s.templates);
+  const saveCurrentPlanAs = useMealStore(s => s.saveCurrentPlanAs);
 
   const isImperial = (profile.weightUnit ?? 'lbs') === 'lbs';
 
@@ -125,11 +127,11 @@ export default function EditGoalScreen() {
       'Update your current meal plan to match the new targets?',
       [
         {
-          text: 'No, just save targets',
+          text: 'No, keep current plan',
           onPress: () => persist(finalTargets, false),
         },
         {
-          text: 'Yes, update plan',
+          text: 'Yes, build new plan',
           style: 'destructive',
           onPress: () => persist(finalTargets, true),
         },
@@ -137,9 +139,7 @@ export default function EditGoalScreen() {
     );
   };
 
-  const persist = (t: GoalTargets, _alsoUpdatePlan: boolean) => {
-    // Save profile + goals. (Plan recalculation is a stretch goal — we just
-    // store the new targets; the plan tab continues to honour what's there.)
+  const persist = (t: GoalTargets, updatePlan: boolean) => {
     updateProfile({
       goalType,
       activityLevel: activity,
@@ -156,13 +156,25 @@ export default function EditGoalScreen() {
       isCalculated: true,
     };
     updateGoals(next);
-    router.back();
+
+    if (updatePlan) {
+      // Auto-save the current plan (nothing lost) before building a new one.
+      if (templates.length > 0) {
+        const today = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        saveCurrentPlanAs(`Auto-saved Plan – ${today}`);
+      }
+      // Replace this route so Back from Build My Plan returns to Profile,
+      // not to the stale Edit Goal flow.
+      router.replace('/plan/build');
+    } else {
+      router.back();
+    }
   };
 
   // ─── Render ──────────────────────────────────────────────────────────────
 
   return (
-    <SafeAreaView style={styles.safe} edges={['top']}>
+    <Screen edges={['top', 'bottom']}>
       <View style={styles.header}>
         <TouchableOpacity onPress={handleBack} style={styles.iconBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
           <Text style={styles.backArrow}>←</Text>
@@ -329,7 +341,7 @@ export default function EditGoalScreen() {
           </Text>
         </TouchableOpacity>
       </View>
-    </SafeAreaView>
+    </Screen>
   );
 }
 

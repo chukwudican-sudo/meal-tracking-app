@@ -126,6 +126,7 @@ export function AddMealScreen({ visible, date, onClose }: Props) {
                     macros: draft.macros,
                     status: 'pending',
                     isAdHoc: true,
+                    photoUri: src.photoUri,
                   });
                   handleClose();
                   return;
@@ -135,27 +136,13 @@ export function AddMealScreen({ visible, date, onClose }: Props) {
             />
           )}
           {activeTab === 'ai' && (
-            <AITab
-              context={context}
-              onDraftReady={(draft, attached) =>
-                setPending({
-                  draft,
-                  source: 'ai',
-                  imageUri: attached.imageUri,
-                  history: attached.history,
-                })
-              }
-            />
+            <AITab context={context} date={date} onLogged={handleClose} />
           )}
           {activeTab === 'manual' && (
             <ManualTab date={date} onCreated={handleClose} />
           )}
           {activeTab === 'search' && (
-            <SearchTab
-              onDraftReady={(draft, meta) =>
-                setPending({ draft, source: 'search', librarySourceId: meta?.libraryId })
-              }
-            />
+            <SearchTab onClose={handleClose} />
           )}
         </View>
 
@@ -176,6 +163,7 @@ export function AddMealScreen({ visible, date, onClose }: Props) {
                 initial={pending.draft}
                 mode="create"
                 showFix={pending.source === 'scan' || pending.source === 'ai'}
+                photoUri={pending.imageUri}
                 onFix={() => setShowFix(true)}
                 onCancel={() => setPending(null)}
                 onSaved={handleSaved}

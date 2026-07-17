@@ -1,106 +1,133 @@
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import {
-  View,
+  ActivityIndicator,
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
-  StyleSheet,
-  ScrollView,
-  ActivityIndicator,
-  KeyboardAvoidingView,
-  Platform,
-  Alert,
+  View,
 } from 'react-native';
 import { Audio } from 'expo-av';
-import * as ImagePicker from 'expo-image-picker';
 
 import { COLORS } from '@/constants/theme';
-import { aiClient, isStubAI, parseDraftFromReply } from '@/ai/aiClient';
+import { aiClient, isStubAI } from '@/ai/aiClient';
 import type { ChatMessage, DayContext, MealDraft } from '@/ai/types';
-import { APP_LOGO } from '@/constants/app';
+import { newId } from '@/lib/sync/uuid';
+import type { Ingredient, MealEntry } from '@/store/types';
+import { useMealStore } from '@/store/useMealStore';
 
 interface Props {
   context: DayContext;
-  onDraftReady: (draft: MealDraft, attached: { imageUri?: string; history: ChatMessage[] }) => void;
+  date: string;
+  onLogged: () => void;
 }
 
-export function AITab({ context, onDraftReady }: Props) {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+const ZERO_MACROS = { protein: 0, carbs: 0, fats: 0 };
+
+function nowHHMM(): string {
+  const d = new Date();
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
+// Shell ingredient derivation: split the description into items and distribute
+// the estimated calories/macros evenly so each row carries some nutrition.
+function deriveIngredients(text: string, draft: MealDraft): Ingredient[] {
+  const parts = text
+    .split(/,|\band\b|\n|\+/i)
+    .map(p => p.trim())
+    .filter(p => p.length > 1)
+    .slice(0, 8);
+  if (parts.length === 0) return [];
+  const n = parts.length;
+  const split = (total: number, i: number) =>
+    Math.round(total / n) + (i === 0 ? total - Math.round(total / n) * n : 0);
+  return parts.map((name, i) => ({
+    id: `aiing-${Date.now()}-${i}`,
+    name: name.length > 40 ? name.slice(0, 40) : name,
+    quantity: 1,
+    unit: 'serving',
+    servings: 1,
+    calories: split(draft.calories, i),
+    macros: {
+      protein: split(draft.macros.protein, i),
+      carbs: split(draft.macros.carbs, i),
+      fats: split(draft.macros.fats, i),
+    },
+  }));
+}
+
+export function AITab({ context, date, onLogged }: Props) {
+  const addMealToDay = useMealStore(s => s.addMealToDay);
+  const ingestMidWeekIngredients = useMealStore(s => s.ingestMidWeekIngredients);
+
   const [input, setInput] = useState('');
-  const [pendingImage, setPendingImage] = useState<string | null>(null);
-  const [streaming, setStreaming] = useState(false);
+  const [draft, setDraft] = useState<MealDraft | null>(null);
+  const [ingredients, setIngredients] = useState<Ingredient[]>([]);
+  const [note, setNote] = useState('');
+  const [busy, setBusy] = useState(false);
   const [recording, setRecording] = useState(false);
   const recordingRef = useRef<Audio.Recording | null>(null);
-  const scrollRef = useRef<ScrollView>(null);
+  const historyRef = useRef<ChatMessage[]>([]);
+  const fullTextRef = useRef('');
 
-  const isEmpty = messages.length === 0 && !streaming;
+  const cals = draft?.calories ?? 0;
+  const macros = draft?.macros ?? ZERO_MACROS;
+  const hasEstimate = draft != null;
 
-  useEffect(() => {
-    setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 30);
-  }, [messages, streaming]);
-
-  async function send() {
+  async function estimate() {
     const trimmed = input.trim();
-    if (!trimmed && !pendingImage) return;
-    if (streaming) return;
-
-    const userMsg: ChatMessage = {
-      role: 'user',
-      content: trimmed || 'Identify this meal.',
-      imageUri: pendingImage ?? undefined,
-    };
-
-    const nextHistory = [...messages, userMsg];
-    setMessages([...nextHistory, { role: 'assistant', content: '' }]);
-    setInput('');
-    const photoUri = pendingImage;
-    setPendingImage(null);
-    setStreaming(true);
-
+    if (!trimmed || busy) return;
+    setBusy(true);
+    const combined = [fullTextRef.current, trimmed].filter(Boolean).join('. ');
     try {
-      let acc = '';
-      for await (const chunk of aiClient.chat(nextHistory, context, { imageUri: photoUri ?? undefined })) {
-        acc += chunk;
-        setMessages(prev => {
-          const copy = [...prev];
-          copy[copy.length - 1] = { role: 'assistant', content: acc };
-          return copy;
-        });
-      }
-      // Try to extract a draft from the assistant's final reply.
-      const candidate = parseDraftFromReply(acc);
-      if (looksLikeRealDraft(candidate)) {
-        onDraftReady(candidate, {
-          imageUri: photoUri ?? undefined,
-          history: [...nextHistory, { role: 'assistant', content: acc }],
-        });
-      }
+      const next = draft
+        ? await aiClient.fixMeal({ fixText: trimmed, currentDraft: draft, history: historyRef.current }, context)
+        : await aiClient.parseMeal({ text: combined }, context);
+      setDraft(next);
+      setIngredients(deriveIngredients(combined, next));
+      setNote(
+        draft
+          ? `Updated estimate for "${next.name}". Add more details to refine.`
+          : `Estimated "${next.name}". Add corrections below to refine.`,
+      );
+      historyRef.current = [
+        ...historyRef.current,
+        { role: 'user', content: trimmed },
+        { role: 'assistant', content: JSON.stringify(next) },
+      ];
+      fullTextRef.current = combined;
+      setInput('');
     } catch (e) {
-      console.warn('AI chat failed:', e);
-      setMessages(prev => {
-        const copy = [...prev];
-        copy[copy.length - 1] = {
-          role: 'assistant',
-          content: 'Something went wrong reaching the assistant. Try again.',
-        };
-        return copy;
-      });
+      console.warn('AI estimate failed:', e);
+      setNote('Something went wrong estimating. Try again.');
     } finally {
-      setStreaming(false);
+      setBusy(false);
     }
   }
 
-  async function attachImage() {
-    if (Platform.OS === 'web') return;
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
-      quality: 0.5,
-      base64: true,
-    });
-    if (result.canceled || !result.assets?.[0]) return;
-    const asset = result.assets[0];
-    const dataUri = asset.base64 ? `data:image/jpeg;base64,${asset.base64}` : asset.uri;
-    setPendingImage(dataUri);
+  function log() {
+    if (!draft) return;
+    const entry: MealEntry = {
+      // UUID required — meal_logs.id is a uuid column on the server.
+      id: newId(),
+      name: draft.name,
+      time: nowHHMM(),
+      calories: draft.calories,
+      ingredients,
+      macros: draft.macros,
+      status: 'pending',
+      isAdHoc: true,
+      servings: 1,
+    };
+    addMealToDay(date, entry);
+    if (ingredients.length > 0) {
+      ingestMidWeekIngredients(ingredients.map(i => ({ name: i.name, mealName: draft.name })));
+    }
+    onLogged();
   }
 
   async function startRecording() {
@@ -115,9 +142,7 @@ export function AITab({ context, onDraftReady }: Props) {
         return;
       }
       await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
-      const { recording: rec } = await Audio.Recording.createAsync(
-        Audio.RecordingOptionsPresets.HIGH_QUALITY,
-      );
+      const { recording: rec } = await Audio.Recording.createAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
       recordingRef.current = rec;
       setRecording(true);
     } catch (e) {
@@ -147,51 +172,54 @@ export function AITab({ context, onDraftReady }: Props) {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
     >
-      {isEmpty ? (
-        <View style={styles.emptyWrap}>
-          <Text style={styles.emptyEmoji}>{APP_LOGO}</Text>
-          <Text style={styles.emptyTitle}>Describe what you ate</Text>
-          <Text style={styles.emptySub}>Or tap the mic to talk</Text>
-          {isStubAI && (
-            <Text style={styles.stubNotice}>
-              Stub mode — drop an OpenAI key in .env to enable the real assistant.
+      <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollBody} keyboardShouldPersistTaps="handled">
+        {/* Live nutrition card */}
+        <View style={styles.card}>
+          <Text style={styles.cardName} numberOfLines={1}>{draft?.name ?? 'Describe your meal'}</Text>
+          <View style={styles.calRow}>
+            <Text style={styles.calValue}>{cals}</Text>
+            <Text style={styles.calUnit}>cal</Text>
+          </View>
+          <View style={styles.macroRow}>
+            <MacroChip label="Protein" value={macros.protein} />
+            <MacroChip label="Carbs" value={macros.carbs} />
+            <MacroChip label="Fats" value={macros.fats} />
+          </View>
+        </View>
+
+        {/* Estimated ingredients */}
+        <Text style={styles.sectionLabel}>Estimated ingredients</Text>
+        {ingredients.length === 0 ? (
+          <View style={styles.emptyIng}>
+            <Text style={styles.emptyIngText}>
+              Ingredients appear here once you describe what you ate.
             </Text>
-          )}
-        </View>
-      ) : (
-        <ScrollView
-          ref={scrollRef}
-          style={styles.chat}
-          contentContainerStyle={styles.chatBody}
-          keyboardShouldPersistTaps="handled"
-        >
-          {messages.map((m, i) => (
-            <Bubble key={i} role={m.role} text={m.content} imageUri={m.imageUri} streaming={streaming && i === messages.length - 1} />
-          ))}
-        </ScrollView>
-      )}
+          </View>
+        ) : (
+          ingredients.map(ing => (
+            <View key={ing.id} style={styles.ingRow}>
+              <Text style={styles.ingName} numberOfLines={1}>{ing.name}</Text>
+              <Text style={styles.ingCal}>{ing.calories ?? 0} cal</Text>
+            </View>
+          ))
+        )}
 
-      {pendingImage && (
-        <View style={styles.attachmentRow}>
-          <Text style={styles.attachmentText}>📎 1 image attached</Text>
-          <TouchableOpacity onPress={() => setPendingImage(null)}>
-            <Text style={styles.attachmentRemove}>✕</Text>
-          </TouchableOpacity>
-        </View>
-      )}
+        {note ? <Text style={styles.note}>{note}</Text> : null}
+        {isStubAI && !note ? (
+          <Text style={styles.stubNotice}>Stub mode — add an OpenAI key in .env to enable real estimates.</Text>
+        ) : null}
+      </ScrollView>
 
+      {/* Input area */}
       <View style={styles.inputBar}>
-        <TouchableOpacity onPress={attachImage} style={styles.iconBtn}>
-          <Text style={styles.iconText}>🖼️</Text>
-        </TouchableOpacity>
         <TextInput
           style={styles.input}
           value={input}
           onChangeText={setInput}
-          placeholder="Describe a meal…"
+          placeholder={hasEstimate ? 'Add a correction…' : 'Describe what you ate…'}
           placeholderTextColor={COLORS.textMuted}
           multiline
-          editable={!streaming}
+          editable={!busy}
         />
         <TouchableOpacity
           onPressIn={startRecording}
@@ -201,119 +229,91 @@ export function AITab({ context, onDraftReady }: Props) {
           <Text style={styles.iconText}>{recording ? '🔴' : '🎙️'}</Text>
         </TouchableOpacity>
         <TouchableOpacity
-          onPress={send}
-          disabled={streaming || (!input.trim() && !pendingImage)}
-          style={[
-            styles.sendBtn,
-            (streaming || (!input.trim() && !pendingImage)) && styles.sendBtnDisabled,
-          ]}
+          onPress={estimate}
+          disabled={busy || !input.trim()}
+          style={[styles.sendBtn, (busy || !input.trim()) && styles.sendBtnDisabled]}
         >
-          {streaming ? (
-            <ActivityIndicator color="#0E1A12" />
-          ) : (
-            <Text style={styles.sendBtnText}>↑</Text>
-          )}
+          {busy ? <ActivityIndicator color="#0E1A12" /> : <Text style={styles.sendBtnText}>↑</Text>}
         </TouchableOpacity>
       </View>
+
+      {/* Log button */}
+      <TouchableOpacity
+        onPress={log}
+        disabled={!hasEstimate}
+        style={[styles.logBtn, !hasEstimate && styles.logBtnDisabled]}
+        activeOpacity={0.85}
+      >
+        <Text style={[styles.logBtnText, !hasEstimate && styles.logBtnTextDisabled]}>Log</Text>
+      </TouchableOpacity>
     </KeyboardAvoidingView>
   );
 }
 
-function Bubble({
-  role,
-  text,
-  imageUri,
-  streaming,
-}: {
-  role: 'user' | 'assistant' | 'system';
-  text: string;
-  imageUri?: string;
-  streaming?: boolean;
-}) {
-  if (role === 'system') return null;
-  const isUser = role === 'user';
-  // Strip the JSON code block from displayed assistant text — the draft card
-  // covers it visually elsewhere.
-  const display = isUser ? text : text.replace(/```json[\s\S]*?```/gi, '').trim();
+function MacroChip({ label, value }: { label: string; value: number }) {
   return (
-    <View style={[styles.bubbleRow, isUser ? styles.bubbleRight : styles.bubbleLeft]}>
-      <View style={[styles.bubble, isUser ? styles.bubbleUser : styles.bubbleAi]}>
-        {imageUri && isUser && (
-          <View style={styles.bubbleImageHint}>
-            <Text style={styles.bubbleImageHintText}>🖼️ Image attached</Text>
-          </View>
-        )}
-        <Text style={[styles.bubbleText, isUser ? styles.bubbleTextUser : styles.bubbleTextAi]}>
-          {display || (streaming ? '…' : '')}
-        </Text>
-      </View>
+    <View style={styles.macroChip}>
+      <Text style={styles.macroChipValue}>{value}g</Text>
+      <Text style={styles.macroChipLabel}>{label}</Text>
     </View>
   );
 }
 
-function looksLikeRealDraft(d: MealDraft): boolean {
-  if (!d.name || d.name === 'New meal') return false;
-  return true;
-}
-
 const styles = StyleSheet.create({
   full: { flex: 1, backgroundColor: COLORS.bg },
-  emptyWrap: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 30,
-    gap: 8,
-  },
-  emptyEmoji: { fontSize: 48, marginBottom: 8 },
-  emptyTitle: { color: COLORS.text, fontSize: 22, fontWeight: '700', textAlign: 'center' },
-  emptySub: { color: COLORS.textSecondary, fontSize: 14 },
-  stubNotice: {
-    color: COLORS.textMuted,
-    fontSize: 11,
-    marginTop: 14,
-    textAlign: 'center',
-  },
-  chat: { flex: 1 },
-  chatBody: { padding: 14, gap: 8 },
-  bubbleRow: { flexDirection: 'row' },
-  bubbleLeft: { justifyContent: 'flex-start' },
-  bubbleRight: { justifyContent: 'flex-end' },
-  bubble: {
-    maxWidth: '82%',
-    paddingVertical: 9,
-    paddingHorizontal: 12,
-    borderRadius: 14,
-  },
-  bubbleAi: {
+  scroll: { flex: 1 },
+  scrollBody: { padding: 16, paddingBottom: 24 },
+
+  card: {
     backgroundColor: COLORS.card,
-    borderTopLeftRadius: 4,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    padding: 16,
   },
-  bubbleUser: {
-    backgroundColor: COLORS.green,
-    borderTopRightRadius: 4,
+  cardName: { color: COLORS.text, fontSize: 16, fontWeight: '700' },
+  calRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 6, marginTop: 8 },
+  calValue: { color: COLORS.text, fontSize: 38, fontWeight: '800' },
+  calUnit: { color: COLORS.textSecondary, fontSize: 16, marginBottom: 7 },
+  macroRow: { flexDirection: 'row', gap: 10, marginTop: 12 },
+  macroChip: {
+    flex: 1,
+    backgroundColor: COLORS.elevated,
+    borderRadius: 12,
+    paddingVertical: 10,
+    alignItems: 'center',
   },
-  bubbleText: { fontSize: 14, lineHeight: 20 },
-  bubbleTextAi: { color: COLORS.text },
-  bubbleTextUser: { color: '#0E1A12' },
-  bubbleImageHint: {
-    marginBottom: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    backgroundColor: 'rgba(0,0,0,0.15)',
-    borderRadius: 8,
-    alignSelf: 'flex-start',
+  macroChipValue: { color: COLORS.text, fontSize: 16, fontWeight: '700' },
+  macroChipLabel: { color: COLORS.textSecondary, fontSize: 12, marginTop: 2 },
+
+  sectionLabel: { color: COLORS.textSecondary, fontSize: 13, fontWeight: '600', marginTop: 20, marginBottom: 8 },
+  emptyIng: {
+    backgroundColor: COLORS.card,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderStyle: 'dashed',
+    padding: 18,
   },
-  bubbleImageHintText: { fontSize: 11, color: '#0E1A12' },
-  attachmentRow: {
+  emptyIngText: { color: COLORS.textMuted, fontSize: 13, textAlign: 'center', lineHeight: 19 },
+  ingRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: COLORS.card,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: COLORS.border,
     paddingHorizontal: 14,
-    paddingVertical: 6,
-    gap: 8,
+    paddingVertical: 12,
+    marginBottom: 8,
   },
-  attachmentText: { color: COLORS.textSecondary, fontSize: 12, flex: 1 },
-  attachmentRemove: { color: COLORS.red, fontSize: 14, fontWeight: '700' },
+  ingName: { color: COLORS.text, fontSize: 14, fontWeight: '600', flex: 1, marginRight: 10 },
+  ingCal: { color: COLORS.textSecondary, fontSize: 13 },
+
+  note: { color: COLORS.textSecondary, fontSize: 13, marginTop: 14, lineHeight: 19 },
+  stubNotice: { color: COLORS.textMuted, fontSize: 11, marginTop: 14, textAlign: 'center' },
+
   inputBar: {
     flexDirection: 'row',
     alignItems: 'flex-end',
@@ -323,6 +323,16 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: COLORS.border,
     backgroundColor: COLORS.bg,
+  },
+  input: {
+    flex: 1,
+    color: COLORS.text,
+    backgroundColor: COLORS.card,
+    borderRadius: 19,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    fontSize: 14,
+    maxHeight: 110,
   },
   iconBtn: {
     width: 38,
@@ -334,16 +344,6 @@ const styles = StyleSheet.create({
   },
   iconBtnActive: { backgroundColor: COLORS.red + '33' },
   iconText: { fontSize: 18 },
-  input: {
-    flex: 1,
-    color: COLORS.text,
-    backgroundColor: COLORS.card,
-    borderRadius: 19,
-    paddingHorizontal: 14,
-    paddingVertical: 9,
-    fontSize: 14,
-    maxHeight: 110,
-  },
   sendBtn: {
     width: 38,
     height: 38,
@@ -354,4 +354,16 @@ const styles = StyleSheet.create({
   },
   sendBtnDisabled: { backgroundColor: COLORS.elevated },
   sendBtnText: { color: '#0E1A12', fontSize: 18, fontWeight: '700' },
+
+  logBtn: {
+    margin: 16,
+    marginTop: 8,
+    paddingVertical: 15,
+    borderRadius: 14,
+    backgroundColor: COLORS.green,
+    alignItems: 'center',
+  },
+  logBtnDisabled: { backgroundColor: COLORS.elevated },
+  logBtnText: { color: '#0E1A12', fontSize: 16, fontWeight: '800' },
+  logBtnTextDisabled: { color: COLORS.textMuted },
 });

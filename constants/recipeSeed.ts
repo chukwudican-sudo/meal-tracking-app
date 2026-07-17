@@ -29,6 +29,7 @@ export const RECIPE_SEED: RecipeTemplate[] = [
       'Simmer 5 minutes, stirring, until thickened.',
       'Top with blueberries and drizzle with honey.',
     ],
+    difficulty: 'Easy',
   },
   {
     id: 'rcp-bf-greek-yogurt-bowl',
@@ -48,6 +49,7 @@ export const RECIPE_SEED: RecipeTemplate[] = [
       'Top with granola and sliced strawberries.',
       'Drizzle with honey.',
     ],
+    difficulty: 'Easy',
   },
   {
     id: 'rcp-bf-veggie-omelette',
@@ -68,6 +70,7 @@ export const RECIPE_SEED: RecipeTemplate[] = [
       'Sauté pepper and spinach in olive oil 2 minutes.',
       'Pour in eggs, sprinkle cheese, fold and serve.',
     ],
+    difficulty: 'Easy',
   },
   {
     id: 'rcp-bf-avocado-toast',
@@ -87,6 +90,7 @@ export const RECIPE_SEED: RecipeTemplate[] = [
       'Mash avocado with lemon juice, salt, and pepper.',
       'Spread on toast and sprinkle chili flakes.',
     ],
+    difficulty: 'Easy',
   },
   {
     id: 'rcp-bf-protein-pancakes',
@@ -107,6 +111,7 @@ export const RECIPE_SEED: RecipeTemplate[] = [
       'Cook small pancakes in a non-stick pan, 2 minutes per side.',
       'Stack and serve with fruit on top.',
     ],
+    difficulty: 'Easy',
   },
 
   // ─── Lunch ─────────────────────────────────────────────────────────────────
@@ -129,6 +134,7 @@ export const RECIPE_SEED: RecipeTemplate[] = [
       'Toss lettuce with dressing.',
       'Top with chicken, parmesan, and croutons.',
     ],
+    difficulty: 'Medium',
   },
   {
     id: 'rcp-ln-tuna-wrap',
@@ -149,6 +155,7 @@ export const RECIPE_SEED: RecipeTemplate[] = [
       'Lay lettuce and sliced tomato on the tortilla.',
       'Spoon tuna mix, roll tightly, slice in half.',
     ],
+    difficulty: 'Easy',
   },
   {
     id: 'rcp-ln-quinoa-bowl',
@@ -170,6 +177,7 @@ export const RECIPE_SEED: RecipeTemplate[] = [
       'Combine with chickpeas, cucumber, and tomatoes.',
       'Dress with olive oil, lemon juice, salt.',
     ],
+    difficulty: 'Medium',
   },
   {
     id: 'rcp-ln-turkey-sandwich',
@@ -190,6 +198,7 @@ export const RECIPE_SEED: RecipeTemplate[] = [
       'Layer turkey, cheese, and lettuce.',
       'Slice diagonally and serve.',
     ],
+    difficulty: 'Easy',
   },
   {
     id: 'rcp-ln-veggie-stir-fry',
@@ -210,6 +219,7 @@ export const RECIPE_SEED: RecipeTemplate[] = [
       'Sauté garlic in sesame oil, add veggies, stir-fry 5 minutes.',
       'Add soy sauce, toss, serve over rice.',
     ],
+    difficulty: 'Easy',
   },
 
   // ─── Dinner ────────────────────────────────────────────────────────────────
@@ -234,6 +244,7 @@ export const RECIPE_SEED: RecipeTemplate[] = [
       'Add aromatics and veggies; toss with soy sauce.',
       'Serve over rice.',
     ],
+    difficulty: 'Medium',
   },
   {
     id: 'rcp-dn-salmon-rice',
@@ -255,6 +266,7 @@ export const RECIPE_SEED: RecipeTemplate[] = [
       'Steam broccoli 5 minutes.',
       'Plate together.',
     ],
+    difficulty: 'Hard',
   },
   {
     id: 'rcp-dn-beef-tacos',
@@ -276,6 +288,7 @@ export const RECIPE_SEED: RecipeTemplate[] = [
       'Add seasoning with a splash of water; simmer 3 minutes.',
       'Warm taco shells; fill with beef, lettuce, tomato, cheese.',
     ],
+    difficulty: 'Medium',
   },
   {
     id: 'rcp-dn-pasta-primavera',
@@ -298,6 +311,7 @@ export const RECIPE_SEED: RecipeTemplate[] = [
       'Sauté garlic and veggies in olive oil 6 minutes.',
       'Toss with pasta and a splash of pasta water; finish with parmesan.',
     ],
+    difficulty: 'Medium',
   },
   {
     id: 'rcp-dn-veggie-curry',
@@ -320,6 +334,7 @@ export const RECIPE_SEED: RecipeTemplate[] = [
       'Add tomato and coconut milk; simmer 10 minutes.',
       'Stir in chickpeas; simmer 5 more minutes; serve over rice.',
     ],
+    difficulty: 'Hard',
   },
 
   // ─── Snacks ────────────────────────────────────────────────────────────────
@@ -338,6 +353,7 @@ export const RECIPE_SEED: RecipeTemplate[] = [
       'Cut carrots into sticks.',
       'Serve with hummus for dipping.',
     ],
+    difficulty: 'Easy',
   },
   {
     id: 'rcp-sn-protein-smoothie',
@@ -356,6 +372,7 @@ export const RECIPE_SEED: RecipeTemplate[] = [
       'Combine all ingredients in a blender.',
       'Blend 30 seconds until smooth.',
     ],
+    difficulty: 'Easy',
   },
   {
     id: 'rcp-sn-apple-almonds',
@@ -372,6 +389,7 @@ export const RECIPE_SEED: RecipeTemplate[] = [
       'Slice apple.',
       'Serve with a small handful of almonds.',
     ],
+    difficulty: 'Easy',
   },
   {
     id: 'rcp-sn-yogurt-honey',
@@ -389,6 +407,7 @@ export const RECIPE_SEED: RecipeTemplate[] = [
       'Spoon yogurt into a bowl.',
       'Drizzle honey and top with crushed walnuts.',
     ],
+    difficulty: 'Easy',
   },
   {
     id: 'rcp-sn-rice-cake-pb',
@@ -406,5 +425,6 @@ export const RECIPE_SEED: RecipeTemplate[] = [
       'Spread peanut butter on rice cakes.',
       'Top with banana slices.',
     ],
+    difficulty: 'Easy',
   },
 ];

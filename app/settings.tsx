@@ -7,9 +7,11 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { Screen } from '@/components/Screen';
 
 import { COLORS } from '@/constants/theme';
+import { signOut } from '@/lib/auth';
+import { engine } from '@/lib/sync/engine';
 import { useMealStore } from '@/store/useMealStore';
 
 export default function SettingsScreen() {
@@ -18,6 +20,41 @@ export default function SettingsScreen() {
   const handleBack = () => {
     if (router.canGoBack()) router.back();
     else router.replace('/profile');
+  };
+
+  // Safe ordering: the projector was already stopped in prepareSignOut(), so
+  // clearing the local cache now can't be replicated to the server as deletes.
+  // End the session, wipe the cache so the UI actually clears, then hand the
+  // user to onboarding/login (the tabs gate also enforces this once signed out).
+  const finishLogout = async () => {
+    const { error } = await signOut();
+    if (error) {
+      // Session still alive — resume capturing so nothing is missed.
+      engine.resumeAfterCancelledSignOut();
+      Alert.alert('Log out failed', error);
+      return;
+    }
+    resetUserData();
+    router.replace('/onboarding');
+  };
+
+  const performLogout = async () => {
+    // Stop capturing + flush queued writes while the token is still valid.
+    const { pending, deadLetter } = await engine.prepareSignOut();
+    const unsynced = pending + deadLetter;
+    if (unsynced > 0) {
+      Alert.alert(
+        'Unsynced changes',
+        `${unsynced} change${unsynced === 1 ? '' : 's'} haven't been saved to the cloud yet — you may be offline. ` +
+          `They'll stay on this device and finish syncing the next time you sign in here. Log out anyway?`,
+        [
+          { text: 'Stay', style: 'cancel', onPress: () => engine.resumeAfterCancelledSignOut() },
+          { text: 'Log out anyway', style: 'destructive', onPress: () => { void finishLogout(); } },
+        ],
+      );
+      return;
+    }
+    await finishLogout();
   };
 
   const handleLogout = () => {
@@ -29,19 +66,14 @@ export default function SettingsScreen() {
         {
           text: 'Log out',
           style: 'destructive',
-          onPress: () => {
-            // For MVP, log out clears the in-memory profile + returns to root.
-            // Real auth wiring will replace this when the auth flow exists.
-            resetUserData();
-            router.replace('/(tabs)');
-          },
+          onPress: () => { void performLogout(); },
         },
       ]
     );
   };
 
   return (
-    <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
+    <Screen edges={['top', 'bottom']}>
       <View style={styles.header}>
         <TouchableOpacity
           onPress={handleBack}
@@ -75,7 +107,7 @@ export default function SettingsScreen() {
           <Text style={styles.logoutText}>Log Out</Text>
         </TouchableOpacity>
       </ScrollView>
-    </SafeAreaView>
+    </Screen>
   );
 }
 

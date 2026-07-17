@@ -3,7 +3,9 @@ import {
   ActivityIndicator,
   Image,
   KeyboardAvoidingView,
+  Modal,
   Platform,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -18,11 +20,13 @@ import {
   type FlashMode,
 } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
+import Ionicons from '@expo/vector-icons/Ionicons';
 
 import { COLORS } from '@/constants/theme';
 import { aiClient, isStubAI } from '@/ai/aiClient';
 import type { DayContext, MealDraft } from '@/ai/types';
 import type { UserGoals } from '@/store/types';
+import { rateMeal } from '@/utils/mealRating';
 import { useMealStore } from '@/store/useMealStore';
 import { useToastStore } from '@/store/useToastStore';
 
@@ -207,7 +211,7 @@ export function ScanTab({ context, onDraftReady }: Props) {
       const match = list.find(r => r.name === scaledDraft.name && r.source === 'ai');
       if (match) removeSavedRecipe(match.id);
       setBookmarked(false);
-      showToast('Removed from Favourites');
+      showToast('Removed from Saved Recipes');
       return;
     }
     const saved = ensureRecipeSaved({
@@ -220,7 +224,7 @@ export function ScanTab({ context, onDraftReady }: Props) {
     });
     void saved;
     setBookmarked(true);
-    showToast('Added to Favourites');
+    showToast('Added to Saved Recipes');
   }
 
   async function handleReevaluate() {
@@ -354,17 +358,27 @@ export function ScanTab({ context, onDraftReady }: Props) {
             />
           )}
 
-          {scanState === 'fix' && (
-            <FixOverlay
-              fixText={fixText}
-              setFixText={setFixText}
-              busy={busy}
-              onClose={() => setScanState('result')}
-              onReevaluate={handleReevaluate}
-            />
-          )}
         </View>
       )}
+
+      {/* Fix Result overlay lives in its own Modal so KeyboardAvoidingView
+          operates at the OS root and reliably lifts the card above the
+          keyboard. Embedding inside the result-stack View was unreliable
+          because of the dimmed background's absolute positioning. */}
+      <Modal
+        transparent
+        visible={scanState === 'fix'}
+        animationType="slide"
+        onRequestClose={() => setScanState('result')}
+      >
+        <FixOverlay
+          fixText={fixText}
+          setFixText={setFixText}
+          busy={busy}
+          onClose={() => setScanState('result')}
+          onReevaluate={handleReevaluate}
+        />
+      </Modal>
     </View>
   );
 }
@@ -406,9 +420,11 @@ function ResultSheet({
         <View style={styles.sheetTopRow}>
           <Text style={styles.sheetName} numberOfLines={2}>{draft.name}</Text>
           <TouchableOpacity onPress={onBookmarkToggle} hitSlop={10} style={styles.bookmarkBtn}>
-            <Text style={[styles.bookmarkIcon, bookmarked && styles.bookmarkIconActive]}>
-              {bookmarked ? '★' : '☆'}
-            </Text>
+            <Ionicons
+              name={bookmarked ? 'bookmark' : 'bookmark-outline'}
+              size={24}
+              color={bookmarked ? COLORS.green : COLORS.textSecondary}
+            />
           </TouchableOpacity>
         </View>
 
@@ -494,71 +510,55 @@ interface FixOverlayProps {
 function FixOverlay({ fixText, setFixText, busy, onClose, onReevaluate }: FixOverlayProps) {
   return (
     <KeyboardAvoidingView
-      style={styles.fixOverlay}
+      style={{ flex: 1 }}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      <View style={styles.fixCard}>
-        <View style={styles.fixHeader}>
-          <Text style={styles.fixTitle}>Fix Result</Text>
-          <TouchableOpacity onPress={onClose} hitSlop={10} style={styles.fixCloseBtn}>
-            <Text style={styles.fixCloseText}>✕</Text>
+      <Pressable style={styles.fixBackdrop} onPress={onClose}>
+        {/* Inner Pressable absorbs taps so the card itself doesn't dismiss.
+            The card sits at flex-end and rides up with the keyboard via the
+            outer KeyboardAvoidingView. */}
+        <Pressable style={styles.fixCard} onPress={() => {}}>
+          <View style={styles.fixHandle} />
+          <View style={styles.fixHeader}>
+            <Text style={styles.fixTitle}>Fix Result</Text>
+            <TouchableOpacity onPress={onClose} hitSlop={10} style={styles.fixCloseBtn}>
+              <Text style={styles.fixCloseText}>✕</Text>
+            </TouchableOpacity>
+          </View>
+          <Text style={styles.fixHint}>
+            Describe any corrections — wrong food, portion size, missed ingredients, etc.
+          </Text>
+          <TextInput
+            style={styles.fixInput}
+            value={fixText}
+            onChangeText={setFixText}
+            placeholder="e.g. that's actually a chicken thigh, not a breast"
+            placeholderTextColor={COLORS.textMuted}
+            multiline
+            autoFocus
+          />
+          <TouchableOpacity
+            style={[styles.fixSubmit, (!fixText.trim() || busy) && styles.disabled]}
+            onPress={onReevaluate}
+            disabled={!fixText.trim() || busy}
+          >
+            {busy ? (
+              <ActivityIndicator color="#0E1A12" />
+            ) : (
+              <Text style={styles.fixSubmitText}>Re-evaluate</Text>
+            )}
           </TouchableOpacity>
-        </View>
-        <Text style={styles.fixHint}>
-          Describe any corrections — wrong food, portion size, missed ingredients, etc.
-        </Text>
-        <TextInput
-          style={styles.fixInput}
-          value={fixText}
-          onChangeText={setFixText}
-          placeholder="e.g. that's actually a chicken thigh, not a breast"
-          placeholderTextColor={COLORS.textMuted}
-          multiline
-          autoFocus
-        />
-        <TouchableOpacity
-          style={[styles.fixSubmit, (!fixText.trim() || busy) && styles.disabled]}
-          onPress={onReevaluate}
-          disabled={!fixText.trim() || busy}
-        >
-          {busy ? (
-            <ActivityIndicator color="#0E1A12" />
-          ) : (
-            <Text style={styles.fixSubmitText}>Re-evaluate</Text>
-          )}
-        </TouchableOpacity>
-      </View>
+        </Pressable>
+      </Pressable>
     </KeyboardAvoidingView>
   );
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
-// Contextual rating. Compares macros to the user's daily goal and surfaces
-// the most actionable thing to say in one sentence — not a generic A-F grade.
+// Contextual rating — shared with the meal detail popup via utils/mealRating.
 function rateForGoals(draft: MealDraft, goals: UserGoals): { label: string; color: string } {
-  const calRatio    = goals.dailyCalories > 0 ? draft.calories / goals.dailyCalories : 0;
-  const proteinRatio = goals.protein > 0 ? draft.macros.protein / goals.protein : 0;
-  const carbsRatio   = goals.carbs   > 0 ? draft.macros.carbs   / goals.carbs   : 0;
-  const fatsRatio    = goals.fats    > 0 ? draft.macros.fats    / goals.fats    : 0;
-
-  // Heuristics — highest-priority signals first.
-  if (calRatio >= 0.6) {
-    return { label: `Heavy meal — ${Math.round(calRatio * 100)}% of your daily calories`, color: COLORS.orange };
-  }
-  if (proteinRatio >= 0.4) {
-    return { label: `Solid protein hit — ${draft.macros.protein}g`, color: COLORS.green };
-  }
-  if (carbsRatio >= 0.5 && carbsRatio > fatsRatio) {
-    return { label: `Carb-heavy — watch the rest of the day`, color: COLORS.orange };
-  }
-  if (fatsRatio >= 0.5) {
-    return { label: `Fat-heavy — balance with leaner meals later`, color: COLORS.orange };
-  }
-  if (calRatio < 0.1) {
-    return { label: `Light snack — fits easily in your day`, color: COLORS.green };
-  }
-  return { label: `Balanced — fits comfortably in your goals`, color: COLORS.green };
+  return rateMeal({ calories: draft.calories, macros: draft.macros }, goals);
 }
 
 // Open Food Facts barcode lookup — unchanged.
@@ -664,8 +664,6 @@ const styles = StyleSheet.create({
   sheetTopRow: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between' },
   sheetName: { color: COLORS.text, fontSize: 22, fontWeight: '700', flex: 1, paddingRight: 12 },
   bookmarkBtn: { padding: 4 },
-  bookmarkIcon: { fontSize: 26, color: COLORS.textSecondary },
-  bookmarkIconActive: { color: COLORS.green },
   sheetSummary: { color: COLORS.textSecondary, fontSize: 13, marginTop: -6 },
 
   calorieRow: {
@@ -725,12 +723,27 @@ const styles = StyleSheet.create({
   },
   logBtnText: { color: '#0E1A12', fontSize: 13, fontWeight: '700' },
 
-  // Fix overlay
-  fixOverlay: { ...StyleSheet.absoluteFillObject, justifyContent: 'flex-end' },
+  // Fix overlay (rendered inside a Modal so KeyboardAvoidingView is at root)
+  fixBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    justifyContent: 'flex-end',
+  },
   fixCard: {
     backgroundColor: COLORS.card,
     borderTopLeftRadius: 22, borderTopRightRadius: 22,
-    padding: 18, paddingBottom: 28, gap: 12,
+    paddingHorizontal: 18,
+    paddingTop: 8,
+    paddingBottom: 28,
+    gap: 12,
+  },
+  fixHandle: {
+    alignSelf: 'center',
+    width: 36,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: COLORS.textMuted,
+    marginBottom: 6,
   },
   fixHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   fixTitle: { color: COLORS.text, fontSize: 17, fontWeight: '700' },

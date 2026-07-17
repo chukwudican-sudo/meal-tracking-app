@@ -8,19 +8,15 @@ import { RecipeCard } from './RecipeCard';
 interface Props {
   title: string;
   recipes: RecipeTemplate[];
-  favouritedIds: Set<string>;     // recipeIds that are favourited
   onSeeAll: () => void;
   onPressRecipe: (recipe: RecipeTemplate) => void;
-  onToggleFavourite: (recipe: RecipeTemplate) => void;
 }
 
 export function CategoryRow({
   title,
   recipes,
-  favouritedIds,
   onSeeAll,
   onPressRecipe,
-  onToggleFavourite,
 }: Props) {
   if (recipes.length === 0) return null;
   return (
@@ -43,9 +39,8 @@ export function CategoryRow({
             name={r.name}
             calories={r.calories}
             cookTimeMin={r.cookTimeMin}
-            favourited={favouritedIds.has(r.id)}
+            category={r.category}
             onPress={() => onPressRecipe(r)}
-            onToggleFavourite={() => onToggleFavourite(r)}
           />
         ))}
       </ScrollView>

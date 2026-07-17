@@ -8,7 +8,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { Screen } from '@/components/Screen';
 
 import { CartIcon } from '@/components/CartIcon';
 import { ProfileIcon } from '@/components/ProfileIcon';
@@ -27,16 +27,9 @@ export default function RecipesScreen() {
   const recipes      = useMealStore(s => s.recipes);
   const savedRecipes = useMealStore(s => s.savedRecipes);
   const grocery      = useMealStore(s => s.grocery);
-  const { favourite } = useRecipeActions();
+  const { addToToday } = useRecipeActions();
 
   const [query, setQuery] = useState('');
-
-  // Map of premade recipeIds that are currently favourited, for hearts in cards.
-  const favouritedIds = useMemo(() => {
-    const set = new Set<string>();
-    savedRecipes.forEach(s => { if (s.favourited && s.recipeId) set.add(s.recipeId); });
-    return set;
-  }, [savedRecipes]);
 
   const kitchenCount = useMemo(
     () => Object.values(grocery.items).filter(i => i.section === 'kitchen').length,
@@ -65,12 +58,13 @@ export default function RecipesScreen() {
     router.push({ pathname: '/recipe/[id]', params: { id: recipe.id } });
   };
 
-  const handleToggleFavourite = (recipe: RecipeTemplate) => {
-    favourite(toRecipeInputFromTemplate(recipe));
+  // Premade plus-tap logs to today WITHOUT saving to the user's collection.
+  const handleAdd = (recipe: RecipeTemplate) => {
+    addToToday(toRecipeInputFromTemplate(recipe), { save: false });
   };
 
   return (
-    <SafeAreaView style={styles.safe} edges={['top']}>
+    <Screen edges={['top']}>
       <View style={styles.header}>
         <Text style={styles.title}>Recipes</Text>
         <View style={styles.headerActions}>
@@ -100,10 +94,9 @@ export default function RecipesScreen() {
         {trimmedQuery ? (
           <SearchResults
             results={searchResults}
-            favouritedIds={favouritedIds}
             query={query}
             onPressRecipe={openRecipe}
-            onToggleFavourite={handleToggleFavourite}
+            onAdd={handleAdd}
             onCreateCustom={() => router.push({ pathname: '/ai/custom', params: { seed: query } })}
           />
         ) : (
@@ -147,34 +140,30 @@ export default function RecipesScreen() {
                 key={cat}
                 title={cat}
                 recipes={recipesByCategory[cat]}
-                favouritedIds={favouritedIds}
                 onSeeAll={() => router.push({ pathname: '/recipes/category/[type]', params: { type: cat } })}
                 onPressRecipe={openRecipe}
-                onToggleFavourite={handleToggleFavourite}
               />
             ))}
           </>
         )}
       </ScrollView>
-    </SafeAreaView>
+    </Screen>
   );
 }
 
 interface SearchResultsProps {
   results: RecipeTemplate[];
-  favouritedIds: Set<string>;
   query: string;
   onPressRecipe: (r: RecipeTemplate) => void;
-  onToggleFavourite: (r: RecipeTemplate) => void;
+  onAdd: (r: RecipeTemplate) => void;
   onCreateCustom: () => void;
 }
 
 function SearchResults({
   results,
-  favouritedIds,
   query,
   onPressRecipe,
-  onToggleFavourite,
+  onAdd,
   onCreateCustom,
 }: SearchResultsProps) {
   if (results.length === 0) {
@@ -199,9 +188,8 @@ function SearchResults({
           calories={r.calories}
           cookTimeMin={r.cookTimeMin}
           category={r.category}
-          favourited={favouritedIds.has(r.id)}
           onPress={() => onPressRecipe(r)}
-          onToggleFavourite={() => onToggleFavourite(r)}
+          onAdd={() => onAdd(r)}
         />
       ))}
     </View>
@@ -242,7 +230,7 @@ const styles = StyleSheet.create({
     paddingVertical: 0,
   },
 
-  scroll: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 40 },
+  scroll: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 96 },
 
   actionRow: { flexDirection: 'row', marginTop: 8 },
   navRow: { flexDirection: 'row', marginTop: 12 },

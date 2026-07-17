@@ -1,70 +1,108 @@
 import { useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { router } from 'expo-router';
+import Ionicons from '@expo/vector-icons/Ionicons';
 
+import { MealForm, type MealFormValues } from '@/components/MealForm';
 import { COLORS } from '@/constants/theme';
-import { EditMealScreen } from '@/components/EditMealScreen';
+import { newId } from '@/lib/sync/uuid';
+import { useMealStore } from '@/store/useMealStore';
+import { useUndoStore } from '@/store/useUndoStore';
+import type { MealEntry } from '@/store/types';
 
 interface Props {
   date: string;
   onCreated: () => void;
 }
 
+// Pure-manual entry: starts on a landing page, then opens the simplified meal
+// form. Logging adds the meal to the day, auto-saves it to Recently Added
+// (savedRecipes, source 'manual'), and returns the user to the Home tab.
 export function ManualTab({ date, onCreated }: Props) {
-  const [showCreate, setShowCreate] = useState(false);
+  const addMealToDay = useMealStore(s => s.addMealToDay);
+  const removeMealFromDay = useMealStore(s => s.removeMealFromDay);
+  const ensureRecipeSaved = useMealStore(s => s.ensureRecipeSaved);
+  const ingestMidWeekIngredients = useMealStore(s => s.ingestMidWeekIngredients);
+  const showUndo = useUndoStore(s => s.showUndo);
+
+  const [mode, setMode] = useState<'landing' | 'form'>('landing');
+
+  function handleSubmit(values: MealFormValues) {
+    // Must be a UUID: meal_logs.id is a uuid column, so a non-uuid id makes the
+    // cloud sync push fail permanently.
+    const id = newId();
+    const entry: MealEntry = {
+      id,
+      name: values.name,
+      time: values.time,
+      category: values.category,
+      calories: values.calories,
+      ingredients: values.ingredients,
+      macros: values.macros,
+      status: 'pending',
+      isAdHoc: true,
+    };
+    addMealToDay(date, entry);
+
+    if (values.ingredients.length > 0) {
+      ingestMidWeekIngredients(values.ingredients.map(i => ({ name: i.name, mealName: values.name })));
+    }
+
+    // Auto-save to the user's Recently Added collection.
+    ensureRecipeSaved({
+      name: values.name,
+      category: values.category,
+      calories: values.calories,
+      macros: values.macros,
+      ingredients: values.ingredients,
+      source: 'manual',
+    });
+
+    showUndo({ message: `${values.name} added`, undo: () => removeMealFromDay(date, id) });
+
+    // Logging from the + button should land the user back on the Home tab.
+    onCreated();
+    router.navigate('/(tabs)');
+  }
+
+  if (mode === 'landing') {
+    return (
+      <View style={styles.landing}>
+        <TouchableOpacity style={styles.landingTap} onPress={() => setMode('form')} activeOpacity={0.85}>
+          <View style={styles.plusCircle}>
+            <Ionicons name="add" size={44} color={COLORS.green} />
+          </View>
+          <Text style={styles.landingTitle}>Create a new meal</Text>
+          <Text style={styles.landingSubtitle}>Enter nutrition details manually.</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
 
   return (
-    <View style={styles.wrap}>
-      <Text style={styles.title}>Manual entry</Text>
-      <Text style={styles.subtitle}>Type in the details yourself — name, time, calories, macros, and ingredients.</Text>
-
-      <TouchableOpacity style={styles.bigBtn} onPress={() => setShowCreate(true)}>
-        <Text style={styles.bigBtnPlus}>+</Text>
-        <Text style={styles.bigBtnLabel}>New meal</Text>
-      </TouchableOpacity>
-
-      <Text style={styles.hint}>You can also pick a saved meal from the Search tab.</Text>
-
-      <EditMealScreen
-        mode="create"
-        visible={showCreate}
-        date={date}
-        entry={null}
-        onClose={() => setShowCreate(false)}
-        onSaved={onCreated}
-      />
-    </View>
+    <MealForm
+      primaryLabel="Log Meal"
+      showMealType
+      onBack={() => setMode('landing')}
+      onSubmit={handleSubmit}
+    />
   );
 }
 
 const styles = StyleSheet.create({
-  wrap: {
-    flex: 1,
-    backgroundColor: COLORS.bg,
+  landing: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32 },
+  landingTap: { alignItems: 'center' },
+  plusCircle: {
+    width: 96,
+    height: 96,
+    borderRadius: 48,
+    backgroundColor: COLORS.green + '1A',
+    borderWidth: 1,
+    borderColor: COLORS.green + '55',
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 28,
-    gap: 14,
+    marginBottom: 20,
   },
-  title: { color: COLORS.text, fontSize: 22, fontWeight: '700' },
-  subtitle: { color: COLORS.textSecondary, fontSize: 14, textAlign: 'center' },
-  bigBtn: {
-    marginTop: 18,
-    width: 200,
-    height: 200,
-    borderRadius: 24,
-    borderWidth: 2,
-    borderColor: COLORS.green,
-    borderStyle: 'dashed',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-  },
-  bigBtnPlus: { color: COLORS.green, fontSize: 56, fontWeight: '300', lineHeight: 60 },
-  bigBtnLabel: { color: COLORS.green, fontSize: 16, fontWeight: '600' },
-  hint: {
-    marginTop: 14,
-    color: COLORS.textMuted,
-    fontSize: 12,
-    textAlign: 'center',
-  },
+  landingTitle: { color: COLORS.text, fontSize: 20, fontWeight: '700' },
+  landingSubtitle: { color: COLORS.textSecondary, fontSize: 14, marginTop: 8, textAlign: 'center' },
 });

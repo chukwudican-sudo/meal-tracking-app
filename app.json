@@ -9,6 +9,7 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
+      "bundleIdentifier": "com.mealapp.app",
       "supportsTablet": true,
       "infoPlist": {
         "NSCameraUsageDescription": "Used to scan meals and barcodes for adding to your day.",
@@ -17,6 +18,7 @@
       }
     },
     "android": {
+      "package": "com.mealapp.app",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/images/android-icon-foreground.png",

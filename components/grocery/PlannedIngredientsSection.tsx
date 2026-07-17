@@ -1,5 +1,5 @@
-import { router } from 'expo-router';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { router, useFocusEffect } from 'expo-router';
+import { useCallback, useMemo, useState } from 'react';
 import {
   Alert,
   Pressable,
@@ -36,24 +36,15 @@ export function PlannedIngredientsSection() {
   );
   const count = planned.length;
 
-  // Auto-expand on first non-empty load and whenever new items arrive.
-  // Otherwise default to collapsed and remember user's last toggle.
-  const prevCountRef = useRef(0);
-  const initializedRef = useRef(false);
+  // Always default to collapsed. Per spec, the section also collapses every
+  // time the Plan tab regains focus so the user gets a consistent starting
+  // state regardless of where they left it.
   const [expanded, setExpanded] = useState(false);
-
-  useEffect(() => {
-    if (!initializedRef.current) {
-      initializedRef.current = true;
-      prevCountRef.current = count;
-      if (count > 0) setExpanded(true);
-      return;
-    }
-    if (count > prevCountRef.current) {
-      setExpanded(true);
-    }
-    prevCountRef.current = count;
-  }, [count]);
+  useFocusEffect(
+    useCallback(() => {
+      setExpanded(false);
+    }, []),
+  );
 
   const handleSkip = (item: GroceryItem) => {
     const usedIn = item.mealNames?.[0] ?? 'a meal';

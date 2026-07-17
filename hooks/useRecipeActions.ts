@@ -5,6 +5,7 @@ import type {
   Ingredient,
   Macros,
   RecipeCategory,
+  RecipeDifficulty,
   RecipeTemplate,
   SavedRecipe,
   SavedRecipeSource,
@@ -24,6 +25,7 @@ export interface RecipeInput {
   ingredients: Ingredient[];
   steps?: string[];
   category?: RecipeCategory;
+  difficulty?: RecipeDifficulty;
   source?: SavedRecipeSource;
 }
 
@@ -38,6 +40,7 @@ export function toRecipeInputFromTemplate(t: RecipeTemplate): RecipeInput {
     ingredients: t.ingredients,
     steps:       t.steps,
     category:    t.category,
+    difficulty:  t.difficulty,
     source:      'premade',
   };
 }
@@ -52,6 +55,7 @@ export function toRecipeInputFromSaved(s: SavedRecipe): RecipeInput {
     ingredients: s.ingredients,
     steps:       s.steps,
     category:    s.category,
+    difficulty:  s.difficulty,
     source:      s.source,
   };
 }
@@ -66,11 +70,11 @@ export function useRecipeActions() {
   const showToast         = useToastStore(s => s.showToast);
 
   const addToToday = useCallback(
-    (recipe: RecipeInput) => {
+    (recipe: RecipeInput, opts?: { save?: boolean }) => {
       const todayIso = toIsoDate(new Date());
-      const entry = addRecipeToToday(recipe);
+      const entry = addRecipeToToday(recipe, opts);
       showUndo({
-        message: `${recipe.name} added to today`,
+        message: 'Added to Today',
         undo: () => removeMealFromDay(todayIso, entry.id),
       });
     },
@@ -113,7 +117,7 @@ export function useRecipeActions() {
   const favourite = useCallback(
     (recipe: RecipeInput) => {
       const updated = toggleFavourite(recipe);
-      showToast(updated.favourited ? 'Saved to recipes' : 'Removed from favourites');
+      showToast(updated.favourited ? 'Added to Saved Recipes' : 'Removed from Saved Recipes');
       return updated;
     },
     [toggleFavourite, showToast]

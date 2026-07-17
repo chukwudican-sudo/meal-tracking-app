@@ -1,12 +1,12 @@
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { Screen } from '@/components/Screen';
 import { router } from 'expo-router';
 
 import { COLORS } from '@/constants/theme';
 
 export default function FindYourPlanScreen() {
   return (
-    <SafeAreaView style={styles.safe} edges={['top']}>
+    <Screen edges={['top', 'bottom']}>
       <View style={styles.header}>
         <TouchableOpacity
           onPress={() => (router.canGoBack() ? router.back() : router.replace('/(tabs)/plan'))}
@@ -50,7 +50,7 @@ export default function FindYourPlanScreen() {
           </TouchableOpacity>
         </View>
       </ScrollView>
-    </SafeAreaView>
+    </Screen>
   );
 }
 

@@ -12,7 +12,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { Screen } from '@/components/Screen';
 
 import { COLORS } from '@/constants/theme';
 import type { GroceryItem } from '@/store/types';
@@ -121,7 +121,7 @@ export default function CartScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
+    <Screen edges={['top', 'bottom']}>
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity
@@ -241,7 +241,7 @@ export default function CartScreen() {
         items={oldCartItems}
         onResolve={resolveOldCartItems}
       />
-    </SafeAreaView>
+    </Screen>
   );
 }
 

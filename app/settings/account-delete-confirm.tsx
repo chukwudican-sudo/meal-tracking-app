@@ -3,35 +3,27 @@ import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 import { FormPage } from '@/components/profile/FormPage';
 import { COLORS } from '@/constants/theme';
-import { useMealStore } from '@/store/useMealStore';
 
+// Account deletion is deferred to a later backend phase: it needs a server-side
+// function to remove the Supabase auth user and cascade-delete all of the
+// account's rows. The previous implementation only wiped the local cache while
+// leaving the session/account intact — a broken half-deleted state — so this
+// screen is intentionally a "coming soon" placeholder and performs no deletion.
+// The entry point in Account Settings is disabled; this guards direct/deep-link
+// access too.
 export default function AccountDeleteConfirmScreen() {
-  const resetUserData = useMealStore(s => s.resetUserData);
-
-  const handleDelete = () => {
-    resetUserData();
-    // Pop until we land back on the tabs root.
-    router.replace('/(tabs)');
-  };
-
   return (
     <FormPage title="Delete Account">
-      <View style={styles.iconWrap}>
-        <Text style={styles.icon}>⚠️</Text>
-      </View>
-      <Text style={styles.heading}>This will permanently delete your account.</Text>
-      <Text style={styles.body}>
-        Your personal data, plans, saved meals, recipes, weight history, and
-        all preferences will be erased. This action cannot be undone. You can
-        create a new account anytime.
-      </Text>
-
-      <View style={styles.btnRow}>
-        <TouchableOpacity style={styles.cancelBtn} onPress={() => router.back()} activeOpacity={0.85}>
-          <Text style={styles.cancelText}>Cancel</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.deleteBtn} onPress={handleDelete} activeOpacity={0.85}>
-          <Text style={styles.deleteText}>Delete Account</Text>
+      <View style={styles.body}>
+        <Text style={styles.icon}>🚧</Text>
+        <Text style={styles.heading}>Account deletion is coming soon</Text>
+        <Text style={styles.sub}>
+          We&apos;re still building secure account deletion. Once it&apos;s ready
+          you&apos;ll be able to permanently remove your account and all of its
+          data from here. For now, no changes have been made.
+        </Text>
+        <TouchableOpacity style={styles.doneBtn} onPress={() => router.back()} activeOpacity={0.85}>
+          <Text style={styles.doneText}>Go back</Text>
         </TouchableOpacity>
       </View>
     </FormPage>
@@ -39,17 +31,13 @@ export default function AccountDeleteConfirmScreen() {
 }
 
 const styles = StyleSheet.create({
-  iconWrap: { alignItems: 'center', marginTop: 8, marginBottom: 16 },
+  body: { alignItems: 'center', paddingVertical: 60, gap: 12, paddingHorizontal: 8 },
   icon: { fontSize: 56 },
-  heading: { color: COLORS.text, fontSize: 18, fontWeight: '700', textAlign: 'center', marginBottom: 12 },
-  body: { color: COLORS.textSecondary, fontSize: 14, lineHeight: 20, textAlign: 'center', paddingHorizontal: 16 },
-
-  btnRow: { flexDirection: 'row', gap: 12, marginTop: 32 },
-  cancelBtn: {
-    flex: 1, paddingVertical: 14, borderRadius: 12, alignItems: 'center',
+  heading: { color: COLORS.text, fontSize: 18, fontWeight: '700', textAlign: 'center' },
+  sub: { color: COLORS.textSecondary, fontSize: 14, lineHeight: 20, textAlign: 'center', paddingHorizontal: 16 },
+  doneBtn: {
+    marginTop: 24, paddingVertical: 14, paddingHorizontal: 40, borderRadius: 12,
     borderWidth: 1, borderColor: COLORS.border, backgroundColor: COLORS.card,
   },
-  cancelText: { color: COLORS.text, fontSize: 14, fontWeight: '600' },
-  deleteBtn: { flex: 1, paddingVertical: 14, borderRadius: 12, alignItems: 'center', backgroundColor: COLORS.red },
-  deleteText: { color: '#fff', fontSize: 14, fontWeight: '700' },
+  doneText: { color: COLORS.text, fontSize: 14, fontWeight: '600' },
 });

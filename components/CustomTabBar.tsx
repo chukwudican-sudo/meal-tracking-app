@@ -17,7 +17,7 @@ const TAB_VISUALS: Record<string, { icon: string; label: string }> = {
 };
 
 // Display order, left → right. The custom + button sits flush right.
-const TAB_ORDER: string[] = ['progress', 'index', 'plan', 'recipes'];
+const TAB_ORDER: string[] = ['index', 'plan', 'recipes', 'progress'];
 
 export function CustomTabBar({ state, navigation, onPlusPress }: Props) {
   const insets = useSafeAreaInsets();

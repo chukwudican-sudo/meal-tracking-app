@@ -9,8 +9,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-
+import { Screen } from '@/components/Screen';
 import { COLORS } from '@/constants/theme';
 
 export type ChatMessage =
@@ -59,7 +58,7 @@ export function ChatShell({
   }, [messages.length, chips?.length]);
 
   return (
-    <SafeAreaView style={styles.safe} edges={['top']}>
+    <Screen edges={['top', 'bottom']}>
       <View style={styles.header}>
         <TouchableOpacity onPress={onBack} style={styles.backBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
           <Text style={styles.backArrow}>←</Text>
@@ -138,7 +137,7 @@ export function ChatShell({
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
-    </SafeAreaView>
+    </Screen>
   );
 }
 
@@ -168,8 +167,6 @@ function MessageBubble({ message }: { message: ChatMessage }) {
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: COLORS.bg },
-
   header: {
     flexDirection: 'row',
     alignItems: 'center',

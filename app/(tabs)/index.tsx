@@ -8,16 +8,17 @@ import {
   AppState,
   type AppStateStatus,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { router } from 'expo-router';
+import { Screen } from '@/components/Screen';
 
 import { COLORS } from '@/constants/theme';
 import { useMealStore, toIsoDate } from '@/store/useMealStore';
-import { useUndoStore } from '@/store/useUndoStore';
 import { NotificationIcon } from '@/components/NotificationIcon';
 import { ProfileIcon } from '@/components/ProfileIcon';
 import { MealCard } from '@/components/MealCard';
 import { WeekStrip } from '@/components/WeekStrip';
-import { EditMealScreen } from '@/components/EditMealScreen';
+import { MealDetailModal } from '@/components/MealDetailModal';
+import { EmailVerificationBanner } from '@/components/EmailVerificationBanner';
 import type { MealEntry } from '@/store/types';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -51,38 +52,40 @@ const ML_PER_CUP      = 250;
 
 export default function HomeScreen() {
   const [viewingDate, setViewingDate] = useState(toIsoDate(new Date()));
-  const [editingEntry, setEditingEntry] = useState<MealEntry | null>(null);
 
-  const {
-    logs,
-    goals,
-    streak,
-    toggleMealStatus,
-    removeMealFromDay,
-    restoreMealToDay,
-    markPastDueMealsAsMissed,
-    logWater,
-    resolveDayFromTemplates,
-    recalcStreak,
-  } = useMealStore();
-  const showUndo = useUndoStore(s => s.showUndo);
+  const logs                    = useMealStore(s => s.logs);
+  const goals                   = useMealStore(s => s.goals);
+  const streak                  = useMealStore(s => s.streak);
+  const pendingFirstPlan        = useMealStore(s => s.profile.pendingFirstPlan);
+  const toggleMealStatus        = useMealStore(s => s.toggleMealStatus);
+  const markPastDueMealsAsMissed = useMealStore(s => s.markPastDueMealsAsMissed);
+  const logWater                = useMealStore(s => s.logWater);
+  const resolveDayFromTemplates = useMealStore(s => s.resolveDayFromTemplates);
+  const recalcStreak            = useMealStore(s => s.recalcStreak);
+  const openMealEditSession     = useMealStore(s => s.openMealEditSession);
 
   const currentLog    = logs[viewingDate];
   const meals         = currentLog?.meals ?? [];
   const sortedMeals   = [...meals].sort((a, b) => a.time.localeCompare(b.time));
   const completedMeals = meals.filter((m: MealEntry) => m.status === 'completed');
 
+  // Sum completed meals into the running daily totals. Coerce every field to a
+  // finite number and tolerate meals persisted without a full `macros` object
+  // (legacy/ad-hoc entries) — otherwise a single malformed meal would throw
+  // during render and freeze the progress display entirely.
+  const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
   const totals = completedMeals.reduce(
     (acc: { calories: number; protein: number; carbs: number; fats: number }, m: MealEntry) => ({
-      calories: acc.calories + m.calories,
-      protein:  acc.protein  + m.macros.protein,
-      carbs:    acc.carbs    + m.macros.carbs,
-      fats:     acc.fats     + m.macros.fats,
+      calories: acc.calories + num(m.calories),
+      protein:  acc.protein  + num(m.macros?.protein),
+      carbs:    acc.carbs    + num(m.macros?.carbs),
+      fats:     acc.fats     + num(m.macros?.fats),
     }),
     { calories: 0, protein: 0, carbs: 0, fats: 0 }
   );
 
-  const caloriePct  = Math.min((totals.calories / goals.dailyCalories) * 100, 100);
+  const calorieGoal = goals.dailyCalories > 0 ? goals.dailyCalories : 0;
+  const caloriePct  = calorieGoal > 0 ? Math.min((totals.calories / calorieGoal) * 100, 100) : 0;
   const pctDoneText = `${Math.round(caloriePct)}% done`;
 
   const waterMl   = currentLog?.waterMl ?? 0;
@@ -119,20 +122,6 @@ export default function HomeScreen() {
     markPastDueMealsAsMissed(date);
   };
 
-  const handleRemoveMeal = (mealId: string) => {
-    const originalMeals = currentLog?.meals ?? [];
-    const originalIndex = originalMeals.findIndex((m: MealEntry) => m.id === mealId);
-    if (originalIndex < 0) return;
-
-    const removedEntry = originalMeals[originalIndex];
-    removeMealFromDay(viewingDate, mealId);
-
-    showUndo({
-      message: 'Meal removed',
-      undo: () => restoreMealToDay(viewingDate, removedEntry, originalIndex),
-    });
-  };
-
   // Plan tag — weekday vs weekend based on the date being viewed
   const viewingDayOfWeek = new Date(viewingDate + 'T00:00:00').getDay(); // 0=Sun, 6=Sat
   const isWeekend        = viewingDayOfWeek === 0 || viewingDayOfWeek === 6;
@@ -140,7 +129,8 @@ export default function HomeScreen() {
   // ── Render ──────────────────────────────────────────────────────────────────
 
   return (
-    <SafeAreaView style={styles.safe} edges={['top']}>
+    <Screen edges={['top']}>
+      <EmailVerificationBanner />
       <ScrollView
         contentContainerStyle={styles.scroll}
         showsVerticalScrollIndicator={false}
@@ -199,6 +189,24 @@ export default function HomeScreen() {
             </Text>
           </View>
         </View>
+
+        {/* ── First-plan nudge (persists until Build My Plan is done) ──── */}
+        {pendingFirstPlan ? (
+          <TouchableOpacity
+            style={styles.nudgeCard}
+            onPress={() => router.push('/plan/build')}
+            activeOpacity={0.85}
+          >
+            <View style={styles.nudgeIcon}>
+              <Text style={styles.nudgeIconText}>🍽️</Text>
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.nudgeTitle}>Build your first meal plan</Text>
+              <Text style={styles.nudgeSub}>Tap to get meals matched to your goals.</Text>
+            </View>
+            <Text style={styles.nudgeChevron}>›</Text>
+          </TouchableOpacity>
+        ) : null}
 
         {/* ── Summary Card ────────────────────────────────────────────── */}
         <View style={styles.summaryCard}>
@@ -274,20 +282,14 @@ export default function HomeScreen() {
               key={entry.id}
               entry={entry}
               onToggle={() => toggleMealStatus(viewingDate, entry.id)}
-              onRemove={() => handleRemoveMeal(entry.id)}
-              onEdit={() => setEditingEntry(entry)}
+              onOpenDetail={() => openMealEditSession(viewingDate, 'home', entry)}
             />
           ))
         )}
       </ScrollView>
 
-      <EditMealScreen
-        visible={!!editingEntry}
-        date={viewingDate}
-        entry={editingEntry}
-        onClose={() => setEditingEntry(null)}
-      />
-    </SafeAreaView>
+      <MealDetailModal />
+    </Screen>
   );
 }
 
@@ -300,7 +302,7 @@ const styles = StyleSheet.create({
   },
   scroll: {
     paddingHorizontal: 16,
-    paddingBottom: 40,
+    paddingBottom: 96,
   },
 
   // ── Header ──────────────────────────────────────────────────────────────────
@@ -400,6 +402,28 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: COLORS.orange,
   },
+
+  // ── First-plan nudge ─────────────────────────────────────────────────────────
+  nudgeCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: COLORS.green + '14',
+    borderWidth: 1,
+    borderColor: COLORS.green + '55',
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 16,
+  },
+  nudgeIcon: {
+    width: 40, height: 40, borderRadius: 20,
+    backgroundColor: COLORS.green + '22',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  nudgeIconText: { fontSize: 20 },
+  nudgeTitle: { color: COLORS.text, fontSize: 15, fontWeight: '700' },
+  nudgeSub: { color: COLORS.textSecondary, fontSize: 12, marginTop: 2 },
+  nudgeChevron: { color: COLORS.green, fontSize: 24, fontWeight: '700' },
 
   // ── Summary card ─────────────────────────────────────────────────────────────
   summaryCard: {

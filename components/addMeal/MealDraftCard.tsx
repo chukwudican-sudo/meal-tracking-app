@@ -23,6 +23,7 @@ interface Props {
   mode: 'create' | 'edit';
   editingMealId?: string;
   showFix?: boolean;
+  photoUri?: string;
   onFix?: (current: MealDraft) => void;
   onCancel: () => void;
   onSaved: () => void;
@@ -34,6 +35,7 @@ export function MealDraftCard({
   mode,
   editingMealId,
   showFix = false,
+  photoUri,
   onFix,
   onCancel,
   onSaved,
@@ -85,6 +87,7 @@ export function MealDraftCard({
         ingredients: [],
         macros: draft.macros,
         status: 'pending',
+        photoUri,
       };
       editMealOnDay(date, entry);
 
@@ -132,6 +135,7 @@ export function MealDraftCard({
       templateId: id,
       // Created through Add Meal flow — ad-hoc relative to the original plan.
       isAdHoc: true,
+      photoUri,
     };
     useMealStore.getState().addMealToDay(date, entry);
 

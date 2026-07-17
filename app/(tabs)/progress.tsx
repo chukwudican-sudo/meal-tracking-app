@@ -6,15 +6,18 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import Svg, { Circle, Polyline } from 'react-native-svg';
+import { Screen } from '@/components/Screen';
 import { useFocusEffect } from 'expo-router';
 
 import { NotificationIcon } from '@/components/NotificationIcon';
 import { ProfileIcon } from '@/components/ProfileIcon';
 import { COLORS } from '@/constants/theme';
+import { kgToLbs, lbsToKg } from '@/constants/goalCalc';
 import { toIsoDate, useMealStore } from '@/store/useMealStore';
 
 const MONTHS = ['J', 'F', 'M', 'A', 'M', 'J', 'J', 'A', 'S', 'O', 'N', 'D'];
@@ -198,7 +201,7 @@ export default function ProgressScreen() {
   }, [yearsWithCompletions]);
 
   return (
-    <SafeAreaView style={styles.safe} edges={['top']}>
+    <Screen edges={['top']}>
       <View style={styles.headerRow}>
         <Text style={styles.title}>Progress</Text>
         <View style={styles.headerActions}>
@@ -324,6 +327,8 @@ export default function ProgressScreen() {
           </View>
         </View>
 
+        <WeightSection />
+
         <View style={styles.placeholderCard}>
           <Text style={styles.placeholderTitle}>More insights coming soon</Text>
           <Text style={styles.placeholderBody}>
@@ -331,7 +336,149 @@ export default function ProgressScreen() {
           </Text>
         </View>
       </ScrollView>
-    </SafeAreaView>
+    </Screen>
+  );
+}
+
+// ─── Weight logging ─────────────────────────────────────────────────────────
+
+function WeightSection() {
+  const weightLog = useMealStore(s => s.weightLog);
+  const profile   = useMealStore(s => s.profile);
+  const logWeight = useMealStore(s => s.logWeight);
+
+  const isImperial = (profile.weightUnit ?? 'lbs') === 'lbs';
+  const unit = isImperial ? 'lbs' : 'kg';
+
+  const [logging, setLogging] = useState(false);
+  const [input, setInput] = useState('');
+  const [chartWidth, setChartWidth] = useState(0);
+
+  const displayWeight = (kg: number) =>
+    Math.round(isImperial ? kgToLbs(kg) : kg);
+
+  const currentWeight = profile.weightKg != null ? displayWeight(profile.weightKg) : null;
+
+  const handleSave = () => {
+    const n = Number(input);
+    if (!Number.isFinite(n) || n <= 0) return;
+    const kg = isImperial ? lbsToKg(n) : n;
+    logWeight(kg);
+    setInput('');
+    setLogging(false);
+  };
+
+  const recent = weightLog.slice(-30);
+
+  // Chart geometry
+  const CHART_H = 120;
+  const PAD = 10;
+  const points = useMemo(() => {
+    if (recent.length === 0 || chartWidth === 0) return [];
+    const values = recent.map(e => (isImperial ? kgToLbs(e.weightKg) : e.weightKg));
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    const span = max - min || 1;
+    const innerW = chartWidth - PAD * 2;
+    const innerH = CHART_H - PAD * 2;
+    return values.map((v, i) => {
+      const x = recent.length === 1
+        ? chartWidth / 2
+        : PAD + (i / (recent.length - 1)) * innerW;
+      const y = PAD + (1 - (v - min) / span) * innerH;
+      return { x, y };
+    });
+  }, [recent, chartWidth, isImperial]);
+
+  const minMax = useMemo(() => {
+    if (recent.length === 0) return null;
+    const values = recent.map(e => displayWeight(e.weightKg));
+    return { min: Math.min(...values), max: Math.max(...values) };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recent, isImperial]);
+
+  const firstDate = recent[0]?.date;
+  const lastDate = recent[recent.length - 1]?.date;
+  const fmtDate = (iso?: string) =>
+    iso ? new Date(iso + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '';
+
+  return (
+    <View style={styles.sectionCard}>
+      <View style={styles.sectionHeaderRow}>
+        <Text style={styles.sectionTitle}>Weight</Text>
+        <TouchableOpacity
+          style={styles.logWeightBtn}
+          onPress={() => setLogging(v => !v)}
+          activeOpacity={0.8}
+        >
+          <Text style={styles.logWeightBtnText}>{logging ? 'Cancel' : '+ Log Weight'}</Text>
+        </TouchableOpacity>
+      </View>
+
+      {currentWeight != null && !logging ? (
+        <Text style={styles.currentWeight}>{currentWeight} {unit}</Text>
+      ) : null}
+
+      {logging ? (
+        <View style={styles.logRow}>
+          <TextInput
+            style={styles.weightInput}
+            value={input}
+            onChangeText={setInput}
+            keyboardType="decimal-pad"
+            placeholder={isImperial ? '170' : '77'}
+            placeholderTextColor={COLORS.textMuted}
+            autoFocus
+            returnKeyType="done"
+            onSubmitEditing={handleSave}
+          />
+          <Text style={styles.weightInputUnit}>{unit}</Text>
+          <TouchableOpacity
+            style={[styles.saveWeightBtn, !input.trim() && styles.saveWeightBtnDisabled]}
+            onPress={handleSave}
+            disabled={!input.trim()}
+            activeOpacity={0.85}
+          >
+            <Text style={styles.saveWeightBtnText}>Save</Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
+
+      {recent.length === 0 ? (
+        <Text style={styles.weightEmpty}>Log your first weight to start tracking.</Text>
+      ) : (
+        <View style={styles.chartWrap}>
+          <View style={styles.chartYAxis}>
+            <Text style={styles.chartAxisLabel}>{minMax?.max}</Text>
+            <Text style={styles.chartAxisLabel}>{minMax?.min}</Text>
+          </View>
+          <View
+            style={styles.chartArea}
+            onLayout={e => setChartWidth(e.nativeEvent.layout.width)}
+          >
+            {chartWidth > 0 ? (
+              <Svg width={chartWidth} height={CHART_H}>
+                {points.length > 1 ? (
+                  <Polyline
+                    points={points.map(p => `${p.x},${p.y}`).join(' ')}
+                    fill="none"
+                    stroke={COLORS.green}
+                    strokeWidth={2}
+                  />
+                ) : null}
+                {points.map((p, i) => (
+                  <Circle key={i} cx={p.x} cy={p.y} r={3} fill={COLORS.green} />
+                ))}
+              </Svg>
+            ) : null}
+            <View style={styles.chartXAxis}>
+              <Text style={styles.chartAxisLabel}>{fmtDate(firstDate)}</Text>
+              {recent.length > 1 ? <Text style={styles.chartAxisLabel}>{fmtDate(lastDate)}</Text> : null}
+            </View>
+          </View>
+        </View>
+      )}
+    </View>
   );
 }
 
@@ -353,7 +500,7 @@ const styles = StyleSheet.create({
   },
   title: { fontSize: 24, fontWeight: '700', color: COLORS.text },
 
-  scroll: { padding: 14, paddingBottom: 34, gap: 12 },
+  scroll: { padding: 14, paddingBottom: 96, gap: 12 },
 
   sectionCard: {
     backgroundColor: COLORS.card,
@@ -406,6 +553,50 @@ const styles = StyleSheet.create({
   },
   heatLegendLabel: { color: COLORS.textSecondary, fontSize: 10 },
   heatLegendCell: { width: 10, height: 10, borderRadius: 2 },
+
+  // ── Weight section ──
+  logWeightBtn: {
+    backgroundColor: COLORS.green,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 14,
+  },
+  logWeightBtnText: { color: '#0E1A12', fontSize: 12, fontWeight: '700' },
+  currentWeight: { color: COLORS.text, fontSize: 24, fontWeight: '700', marginTop: 4, marginBottom: 4 },
+  logRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 8, marginBottom: 4 },
+  weightInput: {
+    flex: 1,
+    backgroundColor: COLORS.elevated,
+    color: COLORS.text,
+    fontSize: 20,
+    fontWeight: '700',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  weightInputUnit: { color: COLORS.textSecondary, fontSize: 14, fontWeight: '600' },
+  saveWeightBtn: {
+    backgroundColor: COLORS.green,
+    paddingHorizontal: 18,
+    paddingVertical: 11,
+    borderRadius: 10,
+  },
+  saveWeightBtnDisabled: { opacity: 0.45 },
+  saveWeightBtnText: { color: '#0E1A12', fontSize: 14, fontWeight: '700' },
+  weightEmpty: {
+    color: COLORS.textSecondary,
+    fontSize: 13,
+    fontStyle: 'italic',
+    marginTop: 10,
+    textAlign: 'center',
+  },
+  chartWrap: { flexDirection: 'row', marginTop: 12, alignItems: 'stretch' },
+  chartYAxis: { justifyContent: 'space-between', paddingVertical: 6, marginRight: 6, height: 120 },
+  chartArea: { flex: 1 },
+  chartXAxis: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 },
+  chartAxisLabel: { color: COLORS.textSecondary, fontSize: 10 },
 
   placeholderCard: {
     backgroundColor: COLORS.card,

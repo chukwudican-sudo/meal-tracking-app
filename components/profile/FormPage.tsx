@@ -8,8 +8,8 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { Screen } from '@/components/Screen';
 import { COLORS } from '@/constants/theme';
 
 interface FormPageProps {
@@ -42,7 +42,7 @@ export function FormPage({
   };
 
   return (
-    <SafeAreaView style={styles.safe} edges={['top']}>
+    <Screen edges={['top', 'bottom']}>
       <KeyboardAvoidingView
         style={{ flex: 1 }}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -83,7 +83,7 @@ export function FormPage({
           </View>
         ) : null}
       </KeyboardAvoidingView>
-    </SafeAreaView>
+    </Screen>
   );
 }
 
@@ -118,8 +118,6 @@ export function RadioRow({
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: COLORS.bg },
-
   header: {
     flexDirection: 'row',
     alignItems: 'center',

@@ -1,7 +1,7 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { useMemo } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { Screen } from '@/components/Screen';
 
 import { RecipeCard } from '@/components/recipes/RecipeCard';
 import { COLORS } from '@/constants/theme';
@@ -14,8 +14,7 @@ const VALID: RecipeCategory[] = ['Breakfast', 'Lunch', 'Dinner', 'Snacks'];
 export default function RecipeCategoryScreen() {
   const params = useLocalSearchParams<{ type: string }>();
   const recipes = useMealStore(s => s.recipes);
-  const savedRecipes = useMealStore(s => s.savedRecipes);
-  const { favourite } = useRecipeActions();
+  const { addToToday } = useRecipeActions();
 
   const category = useMemo<RecipeCategory | null>(() => {
     const raw = (params.type || '').toString();
@@ -28,19 +27,13 @@ export default function RecipeCategoryScreen() {
     return recipes.filter(r => r.category === category);
   }, [recipes, category]);
 
-  const favouritedIds = useMemo(() => {
-    const set = new Set<string>();
-    savedRecipes.forEach(s => { if (s.favourited && s.recipeId) set.add(s.recipeId); });
-    return set;
-  }, [savedRecipes]);
-
   const handleBack = () => {
     if (router.canGoBack()) router.back();
     else router.replace('/(tabs)/recipes');
   };
 
   return (
-    <SafeAreaView style={styles.safe} edges={['top']}>
+    <Screen edges={['top', 'bottom']}>
       <View style={styles.header}>
         <TouchableOpacity onPress={handleBack} style={styles.backBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
           <Text style={styles.backArrow}>←</Text>
@@ -67,14 +60,13 @@ export default function RecipeCategoryScreen() {
               calories={r.calories}
               cookTimeMin={r.cookTimeMin}
               category={r.category}
-              favourited={favouritedIds.has(r.id)}
               onPress={() => router.push({ pathname: '/recipe/[id]', params: { id: r.id } })}
-              onToggleFavourite={() => favourite(toRecipeInputFromTemplate(r))}
+              onAdd={() => addToToday(toRecipeInputFromTemplate(r), { save: false })}
             />
           ))
         )}
       </ScrollView>
-    </SafeAreaView>
+    </Screen>
   );
 }
 

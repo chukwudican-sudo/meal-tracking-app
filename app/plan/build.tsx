@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   KeyboardAvoidingView,
+  LayoutAnimation,
   Modal,
   Platform,
   Pressable,
@@ -10,9 +11,11 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
+  UIManager,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Screen } from '@/components/Screen';
 import { router } from 'expo-router';
 
 import { COLORS } from '@/constants/theme';
@@ -30,8 +33,17 @@ import type {
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 const WEEKDAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+// PAGE_SIZE counts items per page (meals + Suggest more). Non-last pages
+// hold 5 meal cards. The last page holds 1–4 meal cards plus Suggest more
+// for a total of 5 items.
 const PAGE_SIZE = 5;
-const AUTO_PAGE_CAP = 3;
+// Meals seeded the first time a slot is entered.
+const INITIAL_SEED = 9;
+// Meals generated per Suggest more click (or per Describe call: just 1).
+const SUGGEST_BATCH = 5;
+// Suggest-more click count that triggers the Describe-suggestion popup
+// (once per slot, dismissable; never blocks Suggest more).
+const SUGGEST_POPUP_AT = 5;
 // Friendly label used on the guide page + summary copy.
 const GOAL_LABELS: Record<string, string> = {
   lose_weight: 'Lose Weight',
@@ -77,30 +89,115 @@ function applyDietaryFilter(
   });
 }
 
-// Rank recipes by goal-aware score (higher = better fit).
-function rankForGoal(recipes: RecipeTemplate[], profile: UserProfile): RecipeTemplate[] {
+// Rank recipes by goal-aware score, optionally biased by the wizard's
+// mini onboarding answers (cuisines, cook time, loves, avoid).
+//
+// Avoid tokens are *soft* filters — a strong negative score rather than a
+// hard removal — to keep the candidate pool from collapsing on common
+// inputs like "tomato". The user's hard constraints (allergies, dietary
+// preferences) still apply via `applyDietaryFilter` upstream.
+function rankForGoal(
+  recipes: RecipeTemplate[],
+  profile: UserProfile,
+  prefs?: WizardPrefs,
+): RecipeTemplate[] {
   const goal = profile.goalType;
+  const cookCeiling = prefs?.cookTime === 'quick'
+    ? 15
+    : prefs?.cookTime === 'moderate'
+    ? 30
+    : null; // 'full' or null → no penalty
+
+  const wantsEverything = !!prefs?.cuisines.includes(EVERYTHING_KEY);
+  const cuisineFilter = wantsEverything ? null : (prefs?.cuisines ?? []).map(c => c.toLowerCase());
+  const loves = (prefs?.loves ?? []).map(t => t.toLowerCase());
+  const avoid = (prefs?.avoid ?? []).map(t => t.toLowerCase());
+
   const scored = recipes.map(r => {
     let score = 0;
     if (goal === 'gain_muscle' || goal === 'lean_bulk') score += r.macros.protein * 1.2;
     if (goal === 'lose_weight') score -= r.calories * 0.5;
     if (goal === 'maintain') score += r.macros.protein * 0.5;
+
+    // Mini-onboarding biases.
+    const text = (r.name + ' ' + r.ingredients.map(i => i.name).join(' ')).toLowerCase();
+
+    // Cook-time penalty: scales with how far the recipe overruns the ceiling.
+    if (cookCeiling != null && r.cookTimeMin > cookCeiling) {
+      score -= (r.cookTimeMin - cookCeiling) * 1.5;
+    }
+
+    // Cuisine bias: name match gets a strong boost.
+    if (cuisineFilter && cuisineFilter.length > 0) {
+      const hit = cuisineFilter.some(c => text.includes(c));
+      score += hit ? 25 : -5;
+    }
+
+    // Loves: each match adds a sizeable boost.
+    loves.forEach(t => { if (text.includes(t)) score += 20; });
+
+    // Avoid: each match penalises heavily but doesn't hard-drop.
+    avoid.forEach(t => { if (text.includes(t)) score -= 100; });
+
     return { r, score };
   });
   scored.sort((a, b) => b.score - a.score);
   return scored.map(s => s.r);
 }
 
+// A Page is a derived view of the slot's flat meals array. Pages are
+// recomputed from `mealsBySlot` on every render rather than maintained
+// independently, so the page-fill rules below are a pure function of the
+// meal count and never get out of sync.
 interface Page {
-  kind: 'auto' | 'describe';
   cards: RecipeTemplate[];
+  isLast: boolean;
 }
 
 function buildAutoPage(
   pool: RecipeTemplate[],
   alreadyShownIds: Set<string>,
+  limit: number = SUGGEST_BATCH,
 ): RecipeTemplate[] {
-  return pool.filter(r => !alreadyShownIds.has(r.id)).slice(0, PAGE_SIZE);
+  return pool.filter(r => !alreadyShownIds.has(r.id)).slice(0, limit);
+}
+
+// Enable LayoutAnimation on Android (iOS has it on by default). Calling
+// more than once is a no-op.
+if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
+
+// Distribute a flat list of meals into pages.
+//
+// Rules:
+// - Non-last pages contain exactly 5 meal cards (no Suggest more).
+// - Last page contains 1–4 meal cards (Suggest more is rendered after
+//   the last card by the pick screen, so it doesn't appear here).
+// - Edge case: if the meal count is a multiple of 5, splitting into 5s
+//   would leave the last page empty. We "demote" one meal from the
+//   previous page so the last page has 1 meal + Suggest more.
+// - Empty meal list → one empty last page (Suggest more visible alone).
+function distributeMealsIntoPages(meals: RecipeTemplate[]): Page[] {
+  const total = meals.length;
+  if (total === 0) return [{ cards: [], isLast: true }];
+
+  const pages: Page[] = [];
+  let i = 0;
+  while (total - i > PAGE_SIZE) {
+    pages.push({ cards: meals.slice(i, i + PAGE_SIZE), isLast: false });
+    i += PAGE_SIZE;
+  }
+  let remainder = meals.slice(i);
+  if (remainder.length === 0 && pages.length > 0) {
+    // Demote one meal from the previous full page so the last page has
+    // a single meal + Suggest more rather than just Suggest more alone.
+    const prev = pages[pages.length - 1];
+    const demoted = prev.cards.pop()!;
+    remainder = [demoted];
+  }
+  pages.push({ cards: remainder, isLast: true });
+  return pages;
 }
 
 function generateCustomCard(text: string, category: RecipeCategory): RecipeTemplate {
@@ -115,10 +212,6 @@ function generateCustomCard(text: string, category: RecipeCategory): RecipeTempl
     ingredients: [],
     steps: [`Prepare: ${trimmed}`, 'Plate and enjoy.'],
   };
-}
-
-function autoPageCount(pages: Page[]): number {
-  return pages.filter(p => p.kind === 'auto').length;
 }
 
 function autoPlanName(): string {
@@ -159,9 +252,49 @@ type Mode =
 
 type Step =
   | { kind: 'guide' }
+  | { kind: 'onboarding'; questionIdx: 0 | 1 | 2 | 3 }
   | { kind: 'pick'; slotIdx: number }
   | { kind: 'summary'; slotIdx: number }
   | { kind: 'preview' };
+
+// ─── Mini onboarding ─────────────────────────────────────────────────────────
+// 4 short questions asked fresh every Build My Plan run. Answers live only
+// in component state — they're never persisted to profile (people's mood
+// changes day to day) — though we keep the previous session in a module-
+// level cache so the user can one-tap reuse last time's answers.
+
+type CookTime = 'quick' | 'moderate' | 'full';
+
+interface WizardPrefs {
+  cuisines: string[];          // multi-select; "Everything" is mutually exclusive
+  cookTime: CookTime | null;   // single select
+  loves: string[];             // chips + free text combined
+  avoid: string[];             // chips + free text combined
+}
+
+const CUISINE_OPTIONS: string[] = [
+  'Nigerian',
+  'Mediterranean',
+  'Asian',
+  'American',
+  'Mexican',
+  'Indian',
+  'Italian',
+  'Mixed or Everything',
+];
+const EVERYTHING_KEY = 'Mixed or Everything';
+
+const LOVE_SUGGESTIONS = ['Chicken', 'Rice', 'Eggs', 'Pasta', 'Salmon', 'Beef', 'Potatoes', 'Tofu'];
+const AVOID_SUGGESTIONS = ['Mushrooms', 'Olives', 'Tomato', 'Cilantro', 'Liver', 'Tuna', 'Spicy'];
+
+const ONBOARDING_TOTAL = 4;
+
+const EMPTY_PREFS: WizardPrefs = {
+  cuisines: [],
+  cookTime: null,
+  loves: [],
+  avoid: [],
+};
 
 // ─── Screen ──────────────────────────────────────────────────────────────────
 
@@ -172,6 +305,8 @@ export default function BuildPlanScreen() {
   const activatePlan = useMealStore(s => s.activatePlan);
   const saveCurrentPlanAs = useMealStore(s => s.saveCurrentPlanAs);
   const showToast = useToastStore(s => s.showToast);
+  const insets = useSafeAreaInsets();
+  const footerBottomPad = Math.max(insets.bottom, 16) + 16;
 
   // Active slots: only those not skipped, sorted by time so the wizard walks
   // them in the canonical order Breakfast → Mid-morning → Lunch → ... → Dinner.
@@ -181,31 +316,55 @@ export default function BuildPlanScreen() {
   );
 
   const dietaryFiltered = useMemo(() => applyDietaryFilter(recipes, profile), [recipes, profile]);
+
+  // ── Wizard state ────────────────────────────────────────────────────────
+  // Flow: onboarding (4 quick questions, fresh every run) → guide (review)
+  // → pick → summary → preview. Onboarding-first lets the guide act as a
+  // confirmation screen showing both profile data and the user's answers
+  // before committing them to meal selection.
+  const [step, setStep] = useState<Step>({ kind: 'onboarding', questionIdx: 0 });
+  const [mode, setMode] = useState<Mode>({ kind: 'normal' });
+  // Mini onboarding answers, gathered fresh each run. Used to bias meal
+  // suggestions in `byCategory`/`rankForGoal`.
+  const [prefs, setPrefs] = useState<WizardPrefs>(EMPTY_PREFS);
+  // Free-text input boxes for love/avoid questions.
+  const [loveInput, setLoveInput] = useState('');
+  const [avoidInput, setAvoidInput] = useState('');
+
+  // Re-bucket recipes by category whenever profile, recipe pool, or wizard
+  // prefs change. Pages already built for a slot keep their cards (we only
+  // re-rank the pool used to seed *future* pages and Suggest more batches),
+  // so changing prefs mid-flow doesn't yank cards out from under the user.
   const byCategory = useMemo<Record<RecipeCategory, RecipeTemplate[]>>(() => {
     const map: Record<RecipeCategory, RecipeTemplate[]> = {
       Breakfast: [], Lunch: [], Dinner: [], Snacks: [],
     };
-    rankForGoal(dietaryFiltered, profile).forEach(r => { map[r.category].push(r); });
+    rankForGoal(dietaryFiltered, profile, prefs).forEach(r => { map[r.category].push(r); });
     return map;
-  }, [dietaryFiltered, profile]);
-
-  // ── Wizard state ────────────────────────────────────────────────────────
-  // The wizard always opens on the guide page so the user knows what's
-  // about to happen before being dropped into meal selection.
-  const [step, setStep] = useState<Step>({ kind: 'guide' });
-  const [mode, setMode] = useState<Mode>({ kind: 'normal' });
+  }, [dietaryFiltered, profile, prefs]);
   // Describe popup state — opened from the bottom button on each pick page.
   const [describeModalVisible, setDescribeModalVisible] = useState(false);
   const [describeModalText, setDescribeModalText] = useState('');
   // Preview "Meals in this plan" collapse state.
   const [previewMealsExpanded, setPreviewMealsExpanded] = useState(false);
-  // Per-slot: pages of recipe cards. Keyed by slot.id so it survives even if
-  // active slots are recomputed (e.g. user toggles a slot mid-session).
-  const [pagesBySlot, setPagesBySlot] = useState<Record<string, Page[]>>({});
+  // Per-slot: a flat array of meal cards. Keyed by slot.id so it survives
+  // even if active slots are recomputed (e.g. user toggles a slot mid-
+  // session). Pages are derived from this list on every render via
+  // `distributeMealsIntoPages`.
+  const [mealsBySlot, setMealsBySlot] = useState<Record<string, RecipeTemplate[]>>({});
   // Per-slot selected recipes preserved in user-pick order.
   const [selectionsBySlot, setSelectionsBySlot] = useState<Record<string, RecipeTemplate[]>>({});
   // Per-slot active page index in the horizontal pager.
   const [pageIdxBySlot, setPageIdxBySlot] = useState<Record<string, number>>({});
+  // Per-slot Suggest more click count. Used purely to trigger the
+  // "Try Describe" popup once at SUGGEST_POPUP_AT — Suggest more itself
+  // never disappears.
+  const [suggestClicksBySlot, setSuggestClicksBySlot] = useState<Record<string, number>>({});
+  // Tracks whether the popup has already shown at least once for a slot
+  // so we don't pester the user every additional 5 clicks.
+  const [suggestPopupShownBySlot, setSuggestPopupShownBySlot] = useState<Record<string, boolean>>({});
+  // The popup's visibility (per-slot popup, only one slot active at a time).
+  const [suggestPopupVisible, setSuggestPopupVisible] = useState(false);
   // Preview state
   const [previewDays, setPreviewDays] = useState<PlanDayMeal[][]>([]);
   const [expandedDays, setExpandedDays] = useState<Set<number>>(new Set([0]));
@@ -215,17 +374,17 @@ export default function BuildPlanScreen() {
   const [pageWidth, setPageWidth] = useState(0);
   const pagerRef = useRef<ScrollView | null>(null);
 
-  // ── Initialisation: seed first auto-page for the current pick slot ─────
+  // ── Initialisation: seed INITIAL_SEED meals for the current pick slot ──
   useEffect(() => {
     if (step.kind !== 'pick') return;
     const slot = activeSlots[step.slotIdx];
     if (!slot) return;
-    if (pagesBySlot[slot.id]) return;
+    if (mealsBySlot[slot.id]) return;
     const pool = byCategory[categoryForSlot(slot.name)] ?? [];
-    const initial: Page = { kind: 'auto', cards: buildAutoPage(pool, new Set()) };
-    setPagesBySlot(prev => ({ ...prev, [slot.id]: [initial] }));
+    const seed = buildAutoPage(pool, new Set(), INITIAL_SEED);
+    setMealsBySlot(prev => ({ ...prev, [slot.id]: seed }));
     setPageIdxBySlot(prev => ({ ...prev, [slot.id]: prev[slot.id] ?? 0 }));
-  }, [step, activeSlots, byCategory, pagesBySlot]);
+  }, [step, activeSlots, byCategory, mealsBySlot]);
 
   // Whenever pages grow OR the user switches slots, scroll the pager to the
   // current page index. Done on next frame so layout settles first.
@@ -239,25 +398,36 @@ export default function BuildPlanScreen() {
     });
   }, [step, activeSlots, pageWidth, pageIdxBySlot]);
 
-  // ── Guide preview (initial step) ────────────────────────────────────────
-  // Sits in front of the meal selection wizard so the user has a moment to
-  // see their goal/preferences and understand what's about to happen.
+  // ── Guide preview (review step) ─────────────────────────────────────────
+  // Sits *after* the 4 onboarding questions so the user can review both
+  // their fresh answers and their saved profile before meal selection
+  // begins. Read-only — to change an onboarding answer, the user goes back.
   if (step.kind === 'guide') {
     const dietary = profile.dietaryRestrictions ?? [];
     const allergies = profile.allergies ?? [];
-    const hasPrefs = dietary.length > 0 || allergies.length > 0;
     const slotCount = activeSlots.length;
+    const cookTimeLabel = prefs.cookTime === 'quick'
+      ? 'Quick · under 15 min'
+      : prefs.cookTime === 'moderate'
+      ? 'Moderate · 15–30 min'
+      : prefs.cookTime === 'full'
+      ? 'Full cooking · 30+ min'
+      : null;
 
     return (
-      <SafeAreaView style={styles.safe} edges={['top']}>
-        <Header title="Build My Plan" onBack={() => router.back()} />
+      <Screen edges={['top', 'bottom']}>
+        <Header
+          title="Review"
+          onBack={() => setStep({ kind: 'onboarding', questionIdx: 3 })}
+        />
 
         <ScrollView contentContainerStyle={styles.guideBody} showsVerticalScrollIndicator={false}>
-          <Text style={styles.guideHero}>Let&apos;s build your week</Text>
+          <Text style={styles.guideHero}>Looking good</Text>
           <Text style={styles.guideHeroSub}>
-            Based on your goal{profile.firstName ? `, ${profile.firstName}` : ''}, we&apos;ll suggest meals tailored just for you.
+            Here&apos;s what we&apos;ll use to suggest meals{profile.firstName ? `, ${profile.firstName}` : ''}.
           </Text>
 
+          {/* Profile section */}
           <View style={styles.guideCard}>
             <View style={styles.guideRow}>
               <Text style={styles.guideRowLabel}>Goal</Text>
@@ -299,14 +469,73 @@ export default function BuildPlanScreen() {
             </View>
           </View>
 
-          {!hasPrefs && (
-            <Text style={styles.guideHint}>
-              You can update your dietary preferences or allergies any time in your Profile.
-            </Text>
-          )}
+          {/* Onboarding answers — fresh-this-session */}
+          <View style={styles.guideCard}>
+            <View style={styles.guideRow}>
+              <Text style={styles.guideRowLabel}>Cuisines</Text>
+              <View style={styles.guidePillGroup}>
+                {prefs.cuisines.length === 0 ? (
+                  <Text style={styles.guideMuted}>Anything</Text>
+                ) : (
+                  prefs.cuisines.map(c => (
+                    <View key={c} style={styles.guidePill}><Text style={styles.guidePillText}>{c}</Text></View>
+                  ))
+                )}
+              </View>
+            </View>
+
+            <View style={styles.guideDivider} />
+
+            <View style={styles.guideRow}>
+              <Text style={styles.guideRowLabel}>Cook time</Text>
+              <View style={styles.guidePillGroup}>
+                {cookTimeLabel ? (
+                  <View style={styles.guidePill}><Text style={styles.guidePillText}>{cookTimeLabel}</Text></View>
+                ) : (
+                  <Text style={styles.guideMuted}>No preference</Text>
+                )}
+              </View>
+            </View>
+
+            <View style={styles.guideDivider} />
+
+            <View style={styles.guideRow}>
+              <Text style={styles.guideRowLabel}>Loves</Text>
+              <View style={styles.guidePillGroup}>
+                {prefs.loves.length === 0 ? (
+                  <Text style={styles.guideMuted}>None</Text>
+                ) : (
+                  prefs.loves.map(l => (
+                    <View key={l} style={styles.guidePill}><Text style={styles.guidePillText}>{l}</Text></View>
+                  ))
+                )}
+              </View>
+            </View>
+
+            <View style={styles.guideDivider} />
+
+            <View style={styles.guideRow}>
+              <Text style={styles.guideRowLabel}>Avoid</Text>
+              <View style={styles.guidePillGroup}>
+                {prefs.avoid.length === 0 ? (
+                  <Text style={styles.guideMuted}>None</Text>
+                ) : (
+                  prefs.avoid.map(a => (
+                    <View key={a} style={[styles.guidePill, styles.guidePillWarn]}>
+                      <Text style={[styles.guidePillText, styles.guidePillTextWarn]}>{a}</Text>
+                    </View>
+                  ))
+                )}
+              </View>
+            </View>
+          </View>
+
+          <Text style={styles.guideHint}>
+            Want to change something? Tap back to revisit the questions.
+          </Text>
 
           <View style={styles.guideStepsCard}>
-            <Text style={styles.guideStepsTitle}>How it works</Text>
+            <Text style={styles.guideStepsTitle}>What&apos;s next</Text>
             <View style={styles.guideStepRow}>
               <View style={styles.guideStepBullet}><Text style={styles.guideStepBulletText}>1</Text></View>
               <Text style={styles.guideStepText}>
@@ -316,7 +545,7 @@ export default function BuildPlanScreen() {
             <View style={styles.guideStepRow}>
               <View style={styles.guideStepBullet}><Text style={styles.guideStepBulletText}>2</Text></View>
               <Text style={styles.guideStepText}>
-                Pick your favourites from the suggestions, or describe what you want.
+                Pick your favourites — Suggest more or describe what you want any time.
               </Text>
             </View>
             <View style={styles.guideStepRow}>
@@ -328,7 +557,7 @@ export default function BuildPlanScreen() {
           </View>
         </ScrollView>
 
-        <View style={styles.footer}>
+        <View style={[styles.footer, { paddingBottom: footerBottomPad }]}>
           <TouchableOpacity
             style={[styles.primaryBtn, styles.guideCta]}
             onPress={() => setStep({ kind: 'pick', slotIdx: 0 })}
@@ -337,14 +566,288 @@ export default function BuildPlanScreen() {
             <Text style={styles.primaryBtnText}>Let&apos;s go</Text>
           </TouchableOpacity>
         </View>
-      </SafeAreaView>
+      </Screen>
+    );
+  }
+
+  // ── Render: ONBOARDING (4 quick questions) ─────────────────────────────
+  if (step.kind === 'onboarding') {
+    const qIdx = step.questionIdx;
+    const isLast = qIdx === 3;
+
+    const goNext = () => {
+      if (isLast) {
+        // After Q4, route to the guide review page so the user can see all
+        // their answers + profile data before committing.
+        setStep({ kind: 'guide' });
+      } else {
+        setStep({ kind: 'onboarding', questionIdx: (qIdx + 1) as 0 | 1 | 2 | 3 });
+      }
+    };
+    const goBack = () => {
+      // Q1 back returns to the modal; subsequent questions step backwards.
+      if (qIdx === 0) router.back();
+      else setStep({ kind: 'onboarding', questionIdx: (qIdx - 1) as 0 | 1 | 2 | 3 });
+    };
+    const skipAll = () => setStep({ kind: 'guide' });
+
+    // Q1 helpers — "Mixed or Everything" is mutually exclusive with picks.
+    const toggleCuisine = (c: string) => {
+      setPrefs(p => {
+        if (c === EVERYTHING_KEY) {
+          return { ...p, cuisines: p.cuisines.includes(EVERYTHING_KEY) ? [] : [EVERYTHING_KEY] };
+        }
+        const without = p.cuisines.filter(x => x !== EVERYTHING_KEY);
+        const has = without.includes(c);
+        return { ...p, cuisines: has ? without.filter(x => x !== c) : [...without, c] };
+      });
+    };
+
+    // Q3 / Q4 helpers
+    const addLoveToken = (raw: string) => {
+      const v = raw.trim();
+      if (!v) return;
+      if (prefs.avoid.some(a => a.toLowerCase() === v.toLowerCase())) {
+        Alert.alert(
+          `${v} is in foods to avoid`,
+          'A food can only be loved or avoided. Pick one.',
+        );
+        return;
+      }
+      setPrefs(p => p.loves.some(l => l.toLowerCase() === v.toLowerCase()) ? p : { ...p, loves: [...p.loves, v] });
+    };
+    const removeLoveToken = (token: string) =>
+      setPrefs(p => ({ ...p, loves: p.loves.filter(t => t !== token) }));
+    const addAvoidToken = (raw: string) => {
+      const v = raw.trim();
+      if (!v) return;
+      if (prefs.loves.some(a => a.toLowerCase() === v.toLowerCase())) {
+        Alert.alert(
+          `${v} is in foods you love`,
+          'A food can only be loved or avoided. Pick one.',
+        );
+        return;
+      }
+      setPrefs(p => p.avoid.some(l => l.toLowerCase() === v.toLowerCase()) ? p : { ...p, avoid: [...p.avoid, v] });
+    };
+    const removeAvoidToken = (token: string) =>
+      setPrefs(p => ({ ...p, avoid: p.avoid.filter(t => t !== token) }));
+
+    return (
+      <Screen edges={['top', 'bottom']}>
+        <StepProgressBar
+          step={qIdx + 1}
+          total={ONBOARDING_TOTAL}
+          label="Quick setup"
+        />
+        <Header
+          title="A few quick questions"
+          onBack={goBack}
+          rightAction={
+            <TouchableOpacity onPress={skipAll} hitSlop={10}>
+              <Text style={styles.headerRightMutedText}>Skip</Text>
+            </TouchableOpacity>
+          }
+        />
+
+        <KeyboardAvoidingView
+          style={{ flex: 1 }}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        >
+          <ScrollView
+            contentContainerStyle={styles.onbBody}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+          >
+            {qIdx === 0 && (
+              <>
+                <Text style={styles.onbQuestion}>What cuisines do you enjoy?</Text>
+                <Text style={styles.onbHint}>Pick any that sound good. We&apos;ll bias suggestions toward them.</Text>
+                <View style={styles.chipGrid}>
+                  {CUISINE_OPTIONS.map(c => {
+                    const active = prefs.cuisines.includes(c);
+                    return (
+                      <TouchableOpacity
+                        key={c}
+                        style={[styles.chip, active && styles.chipActive]}
+                        onPress={() => toggleCuisine(c)}
+                        activeOpacity={0.85}
+                      >
+                        <Text style={[styles.chipText, active && styles.chipTextActive]}>{c}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </>
+            )}
+
+            {qIdx === 1 && (
+              <>
+                <Text style={styles.onbQuestion}>How much time do you have to cook?</Text>
+                <Text style={styles.onbHint}>This biases suggestions toward recipes that fit your time budget.</Text>
+                <View style={styles.radioGroup}>
+                  {([
+                    { key: 'quick' as const,    label: 'Quick',         meta: 'Under 15 minutes' },
+                    { key: 'moderate' as const, label: 'Moderate',      meta: '15 to 30 minutes' },
+                    { key: 'full' as const,     label: 'Full cooking',  meta: '30 minutes or more' },
+                  ]).map(opt => {
+                    const active = prefs.cookTime === opt.key;
+                    return (
+                      <TouchableOpacity
+                        key={opt.key}
+                        style={[styles.radioRow, active && styles.radioRowActive]}
+                        onPress={() => setPrefs(p => ({ ...p, cookTime: opt.key }))}
+                        activeOpacity={0.85}
+                      >
+                        <View style={[styles.radioDot, active && styles.radioDotActive]} />
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.radioLabel}>{opt.label}</Text>
+                          <Text style={styles.radioMeta}>{opt.meta}</Text>
+                        </View>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </>
+            )}
+
+            {qIdx === 2 && (
+              <>
+                <Text style={styles.onbQuestion}>Any foods you love?</Text>
+                <Text style={styles.onbHint}>
+                  Type or use your keyboard&apos;s mic. Tap suggestions to add them.
+                </Text>
+                <View style={styles.tokenInputRow}>
+                  <TextInput
+                    style={styles.tokenInput}
+                    value={loveInput}
+                    onChangeText={setLoveInput}
+                    placeholder="e.g. salmon, mango, oats"
+                    placeholderTextColor={COLORS.textMuted}
+                    onSubmitEditing={() => { addLoveToken(loveInput); setLoveInput(''); }}
+                    returnKeyType="done"
+                  />
+                  <TouchableOpacity
+                    style={[styles.tokenAddBtn, !loveInput.trim() && styles.disabledBtn]}
+                    disabled={!loveInput.trim()}
+                    onPress={() => { addLoveToken(loveInput); setLoveInput(''); }}
+                  >
+                    <Text style={styles.tokenAddBtnText}>Add</Text>
+                  </TouchableOpacity>
+                </View>
+                <View style={styles.chipGrid}>
+                  {LOVE_SUGGESTIONS.map(s => {
+                    const active = prefs.loves.some(l => l.toLowerCase() === s.toLowerCase());
+                    return (
+                      <TouchableOpacity
+                        key={s}
+                        style={[styles.chip, active && styles.chipActive]}
+                        onPress={() => active ? removeLoveToken(prefs.loves.find(l => l.toLowerCase() === s.toLowerCase())!) : addLoveToken(s)}
+                        activeOpacity={0.85}
+                      >
+                        <Text style={[styles.chipText, active && styles.chipTextActive]}>{s}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+                {prefs.loves.length > 0 && (
+                  <View style={styles.tokenList}>
+                    <Text style={styles.tokenListLabel}>Added</Text>
+                    <View style={styles.chipGrid}>
+                      {prefs.loves.map(t => (
+                        <TouchableOpacity
+                          key={t}
+                          style={[styles.chip, styles.chipActive]}
+                          onPress={() => removeLoveToken(t)}
+                          activeOpacity={0.7}
+                        >
+                          <Text style={[styles.chipText, styles.chipTextActive]}>{t}  ✕</Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  </View>
+                )}
+              </>
+            )}
+
+            {qIdx === 3 && (
+              <>
+                <Text style={styles.onbQuestion}>Any foods to avoid?</Text>
+                <Text style={styles.onbHint}>
+                  This is for foods you don&apos;t enjoy — your allergies are already saved in your profile.
+                </Text>
+                <View style={styles.tokenInputRow}>
+                  <TextInput
+                    style={styles.tokenInput}
+                    value={avoidInput}
+                    onChangeText={setAvoidInput}
+                    placeholder="e.g. cilantro, liver"
+                    placeholderTextColor={COLORS.textMuted}
+                    onSubmitEditing={() => { addAvoidToken(avoidInput); setAvoidInput(''); }}
+                    returnKeyType="done"
+                  />
+                  <TouchableOpacity
+                    style={[styles.tokenAddBtn, !avoidInput.trim() && styles.disabledBtn]}
+                    disabled={!avoidInput.trim()}
+                    onPress={() => { addAvoidToken(avoidInput); setAvoidInput(''); }}
+                  >
+                    <Text style={styles.tokenAddBtnText}>Add</Text>
+                  </TouchableOpacity>
+                </View>
+                <View style={styles.chipGrid}>
+                  {AVOID_SUGGESTIONS.map(s => {
+                    const active = prefs.avoid.some(l => l.toLowerCase() === s.toLowerCase());
+                    return (
+                      <TouchableOpacity
+                        key={s}
+                        style={[styles.chip, active && styles.chipActive]}
+                        onPress={() => active ? removeAvoidToken(prefs.avoid.find(l => l.toLowerCase() === s.toLowerCase())!) : addAvoidToken(s)}
+                        activeOpacity={0.85}
+                      >
+                        <Text style={[styles.chipText, active && styles.chipTextActive]}>{s}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+                {prefs.avoid.length > 0 && (
+                  <View style={styles.tokenList}>
+                    <Text style={styles.tokenListLabel}>Added</Text>
+                    <View style={styles.chipGrid}>
+                      {prefs.avoid.map(t => (
+                        <TouchableOpacity
+                          key={t}
+                          style={[styles.chip, styles.chipActive]}
+                          onPress={() => removeAvoidToken(t)}
+                          activeOpacity={0.7}
+                        >
+                          <Text style={[styles.chipText, styles.chipTextActive]}>{t}  ✕</Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  </View>
+                )}
+              </>
+            )}
+          </ScrollView>
+
+          <View style={[styles.footer, { paddingBottom: footerBottomPad }]}>
+            <TouchableOpacity
+              style={[styles.primaryBtn, styles.guideCta]}
+              onPress={goNext}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.primaryBtnText}>{isLast ? 'Start picking meals' : 'Next'}</Text>
+            </TouchableOpacity>
+          </View>
+        </KeyboardAvoidingView>
+      </Screen>
     );
   }
 
   // ── All-slots-skipped guard ─────────────────────────────────────────────
   if (activeSlots.length === 0) {
     return (
-      <SafeAreaView style={styles.safe} edges={['top']}>
+      <Screen edges={['top', 'bottom']}>
         <Header title="Build My Plan" onBack={() => router.back()} />
         <View style={styles.guardWrap}>
           <Text style={styles.guardEmoji}>🍽️</Text>
@@ -362,13 +865,17 @@ export default function BuildPlanScreen() {
             <Text style={styles.guardSecondaryText}>Close</Text>
           </TouchableOpacity>
         </View>
-      </SafeAreaView>
+      </Screen>
     );
   }
 
   // ── Helpers wired to closure state ─────────────────────────────────────
+  function mealsForSlot(slot: MealSlot): RecipeTemplate[] {
+    return mealsBySlot[slot.id] ?? [];
+  }
+
   function pagesForSlot(slot: MealSlot): Page[] {
-    return pagesBySlot[slot.id] ?? [];
+    return distributeMealsIntoPages(mealsForSlot(slot));
   }
 
   function selectionsForSlot(slot: MealSlot): RecipeTemplate[] {
@@ -390,37 +897,54 @@ export default function BuildPlanScreen() {
     });
   }
 
+  // Lands the user on the current last page after meals are added, then
+  // increments the click counter and conditionally fires the popup.
+  function appendMealsForSlot(
+    slot: MealSlot,
+    newCards: RecipeTemplate[],
+    isSuggestMore: boolean,
+  ) {
+    if (newCards.length === 0) return;
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    setMealsBySlot(prev => {
+      const next = [...(prev[slot.id] ?? []), ...newCards];
+      const pageCount = distributeMealsIntoPages(next).length;
+      setPageIdxBySlot(idx => ({ ...idx, [slot.id]: pageCount - 1 }));
+      return { ...prev, [slot.id]: next };
+    });
+    if (isSuggestMore) {
+      const nextCount = (suggestClicksBySlot[slot.id] ?? 0) + 1;
+      setSuggestClicksBySlot(prev => ({ ...prev, [slot.id]: nextCount }));
+      // Fire the popup the first time we hit the threshold for this slot.
+      if (nextCount === SUGGEST_POPUP_AT && !suggestPopupShownBySlot[slot.id]) {
+        setSuggestPopupShownBySlot(prev => ({ ...prev, [slot.id]: true }));
+        setSuggestPopupVisible(true);
+      }
+    }
+  }
+
+  // "Suggest more": fetch a fresh batch of unseen meals and append. Suggest
+  // more is always available; tracking is purely for the popup nudge.
   function addAutoPage(slot: MealSlot) {
     const pool = byCategory[categoryForSlot(slot.name)] ?? [];
     const shown = new Set<string>();
-    pagesForSlot(slot).forEach(p => p.cards.forEach(c => shown.add(c.id)));
-    const cards = buildAutoPage(pool, shown);
-    if (cards.length === 0) return;
-    setPagesBySlot(prev => {
-      const next = [...(prev[slot.id] ?? []), { kind: 'auto' as const, cards }];
-      return { ...prev, [slot.id]: next };
-    });
-    setPageIdxBySlot(prev => ({
-      ...prev,
-      [slot.id]: (prev[slot.id] ?? 0) + 1,
-    }));
+    mealsForSlot(slot).forEach(c => shown.add(c.id));
+    const cards = buildAutoPage(pool, shown, SUGGEST_BATCH);
+    if (cards.length === 0) {
+      // Pool exhausted — silently fall back to nudging Describe.
+      showToast('No more options — try Describe for custom ideas');
+      return;
+    }
+    appendMealsForSlot(slot, cards, /* isSuggestMore */ true);
   }
 
-  // Append a Describe-generated page using the user's free-form text.
+  // Describe: generate a single custom card from the user's prompt and append.
   function addDescribePage(slot: MealSlot, rawText: string) {
     const text = rawText.trim();
     if (!text) return;
-    const cards = [generateCustomCard(text, categoryForSlot(slot.name))];
-    setPagesBySlot(prev => {
-      const next = [...(prev[slot.id] ?? []), { kind: 'describe' as const, cards }];
-      return { ...prev, [slot.id]: next };
-    });
-    setPageIdxBySlot(prev => {
-      const current = prev[slot.id] ?? 0;
-      const newPageIdx = (pagesBySlot[slot.id] ?? []).length; // index of the page we just appended
-      return { ...prev, [slot.id]: Math.max(current, newPageIdx) };
-    });
-    showToast('Generated new options');
+    const card = generateCustomCard(text, categoryForSlot(slot.name));
+    appendMealsForSlot(slot, [card], /* isSuggestMore */ false);
+    showToast('Generated new option');
   }
 
   function handleCardPress(slot: MealSlot, recipe: RecipeTemplate) {
@@ -497,7 +1021,7 @@ export default function BuildPlanScreen() {
     );
   }
 
-  function advanceFromSlot(slotIdx: number, skipped: boolean) {
+  function advanceFromSlot(slotIdx: number, _skipped: boolean) {
     if (slotIdx >= activeSlots.length - 1) {
       // Build the preview and head there.
       const days = buildPreviewDays(activeSlots, selectionsBySlot);
@@ -506,14 +1030,17 @@ export default function BuildPlanScreen() {
       setStep({ kind: 'preview' });
       return;
     }
-    if (skipped) {
-      // Skipped slots jump to the next slot's pick step (no summary for this one).
-      setStep({ kind: 'pick', slotIdx: slotIdx + 1 });
-    } else {
-      // Normal continue jumps to summary first, but in this helper we only advance
-      // to the next slot's pick. Summary→continue calls this directly.
-      setStep({ kind: 'pick', slotIdx: slotIdx + 1 });
-    }
+    // Forward navigation: if the next slot is already completed (has selections),
+    // show its summary instead of forcing the user back through the pick page.
+    // Otherwise show the pick page so the user can choose meals for that slot.
+    const nextIdx = slotIdx + 1;
+    const nextSlot = activeSlots[nextIdx];
+    const nextHasSelections = (selectionsBySlot[nextSlot.id] ?? []).length > 0;
+    setStep(
+      nextHasSelections
+        ? { kind: 'summary', slotIdx: nextIdx }
+        : { kind: 'pick', slotIdx: nextIdx },
+    );
   }
 
   function handleBackFromPick(slotIdx: number) {
@@ -590,8 +1117,6 @@ export default function BuildPlanScreen() {
     const slot = activeSlots[step.slotIdx];
     const slotPages = pagesForSlot(slot);
     const sel = selectionsForSlot(slot);
-    const autoCount = autoPageCount(slotPages);
-    const findMoreLocked = autoCount >= AUTO_PAGE_CAP + 1; // initial page counts as 1 auto, cap is +3 more
     const currentPageIdx = pageIdxBySlot[slot.id] ?? 0;
 
     const headerTitle = slot.name;
@@ -602,7 +1127,7 @@ export default function BuildPlanScreen() {
       : undefined;
 
     return (
-      <SafeAreaView style={styles.safe} edges={['top']}>
+      <Screen edges={['top', 'bottom']}>
         {/* Progress bar — only in normal flow. Suppressed in swap modes. */}
         {mode.kind === 'normal' && (
           <StepProgressBar
@@ -632,81 +1157,63 @@ export default function BuildPlanScreen() {
           }
         />
 
-        {/* Dots — centered, just below the header. */}
-        {slotPages.length > 1 && (
-          <View style={styles.dotsCenterRow}>
-            {slotPages.map((_, idx) => (
-              <View
-                key={idx}
-                style={[styles.dot, currentPageIdx === idx && styles.dotActive]}
-              />
-            ))}
-          </View>
-        )}
-
-        {/* Explanatory copy + selection counter. */}
-        <View style={styles.pickIntro}>
-          <Text style={styles.pickIntroText}>
-            {mode.kind === 'normal'
-              ? `Pick your favourites. We'll rotate them through the week.`
-              : `Tap a card to swap.`}
-          </Text>
-          {mode.kind === 'normal' && (
-            <Text style={styles.pickCounter}>{sel.length} selected</Text>
-          )}
-        </View>
-
+        {/* Elevated card wraps everything below the header. The card's
+            internal layout is: intro (instruction + counter) → horizontal
+            pager (flex:1) → page dots → locked bottom bar (Describe + skip). */}
         <KeyboardAvoidingView
           style={{ flex: 1 }}
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         >
-          <View
-            style={{ flex: 1 }}
-            onLayout={e => setPageWidth(e.nativeEvent.layout.width)}
-          >
-            {pageWidth > 0 && (
-              <ScrollView
-                ref={pagerRef}
-                horizontal
-                pagingEnabled
-                showsHorizontalScrollIndicator={false}
-                onMomentumScrollEnd={e => {
-                  const x = e.nativeEvent.contentOffset.x;
-                  const newIdx = Math.round(x / pageWidth);
-                  setPageIdxBySlot(prev => ({ ...prev, [slot.id]: newIdx }));
-                }}
-              >
-                {slotPages.map((page, pageIdx) => (
-                  <ScrollView
-                    key={pageIdx}
-                    style={{ width: pageWidth }}
-                    contentContainerStyle={styles.pageBody}
-                    showsVerticalScrollIndicator={false}
-                  >
-                    {page.kind === 'describe' && (
-                      <View style={styles.describeBadge}>
-                        <Text style={styles.describeBadgeText}>From your description</Text>
-                      </View>
-                    )}
-                    {page.cards.map(r => (
-                      <PickCard
-                        key={r.id}
-                        recipe={r}
-                        selected={isSelected(slot, r.id)}
-                        showCheck={mode.kind === 'normal'}
-                        onPress={() => handleCardPress(slot, r)}
-                      />
-                    ))}
-                    {/* "Suggest more" card or replacement message at the bottom of each page. */}
-                    {pageIdx === slotPages.length - 1 && (
-                      findMoreLocked ? (
-                        <View style={styles.findMoreLocked}>
-                          <Text style={styles.findMoreLockedText}>
-                            That&apos;s all for auto-suggestions. Use &ldquo;Describe what you want&rdquo;
-                            below for unlimited options.
-                          </Text>
-                        </View>
-                      ) : (
+          <View style={styles.cardContainer}>
+            {/* Intro */}
+            <View style={styles.cardIntro}>
+              <Text style={styles.pickIntroText}>
+                {mode.kind === 'normal'
+                  ? `Pick your favourites. We'll rotate them through the week.`
+                  : `Tap a card to swap.`}
+              </Text>
+              {mode.kind === 'normal' && (
+                <Text style={styles.pickCounter}>{sel.length} selected</Text>
+              )}
+            </View>
+
+            {/* Horizontal pager — fills available card height. */}
+            <View
+              style={styles.cardPagerArea}
+              onLayout={e => setPageWidth(e.nativeEvent.layout.width)}
+            >
+              {pageWidth > 0 && (
+                <ScrollView
+                  ref={pagerRef}
+                  horizontal
+                  pagingEnabled
+                  showsHorizontalScrollIndicator={false}
+                  onMomentumScrollEnd={e => {
+                    const x = e.nativeEvent.contentOffset.x;
+                    const newIdx = Math.round(x / pageWidth);
+                    setPageIdxBySlot(prev => ({ ...prev, [slot.id]: newIdx }));
+                  }}
+                >
+                  {slotPages.map((page, pageIdx) => (
+                    <ScrollView
+                      key={pageIdx}
+                      style={{ width: pageWidth }}
+                      contentContainerStyle={styles.pageBody}
+                      showsVerticalScrollIndicator={false}
+                    >
+                      {page.cards.map(r => (
+                        <PickCard
+                          key={r.id}
+                          recipe={r}
+                          selected={isSelected(slot, r.id)}
+                          showCheck={mode.kind === 'normal'}
+                          onPress={() => handleCardPress(slot, r)}
+                        />
+                      ))}
+                      {/* Suggest more sits on the last page only and is
+                          always visible — clicking it 5 times triggers the
+                          Describe-suggestion popup once per slot. */}
+                      {page.isLast && (
                         <TouchableOpacity
                           style={styles.findMoreCard}
                           onPress={() => addAutoPage(slot)}
@@ -715,35 +1222,48 @@ export default function BuildPlanScreen() {
                           <Text style={styles.findMoreEmoji}>✨</Text>
                           <Text style={styles.findMoreText}>Suggest more</Text>
                         </TouchableOpacity>
-                      )
-                    )}
-                  </ScrollView>
-                ))}
-              </ScrollView>
-            )}
-          </View>
+                      )}
+                    </ScrollView>
+                  ))}
+                </ScrollView>
+              )}
+            </View>
 
-          {/* Bottom bar: Describe button + skip link. */}
-          <View style={styles.bottomBar}>
-            <TouchableOpacity
-              style={styles.describeOpenBtn}
-              activeOpacity={0.85}
-              onPress={() => {
-                setDescribeModalText('');
-                setDescribeModalVisible(true);
-              }}
-            >
-              <Text style={styles.describeOpenIcon}>✎</Text>
-              <Text style={styles.describeOpenBtnText}>Describe what you want</Text>
-            </TouchableOpacity>
-            {mode.kind === 'normal' && (
-              <TouchableOpacity
-                style={styles.skipRow}
-                onPress={() => handleSkipSlot(slot, step.slotIdx)}
-              >
-                <Text style={styles.skipText}>No {slot.name}</Text>
-              </TouchableOpacity>
+            {/* iOS-16-style page indicator: round dots + elongated active pill. */}
+            {slotPages.length > 1 && (
+              <View style={styles.cardDots}>
+                {slotPages.map((_, idx) => (
+                  <View
+                    key={idx}
+                    style={[styles.dot, currentPageIdx === idx && styles.dotActive]}
+                  />
+                ))}
+              </View>
             )}
+
+            {/* Locked bottom bar: Describe + skip. Stays inside the card
+                so the card visually frames the entire selection workflow. */}
+            <View style={styles.cardLockedBottom}>
+              <TouchableOpacity
+                style={styles.describeOpenBtn}
+                activeOpacity={0.85}
+                onPress={() => {
+                  setDescribeModalText('');
+                  setDescribeModalVisible(true);
+                }}
+              >
+                <Text style={styles.describeOpenIcon}>✎</Text>
+                <Text style={styles.describeOpenBtnText}>Describe what you want</Text>
+              </TouchableOpacity>
+              {mode.kind === 'normal' && (
+                <TouchableOpacity
+                  style={styles.skipRow}
+                  onPress={() => handleSkipSlot(slot, step.slotIdx)}
+                >
+                  <Text style={styles.skipText}>No {slot.name}</Text>
+                </TouchableOpacity>
+              )}
+            </View>
           </View>
         </KeyboardAvoidingView>
 
@@ -800,7 +1320,63 @@ export default function BuildPlanScreen() {
             </Pressable>
           </KeyboardAvoidingView>
         </Modal>
-      </SafeAreaView>
+
+        {/* Suggest more popup: fires once per slot at SUGGEST_POPUP_AT clicks.
+            Two CTAs — open Describe or keep suggesting. Suggest more keeps
+            working forever regardless of how the popup is dismissed. */}
+        <Modal
+          transparent
+          animationType="fade"
+          visible={suggestPopupVisible}
+          onRequestClose={() => setSuggestPopupVisible(false)}
+        >
+          <Pressable
+            style={styles.describeOverlay}
+            onPress={() => setSuggestPopupVisible(false)}
+          >
+            <Pressable
+              style={styles.describeCard}
+              onPress={e => e.stopPropagation?.()}
+            >
+              <View style={styles.describeCardHeader}>
+                <Text style={styles.describeCardTitle}>Try Describe?</Text>
+                <TouchableOpacity
+                  onPress={() => setSuggestPopupVisible(false)}
+                  hitSlop={10}
+                  style={styles.describeCloseBtn}
+                >
+                  <Text style={styles.describeCloseText}>✕</Text>
+                </TouchableOpacity>
+              </View>
+              <Text style={styles.describeCardHint}>
+                Not seeing what you&apos;re after? Describe what you want and we&apos;ll
+                generate something tailored. Suggest more still works — this is
+                just a tip.
+              </Text>
+              <View style={styles.suggestPopupRow}>
+                <TouchableOpacity
+                  style={styles.suggestPopupSecondary}
+                  activeOpacity={0.85}
+                  onPress={() => setSuggestPopupVisible(false)}
+                >
+                  <Text style={styles.suggestPopupSecondaryText}>Keep suggesting</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.suggestPopupPrimary}
+                  activeOpacity={0.85}
+                  onPress={() => {
+                    setSuggestPopupVisible(false);
+                    setDescribeModalText('');
+                    setDescribeModalVisible(true);
+                  }}
+                >
+                  <Text style={styles.suggestPopupPrimaryText}>Try Describe</Text>
+                </TouchableOpacity>
+              </View>
+            </Pressable>
+          </Pressable>
+        </Modal>
+      </Screen>
     );
   }
 
@@ -812,7 +1388,7 @@ export default function BuildPlanScreen() {
     const avgProtein = sel.length === 0 ? 0 : Math.round(sel.reduce((s, r) => s + r.macros.protein, 0) / sel.length);
 
     return (
-      <SafeAreaView style={styles.safe} edges={['top']}>
+      <Screen edges={['top', 'bottom']}>
         {/* Progress bar — same step number as the corresponding pick page,
             since the summary belongs to that meal type. */}
         <StepProgressBar
@@ -868,7 +1444,7 @@ export default function BuildPlanScreen() {
             <Text style={styles.addMoreText}>+ Add more</Text>
           </TouchableOpacity>
         </ScrollView>
-      </SafeAreaView>
+      </Screen>
     );
   }
 
@@ -920,7 +1496,7 @@ export default function BuildPlanScreen() {
   const collapsibleNeeded = distinctMeals.length > 3;
 
   return (
-    <SafeAreaView style={styles.safe} edges={['top']}>
+    <Screen edges={['top', 'bottom']}>
       <Header
         title="Preview your plan"
         subtitle="Tap any meal to swap it"
@@ -1024,7 +1600,7 @@ export default function BuildPlanScreen() {
                               setStep({ kind: 'pick', slotIdx });
                             }}
                           >
-                            <Text style={styles.findDifferentText}>Find different meal</Text>
+                            <Text style={styles.findDifferentText}>Swap</Text>
                           </TouchableOpacity>
                         </View>
                       );
@@ -1038,7 +1614,7 @@ export default function BuildPlanScreen() {
       </ScrollView>
 
       {/* Single Confirm Plan button — Back is the header arrow. */}
-      <View style={styles.footer}>
+      <View style={[styles.footer, { paddingBottom: footerBottomPad }]}>
         <TouchableOpacity style={[styles.primaryBtn, styles.primaryBtnFull]} onPress={handleActivate}>
           <Text style={styles.primaryBtnText}>Confirm Plan</Text>
         </TouchableOpacity>
@@ -1102,7 +1678,7 @@ export default function BuildPlanScreen() {
           </Pressable>
         </Pressable>
       </Modal>
-    </SafeAreaView>
+    </Screen>
   );
 }
 
@@ -1161,6 +1737,9 @@ function PickCard({
 }: {
   recipe: RecipeTemplate;
   selected: boolean;
+  // When false (swap modes) we suppress the corner "Selected" badge since
+  // selection state isn't meaningful in those flows — the user is replacing
+  // a meal one-tap, not toggling.
   showCheck: boolean;
   onPress: () => void;
 }) {
@@ -1169,21 +1748,25 @@ function PickCard({
       onPress={onPress}
       activeOpacity={0.85}
       style={[styles.pickCard, selected && styles.pickCardSelected]}
+      accessibilityRole="button"
+      accessibilityState={{ selected }}
+      accessibilityLabel={
+        selected ? `${recipe.name}, selected` : `${recipe.name}`
+      }
     >
-      <View style={styles.pickHead}>
-        <Text style={styles.pickName} numberOfLines={1}>{recipe.name}</Text>
-        {showCheck && (
-          <View style={[styles.checkCircle, selected && styles.checkCircleSelected]}>
-            {selected ? <Text style={styles.checkMark}>✓</Text> : null}
-          </View>
-        )}
-      </View>
+      <Text style={styles.pickName} numberOfLines={1}>{recipe.name}</Text>
       <Text style={styles.pickMeta}>{recipe.calories} cal · {recipe.cookTimeMin}m</Text>
       <View style={styles.macroRow}>
         <Text style={styles.macroPill}>P {recipe.macros.protein}g</Text>
         <Text style={styles.macroPill}>C {recipe.macros.carbs}g</Text>
         <Text style={styles.macroPill}>F {recipe.macros.fats}g</Text>
       </View>
+      {showCheck && selected && (
+        <View style={styles.selectedBadge}>
+          <Text style={styles.selectedBadgeIcon}>✓</Text>
+          <Text style={styles.selectedBadgeText}>Selected</Text>
+        </View>
+      )}
     </TouchableOpacity>
   );
 }
@@ -1206,6 +1789,7 @@ const styles = StyleSheet.create({
   headerTitle: { color: COLORS.text, fontSize: 17, fontWeight: '700', textAlign: 'center' },
   headerSubtitle: { color: COLORS.textSecondary, fontSize: 11, textAlign: 'center', marginTop: 2 },
   headerRightText: { color: COLORS.green, fontSize: 14, fontWeight: '700' },
+  headerRightMutedText: { color: COLORS.textSecondary, fontSize: 14, fontWeight: '600' },
 
   // Step progress bar (above Header)
   progressWrap: {
@@ -1227,22 +1811,58 @@ const styles = StyleSheet.create({
   },
   progressLabel: { color: COLORS.textSecondary, fontSize: 11, fontWeight: '600' },
 
-  // Pick page chrome
-  dotsCenterRow: {
+  // Pick page chrome — wrapped in an elevated card so the workflow feels
+  // like a single sheet rather than a stack of unrelated rows.
+  cardContainer: {
+    flex: 1,
+    marginHorizontal: 14,
+    marginVertical: 12,
+    borderRadius: 18,
+    backgroundColor: COLORS.card,
+    paddingTop: 14,
+    paddingBottom: 8,
+    paddingHorizontal: 0,
+    overflow: 'hidden',
+    // Soft elevation. Shadow on iOS, elevation on Android.
+    shadowColor: '#000',
+    shadowOpacity: 0.18,
+    shadowOffset: { width: 0, height: 4 },
+    shadowRadius: 14,
+    elevation: 5,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: COLORS.border,
+  },
+  cardIntro: {
+    paddingHorizontal: 14,
+    paddingBottom: 8,
+    gap: 4,
+  },
+  cardPagerArea: {
+    flex: 1,
+  },
+  cardDots: {
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
     gap: 6,
-    paddingTop: 10,
-    paddingBottom: 4,
-  },
-  dot: { width: 6, height: 6, borderRadius: 3, backgroundColor: COLORS.border },
-  dotActive: { backgroundColor: COLORS.green, width: 14 },
-  pickIntro: {
-    paddingHorizontal: 16,
     paddingTop: 8,
     paddingBottom: 4,
-    gap: 4,
+  },
+  cardLockedBottom: {
+    paddingHorizontal: 14,
+    paddingTop: 8,
+    paddingBottom: 12,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: COLORS.border,
+    gap: 8,
+  },
+  // iOS-16-style dots: small circles with an elongated active pill.
+  dot: { width: 6, height: 6, borderRadius: 3, backgroundColor: COLORS.border },
+  dotActive: {
+    backgroundColor: COLORS.green,
+    width: 18,
+    height: 6,
+    borderRadius: 3,
   },
   pickIntroText: {
     color: COLORS.textSecondary,
@@ -1256,19 +1876,7 @@ const styles = StyleSheet.create({
   },
 
   body: { padding: 16, paddingBottom: 40 },
-  pageBody: { padding: 16, paddingBottom: 16 },
-
-  describeBadge: {
-    backgroundColor: COLORS.purple + '22',
-    borderColor: COLORS.purple,
-    borderWidth: 1,
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    alignSelf: 'flex-start',
-    marginBottom: 8,
-  },
-  describeBadgeText: { color: COLORS.purple, fontSize: 11, fontWeight: '700' },
+  pageBody: { padding: 16, paddingBottom: 28 },
 
   pickCard: {
     backgroundColor: COLORS.card,
@@ -1277,9 +1885,19 @@ const styles = StyleSheet.create({
     borderColor: COLORS.border,
     padding: 14,
     marginBottom: 10,
+    // Reserve space for the corner Selected badge so card height is stable
+    // whether the badge is visible or not.
+    minHeight: 88,
+    position: 'relative',
   },
-  pickCardSelected: { borderColor: COLORS.green, backgroundColor: COLORS.green + '14' },
-  pickHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  // Stronger selected state: thicker green border + tinted fill. Combined
+  // with the corner "Selected" pill this provides redundant cues
+  // (color + label + border) for accessibility.
+  pickCardSelected: {
+    borderColor: COLORS.green,
+    borderWidth: 2,
+    backgroundColor: COLORS.green + '1F',
+  },
   pickName: { color: COLORS.text, fontSize: 15, fontWeight: '700', flex: 1, marginRight: 8 },
   pickMeta: { color: COLORS.textSecondary, fontSize: 12, marginTop: 4 },
   macroRow: { flexDirection: 'row', gap: 6, marginTop: 8 },
@@ -1292,14 +1910,21 @@ const styles = StyleSheet.create({
     borderRadius: 999,
   },
 
-  checkCircle: {
-    width: 24, height: 24, borderRadius: 12,
-    borderWidth: 1.5,
-    borderColor: COLORS.textSecondary,
-    alignItems: 'center', justifyContent: 'center',
+  // Corner "Selected" pill in the top-right of a selected card.
+  selectedBadge: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: COLORS.green,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 999,
   },
-  checkCircleSelected: { borderColor: COLORS.green, backgroundColor: COLORS.green },
-  checkMark: { color: '#0E1A12', fontSize: 14, fontWeight: '900' },
+  selectedBadgeIcon: { color: '#0E1A12', fontSize: 11, fontWeight: '900' },
+  selectedBadgeText: { color: '#0E1A12', fontSize: 11, fontWeight: '700', letterSpacing: 0.3 },
 
   findMoreCard: {
     backgroundColor: COLORS.card,
@@ -1314,22 +1939,6 @@ const styles = StyleSheet.create({
   findMoreEmoji: { fontSize: 22, marginBottom: 4 },
   findMoreText: { color: COLORS.green, fontSize: 14, fontWeight: '700' },
 
-  findMoreLocked: {
-    backgroundColor: COLORS.elevated,
-    borderRadius: 12,
-    padding: 14,
-    marginTop: 4,
-  },
-  findMoreLockedText: { color: COLORS.textSecondary, fontSize: 12, lineHeight: 17 },
-
-  bottomBar: {
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: COLORS.border,
-    backgroundColor: COLORS.bg,
-    gap: 4,
-  },
   // Bottom button that opens the Describe popup
   describeOpenBtn: {
     flexDirection: 'row',
@@ -1389,6 +1998,39 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   describeGenBtnText: { color: '#0E1A12', fontSize: 14, fontWeight: '700' },
+
+  // Suggest more popup CTAs (matches Describe popup styling).
+  suggestPopupRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 14,
+  },
+  suggestPopupSecondary: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    alignItems: 'center',
+    backgroundColor: COLORS.elevated,
+  },
+  suggestPopupSecondaryText: {
+    color: COLORS.text,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  suggestPopupPrimary: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 12,
+    backgroundColor: COLORS.green,
+    alignItems: 'center',
+  },
+  suggestPopupPrimaryText: {
+    color: '#0E1A12',
+    fontSize: 13,
+    fontWeight: '700',
+  },
 
   skipRow: { alignItems: 'center', paddingVertical: 8 },
   skipText: { color: COLORS.textSecondary, fontSize: 13, fontWeight: '600' },
@@ -1482,7 +2124,7 @@ const styles = StyleSheet.create({
     gap: 10,
     paddingHorizontal: 16,
     paddingTop: 10,
-    paddingBottom: 14,
+    // paddingBottom is applied inline via useSafeAreaInsets per render.
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: COLORS.border,
     backgroundColor: COLORS.bg,
@@ -1508,7 +2150,7 @@ const styles = StyleSheet.create({
   secondaryBtnText: { color: COLORS.text, fontSize: 14, fontWeight: '600' },
 
   // Guide page
-  guideBody: { padding: 16, paddingBottom: 24, gap: 16 },
+  guideBody: { padding: 16, paddingBottom: 40, gap: 16 },
   guideHero: { color: COLORS.text, fontSize: 24, fontWeight: '700', marginTop: 6 },
   guideHeroSub: { color: COLORS.textSecondary, fontSize: 13, lineHeight: 19 },
   guideCard: {
@@ -1575,6 +2217,72 @@ const styles = StyleSheet.create({
   guideStepBulletText: { color: '#0E1A12', fontSize: 12, fontWeight: '700' },
   guideStepText: { color: COLORS.text, fontSize: 13, lineHeight: 19, flex: 1 },
   guideCta: { flex: 1 },
+
+  // Mini onboarding question pages
+  onbBody: { padding: 16, gap: 16, paddingBottom: 24 },
+  onbQuestion: { color: COLORS.text, fontSize: 22, fontWeight: '700' },
+  onbHint: { color: COLORS.textSecondary, fontSize: 13, lineHeight: 19, marginTop: -6 },
+
+  // Reusable chip grid (cuisines, suggestions, tokens)
+  chipGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  chip: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: COLORS.card,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  chipActive: {
+    backgroundColor: COLORS.green + '22',
+    borderColor: COLORS.green,
+  },
+  chipText: { color: COLORS.textSecondary, fontSize: 13, fontWeight: '600' },
+  chipTextActive: { color: COLORS.green, fontSize: 13, fontWeight: '700' },
+
+  // Cook-time radio rows
+  radioGroup: { gap: 10 },
+  radioRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: COLORS.card,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 12,
+    padding: 14,
+  },
+  radioRowActive: { borderColor: COLORS.green, borderWidth: 2 },
+  radioDot: {
+    width: 18, height: 18, borderRadius: 9,
+    borderWidth: 2,
+    borderColor: COLORS.textSecondary,
+  },
+  radioDotActive: { backgroundColor: COLORS.green, borderColor: COLORS.green },
+  radioLabel: { color: COLORS.text, fontSize: 15, fontWeight: '700' },
+  radioMeta: { color: COLORS.textSecondary, fontSize: 12, marginTop: 2 },
+
+  // Token input (loves / avoid)
+  tokenInputRow: { flexDirection: 'row', alignItems: 'stretch', gap: 8 },
+  tokenInput: {
+    flex: 1,
+    backgroundColor: COLORS.elevated,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    color: COLORS.text,
+    fontSize: 14,
+  },
+  tokenAddBtn: {
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    backgroundColor: COLORS.green,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  tokenAddBtnText: { color: '#0E1A12', fontSize: 13, fontWeight: '700' },
+  tokenList: { gap: 8, marginTop: 4 },
+  tokenListLabel: { color: COLORS.textSecondary, fontSize: 11, letterSpacing: 1, fontWeight: '700' },
 
   // Preview header cards
   planNameCard: {

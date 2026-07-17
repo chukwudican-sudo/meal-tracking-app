@@ -1,10 +1,28 @@
 // ─── Core data models ─────────────────────────────────────────────────────────
 
+// Secondary nutrients the user can optionally track beyond the core macros.
+export type NutrientKey =
+  | 'fiber'
+  | 'sugar'
+  | 'sodium'
+  | 'potassium'
+  | 'cholesterol'
+  | 'saturatedFat'
+  | 'iron';
+
+export type NutrientValues = Partial<Record<NutrientKey, number>>;
+
 export interface Ingredient {
   id: string;
   name: string;
   quantity: number;
   unit: string;
+  // Optional per-ingredient nutrition (populated by AI/manual edit; legacy
+  // ingredients may omit these and display as 0).
+  calories?: number;
+  macros?: Macros;
+  servings?: number;
+  nutrients?: NutrientValues;
 }
 
 export interface Macros {
@@ -26,6 +44,12 @@ export interface MealEntry {
   status: MealStatus;
   templateId?: string;  // id of the MealTemplate that generated this entry (planned meals only)
   isAdHoc?: boolean;    // true if added outside the original plan structure (permanent flag)
+  slotId?: string;      // id of the MealSlot this entry fills (used by the slot-section Day Detail)
+  category?: RecipeCategory; // meal type tag (Breakfast/Lunch/Dinner/Snacks)
+  servings?: number;    // serving multiplier (default 1); scales calories/macros/ingredients
+  nutrients?: NutrientValues; // optional secondary nutrient totals for this meal
+  photoUri?: string;    // optional meal photo (scanned capture or user upload)
+  seed?: boolean;       // built-in demo/sample data — excluded from cloud sync
 }
 
 export interface DailyLog {
@@ -41,6 +65,7 @@ export interface UserGoals {
   fats: number;             // grams
   waterTargetCups: number;  // daily water target in cups (8oz)
   isCalculated?: boolean;   // true when set by Edit Goal flow; cleared when manually edited
+  secondaryTargets?: NutrientValues; // optional daily targets for tracked secondary nutrients
 }
 
 // ─── Goal / activity / unit enums ────────────────────────────────────────────
@@ -79,11 +104,24 @@ export interface UserProfile {
 
   // Body & goals
   age?: number;
+  birthday?: string;                  // ISO yyyy-mm-dd captured during onboarding
   heightCm?: number;
   weightKg?: number;
+  targetWeightKg?: number;            // goal weight (== weightKg for "eat healthier")
   gender?: Gender;
   activityLevel?: ActivityLevel;
   goalType?: GoalType;
+  paceLbsPerWeek?: number | null;     // desired rate of change (null for "eat healthier")
+  goalDate?: string | null;           // ISO date the user is projected to hit their goal
+
+  // Onboarding lifecycle
+  onboardingComplete?: boolean;       // gates the app entry; false shows the onboarding flow
+  pendingFirstPlan?: boolean;         // true after onboarding until the first plan is built (Home nudge)
+  notificationsAllowed?: boolean;     // result of the onboarding notification prompt
+  // True after an email/password signup whose address is not yet verified.
+  // Drives the Home "verify your email" banner; cleared once a confirmed
+  // session is observed. Persisted so the banner survives app restarts.
+  pendingEmailVerification?: boolean;
 
   // Preferences
   weightUnit: WeightUnit;             // 'lbs' default — switch from Profile or Settings
@@ -97,6 +135,9 @@ export interface UserProfile {
 
   // Meal slots (Build My Plan walks these in order; default to 5 slots).
   mealSlots: MealSlot[];
+
+  // Secondary nutrients the user has chosen to track (shown on macro page 2).
+  trackedNutrients?: NutrientKey[];
 
   // Name of the currently active plan (set when a plan is activated).
   activePlanName?: string;
@@ -169,6 +210,8 @@ export interface SavedMeal {
 
 export type RecipeCategory = 'Breakfast' | 'Lunch' | 'Dinner' | 'Snacks';
 
+export type RecipeDifficulty = 'Easy' | 'Medium' | 'Hard';
+
 export interface RecipeTemplate {
   id: string;                 // Stable id (e.g. 'premade-bf-oats')
   name: string;
@@ -178,6 +221,7 @@ export interface RecipeTemplate {
   macros: Macros;
   ingredients: Ingredient[];
   steps: string[];            // numbered cooking steps in order
+  difficulty?: RecipeDifficulty; // shown on the full recipe detail page
 }
 
 export type SavedRecipeSource = 'premade' | 'ai' | 'manual';
@@ -194,6 +238,7 @@ export interface SavedRecipe {
   macros: Macros;
   ingredients: Ingredient[];
   steps?: string[];
+  difficulty?: RecipeDifficulty; // shown on the full recipe detail page
   source: SavedRecipeSource;
   favourited: boolean;           // explicit heart tap
   addedAt: string;               // ISO timestamp — drives "Recently Added" order
@@ -233,6 +278,44 @@ export interface MealPlan {
 
 export type PlanTemplate = MealPlan;
 
+// ─── Cross-screen swap coordination (ephemeral UI state) ─────────────────────
+
+// Set by Day Detail (daily) or Customize Plan (plan) before navigating to the
+// Saved Recipes page in swap mode. The Saved Recipes page reads this to know
+// where to put the chosen recipe, then clears it.
+export type PendingSwap =
+  | { type: 'daily'; date: string; slotName: string; slotId?: string; time: string; category?: RecipeCategory }
+  | { type: 'plan'; dayIdx: number; slotName: string; time: string; category?: RecipeCategory };
+
+// Holds the in-progress Customize Plan draft so it survives the round-trip to
+// the Saved Recipes swap page (which unmounts the Plan Detail modal stack).
+export interface CustomizeDraft {
+  planId: string;
+  draftPlan: MealPlan;
+}
+
+// In-progress edit of a single logged meal. Shared between the meal detail
+// popup and the full-screen macro/ingredient edit routes so the popup can
+// dismiss for navigation and reappear with the latest draft values.
+export interface MealEditSession {
+  date: string;
+  context: 'home' | 'plan';
+  draft: MealEntry;
+}
+
+// ─── Cloud sync ───────────────────────────────────────────────────────────────
+
+// Reverse-mapped Supabase data ready to merge into the store. Everything is in
+// the app's domain shape (metric units, GroceryItem, MealEntry, etc.).
+export interface ServerSnapshot {
+  profile?: Partial<UserProfile>;
+  goals?: Partial<UserGoals>;
+  weightLog?: WeightLogEntry[];
+  savedRecipes?: SavedRecipe[];
+  groceryItems?: GroceryItem[];
+  logsByDate?: Record<string, MealEntry[]>;
+}
+
 // ─── Zustand store shape ──────────────────────────────────────────────────────
 
 export interface AppStore {
@@ -248,6 +331,13 @@ export interface AppStore {
   weightLog: WeightLogEntry[];        // chronological weight history (Profile + Progress)
   plans: PlanTemplate[];              // premade plan catalog (seeded)
   savedPlans: MealPlan[];             // user-snapshotted plans
+  viewedRecipeIds: string[];          // saved recipe ids the user has opened (clears NEW tag)
+
+  // Ephemeral swap coordination (not persisted across launches in practice).
+  pendingSwap: PendingSwap | null;
+  customizeDraft: CustomizeDraft | null;
+  // In-progress single-meal edit (popup + edit routes). Not persisted.
+  mealEditSession: MealEditSession | null;
 
   toggleMealStatus:       (date: string, mealId: string) => void;
   logWater:               (date: string, ml: number) => void;
@@ -294,8 +384,12 @@ export interface AppStore {
   ensureRecipeSaved: (recipe: Omit<SavedRecipe, 'id' | 'addedAt' | 'favourited'> & { id?: string; favourited?: boolean }) => SavedRecipe;
   toggleFavouriteRecipe: (recipe: Omit<SavedRecipe, 'id' | 'addedAt' | 'favourited'> & { id?: string }) => SavedRecipe;
   removeSavedRecipe: (id: string) => void;
-  // Add a recipe to today's log immediately. Auto-saves and ingests ingredients.
-  addRecipeToToday: (recipe: Pick<SavedRecipe, 'name' | 'calories' | 'macros' | 'ingredients'> & { recipeId?: string; cookTimeMin?: number; steps?: string[]; category?: RecipeCategory; source?: SavedRecipeSource }) => MealEntry;
+  // Mark a saved recipe as viewed so its "NEW" tag clears.
+  markRecipeViewed: (id: string) => void;
+  // Add a recipe to today's log immediately. Ingests ingredients; auto-saves
+  // unless opts.save === false (used by premade plus-tap which must not persist
+  // into the user's Recently Added collection).
+  addRecipeToToday: (recipe: Pick<SavedRecipe, 'name' | 'calories' | 'macros' | 'ingredients'> & { recipeId?: string; cookTimeMin?: number; steps?: string[]; category?: RecipeCategory; source?: SavedRecipeSource }, opts?: { save?: boolean }) => MealEntry;
   // Add a recipe to a future date by creating a one-off MealTemplate.
   addRecipeToPlan: (recipe: Pick<SavedRecipe, 'name' | 'calories' | 'macros' | 'ingredients'> & { recipeId?: string; cookTimeMin?: number; steps?: string[]; category?: RecipeCategory; source?: SavedRecipeSource }, dateIso: string, time: string) => MealTemplate;
 
@@ -310,4 +404,30 @@ export interface AppStore {
   removeSavedPlan: (id: string) => void;
   /** Replace a saved plan in-place, e.g. after Customize Plan edits. */
   updateSavedPlan: (id: string, plan: MealPlan) => void;
+
+  // ─── Swap coordination actions ──────────────────────────────────────────
+  setPendingSwap: (swap: PendingSwap | null) => void;
+  clearPendingSwap: () => void;
+  setCustomizeDraft: (draft: CustomizeDraft | null) => void;
+  clearCustomizeDraft: () => void;
+  // Replace (or fill) the meal in the given slot for one specific day's log.
+  swapMealInDay: (
+    date: string,
+    slot: { slotId?: string; slotName: string; time: string },
+    recipe: Pick<SavedRecipe, 'name' | 'calories' | 'macros' | 'ingredients'> & { recipeId?: string; cookTimeMin?: number; steps?: string[]; category?: RecipeCategory; source?: SavedRecipeSource },
+  ) => void;
+
+  // ─── Meal edit session (popup + macro/ingredient edit routes) ────────────
+  openMealEditSession: (date: string, context: 'home' | 'plan', entry: MealEntry) => void;
+  updateMealDraft: (patch: Partial<MealEntry>) => void;
+  updateDraftIngredient: (ingredientId: string, patch: Partial<Ingredient>) => void;
+  removeDraftIngredient: (ingredientId: string) => void;
+  commitMealEditSession: () => void;
+  closeMealEditSession: () => void;
+
+  // ─── Cloud sync (Supabase) ───────────────────────────────────────────────
+  // Merge a reverse-mapped server snapshot into local state. Records whose
+  // entityKey is present in `dirtyKeys` (a pending local write) are left
+  // untouched so an in-flight change is never clobbered by an incoming pull.
+  applyServerSnapshot: (snapshot: ServerSnapshot, dirtyKeys: Set<string>) => void;
 }

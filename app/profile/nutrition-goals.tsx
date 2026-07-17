@@ -1,15 +1,19 @@
 import { router } from 'expo-router';
 import { useState } from 'react';
-import { StyleSheet, Text, TextInput, View } from 'react-native';
+import { StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
 import { FormPage, FormSection } from '@/components/profile/FormPage';
 import { COLORS } from '@/constants/theme';
+import { NUTRIENT_META } from '@/constants/nutrients';
 import { useMealStore } from '@/store/useMealStore';
 import { useToastStore } from '@/store/useToastStore';
+import type { NutrientKey } from '@/store/types';
 
 export default function NutritionGoalsScreen() {
   const goals = useMealStore(s => s.goals);
   const updateGoals = useMealStore(s => s.updateGoals);
+  const trackedNutrients = useMealStore(s => s.profile.trackedNutrients ?? []);
+  const updateProfile = useMealStore(s => s.updateProfile);
   const showToast = useToastStore(s => s.showToast);
 
   const [calories, setCalories] = useState(String(goals.dailyCalories));
@@ -18,10 +22,24 @@ export default function NutritionGoalsScreen() {
   const [fats, setFats]         = useState(String(goals.fats));
   const [water, setWater]       = useState(String(goals.waterTargetCups ?? 8));
 
+  const [tracked, setTracked] = useState<NutrientKey[]>(trackedNutrients);
+  const [targets, setTargets] = useState<Record<string, string>>(() => {
+    const base: Record<string, string> = {};
+    NUTRIENT_META.forEach(n => {
+      const v = goals.secondaryTargets?.[n.key];
+      base[n.key] = v != null ? String(v) : '';
+    });
+    return base;
+  });
+
   const parseInt0 = (raw: string): number | null => {
     const n = Number(raw.trim());
     if (!Number.isInteger(n) || n < 0) return null;
     return n;
+  };
+
+  const toggleNutrient = (key: NutrientKey) => {
+    setTracked(prev => (prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]));
   };
 
   const handleSave = () => {
@@ -34,15 +52,31 @@ export default function NutritionGoalsScreen() {
       showToast('Use whole numbers (0 or higher) for all targets.');
       return;
     }
+
+    // Collect optional secondary targets only for tracked nutrients with a value.
+    const secondaryTargets: Partial<Record<NutrientKey, number>> = {};
+    for (const key of tracked) {
+      const raw = (targets[key] ?? '').trim();
+      if (raw.length === 0) continue;
+      const n = parseInt0(raw);
+      if (n == null) {
+        showToast('Use whole numbers (0 or higher) for nutrient targets.');
+        return;
+      }
+      secondaryTargets[key] = n;
+    }
+
     updateGoals({
       dailyCalories: c,
       protein: p,
       carbs: cb,
       fats: f,
       waterTargetCups: w,
+      secondaryTargets,
       // Manual edits clear the "auto-calculated" badge.
       isCalculated: false,
     });
+    updateProfile({ trackedNutrients: tracked });
     showToast('Targets updated');
     router.back();
   };
@@ -71,6 +105,42 @@ export default function NutritionGoalsScreen() {
 
       <FormSection label="HYDRATION">
         <Field label="Water target (cups)"    value={water}    onChange={setWater} />
+      </FormSection>
+
+      <FormSection label="NUTRIENTS TO TRACK">
+        <View style={styles.chipWrap}>
+          {NUTRIENT_META.map(n => {
+            const active = tracked.includes(n.key);
+            return (
+              <TouchableOpacity
+                key={n.key}
+                style={[styles.chip, active && styles.chipActive]}
+                onPress={() => toggleNutrient(n.key)}
+                activeOpacity={0.8}
+              >
+                <Text style={[styles.chipText, active && styles.chipTextActive]}>{n.label}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+
+        {tracked.length > 0 ? (
+          tracked.map(key => {
+            const meta = NUTRIENT_META.find(n => n.key === key)!;
+            return (
+              <Field
+                key={key}
+                label={`${meta.label} target (${meta.unit}) — optional`}
+                value={targets[key] ?? ''}
+                onChange={v => setTargets(prev => ({ ...prev, [key]: v }))}
+              />
+            );
+          })
+        ) : (
+          <View style={styles.field}>
+            <Text style={styles.bannerText}>Pick nutrients above to show them on meals and set optional targets.</Text>
+          </View>
+        )}
       </FormSection>
     </FormPage>
   );
@@ -121,4 +191,23 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     fontSize: 14,
   },
+
+  chipWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  chip: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: COLORS.elevated,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  chipActive: { backgroundColor: COLORS.green, borderColor: COLORS.green },
+  chipText: { color: COLORS.textSecondary, fontSize: 13, fontWeight: '600' },
+  chipTextActive: { color: '#0E1A12' },
 });

@@ -1,19 +1,14 @@
-import { useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { COLORS } from '@/constants/theme';
-import { MacroPill } from './MacroPill';
 import type { MealEntry } from '@/store/types';
 
 interface MealCardProps {
   entry: MealEntry;
   onToggle: () => void;
-  onRemove: () => void;
-  onEdit: () => void;
+  onOpenDetail: () => void;
 }
 
-export function MealCard({ entry, onToggle, onRemove, onEdit }: MealCardProps) {
-  const [expanded, setExpanded] = useState(false);
-
+export function MealCard({ entry, onToggle, onOpenDetail }: MealCardProps) {
   const isCompleted = entry.status === 'completed';
   const isMissed    = entry.status === 'missed';
 
@@ -27,34 +22,19 @@ export function MealCard({ entry, onToggle, onRemove, onEdit }: MealCardProps) {
 
   return (
     <View style={[styles.container, borderStyle]}>
-
-      {/* ── Collapsed row (always visible) — tapping body expands ── */}
-      <TouchableOpacity
-        activeOpacity={0.75}
-        onPress={() => setExpanded(e => !e)}
-        style={styles.collapsedRow}
-      >
+      <TouchableOpacity activeOpacity={0.75} onPress={onOpenDetail} style={styles.row}>
         {/* Completion circle — only this toggles status */}
         <TouchableOpacity
           onPress={onToggle}
           hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-          style={[
-            styles.circle,
-            isCompleted && styles.circleDone,
-          ]}
+          style={[styles.circle, isCompleted && styles.circleDone]}
         >
           {isCompleted && <Text style={styles.checkmark}>✓</Text>}
         </TouchableOpacity>
 
-        {/* Name + time + missed badge */}
+        {/* Name + time + badges */}
         <View style={styles.nameBlock}>
-          <Text
-            style={[
-              styles.mealName,
-              isCompleted && styles.mealNameDone,
-            ]}
-            numberOfLines={1}
-          >
+          <Text style={[styles.mealName, isCompleted && styles.mealNameDone]} numberOfLines={1}>
             {entry.name}
           </Text>
           <View style={styles.timeRow}>
@@ -77,46 +57,6 @@ export function MealCard({ entry, onToggle, onRemove, onEdit }: MealCardProps) {
           {entry.calories} kcal
         </Text>
       </TouchableOpacity>
-
-      {/* ── Expanded section ── */}
-      {expanded && (
-        <View style={styles.expandedSection}>
-          {/* Separator */}
-          <View style={styles.separator} />
-
-          {/* Ingredients */}
-          {entry.ingredients.map(ing => (
-            <Text key={ing.id} style={styles.ingredient}>
-              {'• '}{ing.name} {ing.quantity}{ing.unit}
-            </Text>
-          ))}
-
-          {/* Macro pills */}
-          <View style={styles.pillRow}>
-            <MacroPill label="Protein" value={entry.macros.protein} unit="g" color={COLORS.text} />
-            <MacroPill label="Carbs"   value={entry.macros.carbs}   unit="g" color={COLORS.text} />
-            <MacroPill label="Fats"    value={entry.macros.fats}    unit="g" color={COLORS.text} />
-          </View>
-
-          {/* Action buttons */}
-          <View style={styles.actionRow}>
-            <TouchableOpacity
-              style={styles.editBtn}
-              onPress={onEdit}
-              activeOpacity={0.7}
-            >
-              <Text style={styles.editBtnText}>Edit meal</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.removeBtn}
-              onPress={onRemove}
-              activeOpacity={0.7}
-            >
-              <Text style={styles.removeBtnText}>Remove</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      )}
     </View>
   );
 }
@@ -128,9 +68,7 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     overflow: 'hidden',
   },
-
-  // ── Collapsed row ──────────────────────────────────────────────────────────
-  collapsedRow: {
+  row: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 14,
@@ -157,9 +95,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     lineHeight: 14,
   },
-  nameBlock: {
-    flex: 1,
-  },
+  nameBlock: { flex: 1 },
   mealName: {
     fontSize: 15,
     fontWeight: '700',
@@ -175,10 +111,7 @@ const styles = StyleSheet.create({
     gap: 6,
     marginTop: 2,
   },
-  mealTime: {
-    fontSize: 12,
-    color: COLORS.textSecondary,
-  },
+  mealTime: { fontSize: 12, color: COLORS.textSecondary },
   missedBadge: {
     backgroundColor: COLORS.red + '20',
     borderRadius: 4,
@@ -187,81 +120,19 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: COLORS.red + '60',
   },
-  missedText: {
-    fontSize: 10,
-    fontWeight: '600',
-    color: COLORS.red,
-  },
+  missedText: { fontSize: 10, fontWeight: '600', color: COLORS.red },
   addedBadge: {
     backgroundColor: COLORS.elevated,
     borderRadius: 999,
     paddingHorizontal: 6,
     paddingVertical: 2,
   },
-  addedText: {
-    fontSize: 10,
-    fontWeight: '600',
-    color: COLORS.textMuted,
-    letterSpacing: 0.4,
-  },
+  addedText: { fontSize: 10, fontWeight: '600', color: COLORS.textMuted, letterSpacing: 0.4 },
   calories: {
     fontSize: 14,
     fontWeight: '600',
     color: COLORS.text,
     flexShrink: 0,
   },
-  caloriesCompleted: {
-    color: COLORS.green,
-  },
-
-  // ── Expanded section ───────────────────────────────────────────────────────
-  expandedSection: {
-    paddingHorizontal: 14,
-    paddingBottom: 14,
-    gap: 8,
-  },
-  separator: {
-    height: 1,
-    backgroundColor: COLORS.border,
-    marginBottom: 4,
-  },
-  ingredient: {
-    fontSize: 13,
-    color: COLORS.textSecondary,
-    lineHeight: 20,
-  },
-  pillRow: {
-    flexDirection: 'row',
-    gap: 8,
-    marginTop: 4,
-  },
-  actionRow: {
-    flexDirection: 'row',
-    gap: 8,
-    marginTop: 4,
-  },
-  editBtn: {
-    flex: 1,
-    backgroundColor: COLORS.elevated,
-    borderRadius: 8,
-    paddingVertical: 10,
-    alignItems: 'center',
-  },
-  editBtnText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: COLORS.text,
-  },
-  removeBtn: {
-    flex: 1,
-    backgroundColor: COLORS.elevated,
-    borderRadius: 8,
-    paddingVertical: 10,
-    alignItems: 'center',
-  },
-  removeBtnText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: COLORS.red,
-  },
+  caloriesCompleted: { color: COLORS.green },
 });

@@ -6,14 +6,19 @@ import type { StateStorage } from 'zustand/middleware';
 
 import type {
   AppStore,
+  CustomizeDraft,
   DailyLog,
   GroceryItem,
   GroceryState,
   Ingredient,
+  Macros,
+  MealEditSession,
   MealEntry,
   MealPlan,
   MealSlot,
   MealTemplate,
+  PendingSwap,
+  PlanDayMeal,
   RecurrenceRule,
   SavedMeal,
   SavedRecipe,
@@ -23,7 +28,10 @@ import type {
 } from './types';
 import { RECIPE_SEED } from '@/constants/recipeSeed';
 import { PLAN_SEED } from '@/constants/planSeed';
+import { DEFAULT_TRACKED_NUTRIENTS } from '@/constants/nutrients';
 import { classifyIngredient, normalizeIngredientName } from '@/constants/ingredientCategories';
+import { newId, isUuid } from '@/lib/sync/uuid';
+import { entityKey, isGroceryKeyDirty } from '@/lib/sync/types';
 
 // ─── Date helpers ─────────────────────────────────────────────────────────────
 
@@ -45,12 +53,58 @@ function roundToNextHalfHour(d: Date): string {
   return `${hh}:${mm}`;
 }
 
+// Drop keys whose value is undefined so a server snapshot never overwrites a
+// present local field with `undefined` during a spread merge.
+function stripUndefined<T extends object>(obj: T): Partial<T> {
+  const out: Partial<T> = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (v !== undefined) (out as Record<string, unknown>)[k] = v;
+  }
+  return out;
+}
+
 // Deep-clone ingredients with fresh ids so multiple meals don't share refs.
 function cloneIngredients(items: Ingredient[]): Ingredient[] {
   return items.map((i, idx) => ({
     ...i,
     id: `ing-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 6)}`,
   }));
+}
+
+// ─── Nutrition backfill (keeps the app testable) ──────────────────────────────
+// Legacy persisted meals — and custom/AI/plan-derived entries created before
+// nutrition resolution existed — can carry calories:0 with all-zero macros,
+// which makes the Home progress never move when they're completed. On rehydrate
+// we backfill deterministic, realistic values for any entry that is COMPLETELY
+// empty. Entries that already have real numbers are left untouched.
+function isNutritionEmpty(calories?: number, macros?: Macros): boolean {
+  const c = typeof calories === 'number' ? calories : 0;
+  return c <= 0
+    && (macros?.protein ?? 0) <= 0
+    && (macros?.carbs ?? 0) <= 0
+    && (macros?.fats ?? 0) <= 0;
+}
+
+function seedFromString(s: string): number {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return h;
+}
+
+// Deterministic per-name macros so different meals show different (but sensible)
+// values rather than an identical placeholder everywhere.
+function fallbackNutrition(name: string): { calories: number; macros: Macros } {
+  const seed = seedFromString(name || 'meal');
+  const protein = 20 + (seed % 25);         // 20–44 g
+  const carbs   = 30 + ((seed >> 3) % 40);  // 30–69 g
+  const fats    = 8  + ((seed >> 6) % 15);  // 8–22 g
+  return { calories: protein * 4 + carbs * 4 + fats * 9, macros: { protein, carbs, fats } };
+}
+
+function ensureNutrition<T extends { name: string; calories?: number; macros?: Macros }>(m: T): T {
+  if (!isNutritionEmpty(m.calories, m.macros)) return m;
+  const fb = fallbackNutrition(m.name);
+  return { ...m, calories: fb.calories, macros: fb.macros };
 }
 
 // Match priority: by recipeId (premade source of truth), then by lowercased name.
@@ -194,7 +248,14 @@ const DEFAULT_PROFILE: UserProfile = {
   remindMinutesBefore:  15,
 
   mealSlots: DEFAULT_MEAL_SLOTS,
+  trackedNutrients: DEFAULT_TRACKED_NUTRIENTS,
   activePlanName: undefined,
+
+  // Onboarding lifecycle — a brand-new profile has not completed onboarding.
+  onboardingComplete: false,
+  pendingFirstPlan: false,
+  notificationsAllowed: undefined,
+  pendingEmailVerification: false,
 };
 
 // ─── Templates ────────────────────────────────────────────────────────────────
@@ -275,13 +336,14 @@ function buildSeedLog(daysAgo: number): [string, DailyLog] {
   const applicable = SEED_TEMPLATES.filter(t => isTemplateApplicableOnDate(t, date));
 
   const meals: MealEntry[] = applicable.map(t => ({
-    id:          `${date}-${t.id}`,
+    id:          newId(),
     name:        t.name,
     time:        t.time,
     calories:    t.calories,
     ingredients: t.ingredients,
     macros:      t.macros,
     status:      'completed',
+    seed:        true,   // built-in sample history — never uploaded to the cloud
   }));
 
   return [date, { date, meals, waterMl: 500 }];
@@ -403,6 +465,10 @@ export const useMealStore = create<AppStore>()(
       weightLog:    [],
       plans:        PLAN_SEED,
       savedPlans:   [],
+      viewedRecipeIds: [],
+      pendingSwap:    null,
+      customizeDraft: null,
+      mealEditSession: null,
 
       // ── Toggle completion ──────────────────────────────────────────────────
       toggleMealStatus: (date, mealId) => {
@@ -548,12 +614,15 @@ export const useMealStore = create<AppStore>()(
                 ...log,
                 meals: log.meals.map(m => {
                   if (m.id !== entry.id) return m;
-                  // Preserve the permanent ad-hoc flag and templateId link from
-                  // the existing entry — callers may not include them in `entry`.
+                  // Preserve the permanent ad-hoc flag, templateId link, and the
+                  // seed marker from the existing entry — callers may not include
+                  // them in `entry`. Keeping `seed` means built-in demo meals stay
+                  // excluded from cloud sync even after being edited.
                   return {
                     ...entry,
                     isAdHoc:    entry.isAdHoc    ?? m.isAdHoc,
                     templateId: entry.templateId ?? m.templateId,
+                    seed:       entry.seed       ?? m.seed,
                   };
                 }),
               },
@@ -631,7 +700,7 @@ export const useMealStore = create<AppStore>()(
           const applicable = state.templates.filter(t => isTemplateApplicableOnDate(t, date));
           if (applicable.length === 0) return state;
           const meals: MealEntry[] = applicable.map(t => ({
-            id:          `${date}-${t.id}`,
+            id:          newId(),
             name:        t.name,
             time:        t.time,
             calories:    t.calories,
@@ -691,6 +760,8 @@ export const useMealStore = create<AppStore>()(
         set({
           logs:         {},
           goals:        DEFAULT_GOALS,
+          // DEFAULT_PROFILE has onboardingComplete:false, so a reset restarts
+          // the onboarding flow on next app entry.
           profile:      DEFAULT_PROFILE,
           streak:       0,
           templates:    [],
@@ -699,6 +770,8 @@ export const useMealStore = create<AppStore>()(
           savedRecipes: [],
           weightLog:    [],
           savedPlans:   [],
+          viewedRecipeIds: [],
+          mealEditSession: null,
         });
       },
 
@@ -1062,7 +1135,7 @@ export const useMealStore = create<AppStore>()(
         if (existing) return existing;
 
         const next: SavedRecipe = {
-          id: `sav-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          id: newId(),
           recipeId: recipe.recipeId,
           name: recipe.name,
           category: recipe.category,
@@ -1071,6 +1144,7 @@ export const useMealStore = create<AppStore>()(
           macros: recipe.macros,
           ingredients: cloneIngredients(recipe.ingredients),
           steps: recipe.steps ? [...recipe.steps] : undefined,
+          difficulty: recipe.difficulty,
           source: recipe.source ?? 'manual',
           favourited: recipe.favourited ?? false,
           addedAt: new Date().toISOString(),
@@ -1094,7 +1168,7 @@ export const useMealStore = create<AppStore>()(
         }
         // No existing — create one as favourited.
         const next: SavedRecipe = {
-          id: `sav-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          id: newId(),
           recipeId: recipe.recipeId,
           name: recipe.name,
           category: recipe.category,
@@ -1103,6 +1177,7 @@ export const useMealStore = create<AppStore>()(
           macros: recipe.macros,
           ingredients: cloneIngredients(recipe.ingredients),
           steps: recipe.steps ? [...recipe.steps] : undefined,
+          difficulty: recipe.difficulty,
           source: recipe.source ?? 'manual',
           favourited: true,
           addedAt: new Date().toISOString(),
@@ -1117,10 +1192,18 @@ export const useMealStore = create<AppStore>()(
         }));
       },
 
-      addRecipeToToday: (recipe) => {
+      markRecipeViewed: (id) => {
+        set(state =>
+          state.viewedRecipeIds.includes(id)
+            ? state
+            : { viewedRecipeIds: [...state.viewedRecipeIds, id] }
+        );
+      },
+
+      addRecipeToToday: (recipe, opts) => {
         const todayIso = toIsoDate(new Date());
         const entry: MealEntry = {
-          id: `meal-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          id: newId(),
           name: recipe.name,
           time: roundToNextHalfHour(new Date()),
           calories: recipe.calories,
@@ -1137,18 +1220,22 @@ export const useMealStore = create<AppStore>()(
           );
         }
 
-        // Auto-save the recipe to savedRecipes.
-        get().ensureRecipeSaved({
-          recipeId: recipe.recipeId,
-          name: recipe.name,
-          category: recipe.category,
-          calories: recipe.calories,
-          cookTimeMin: recipe.cookTimeMin,
-          macros: recipe.macros,
-          ingredients: recipe.ingredients,
-          steps: recipe.steps,
-          source: recipe.source ?? 'manual',
-        });
+        // Auto-save the recipe to savedRecipes unless explicitly suppressed.
+        // Premade plus-tap passes { save: false } so it logs to today without
+        // adding the template to the user's Recently Added collection.
+        if (opts?.save !== false) {
+          get().ensureRecipeSaved({
+            recipeId: recipe.recipeId,
+            name: recipe.name,
+            category: recipe.category,
+            calories: recipe.calories,
+            cookTimeMin: recipe.cookTimeMin,
+            macros: recipe.macros,
+            ingredients: recipe.ingredients,
+            steps: recipe.steps,
+            source: recipe.source ?? 'manual',
+          });
+        }
 
         return entry;
       },
@@ -1190,6 +1277,24 @@ export const useMealStore = create<AppStore>()(
       activatePlan: (plan) => {
         const state = get();
         const recipeById = new Map(state.recipes.map(r => [r.id, r]));
+        const savedById = new Map(state.savedRecipes.map(r => [r.id, r]));
+        const savedByRecipeId = new Map(
+          state.savedRecipes.filter(r => r.recipeId).map(r => [r.recipeId as string, r]),
+        );
+        // Resolve a plan meal's nutrition from premade recipes first, then the
+        // user's saved/AI recipes (by id, source id, or name). Without this,
+        // custom recipes referenced by a plan resolved to 0 calories, so the
+        // Home progress rings never moved when those meals were completed.
+        const resolveNutrition = (recipeId: string, recipeName: string) => {
+          const nameKey = recipeName.trim().toLowerCase();
+          return (
+            recipeById.get(recipeId) ??
+            savedById.get(recipeId) ??
+            savedByRecipeId.get(recipeId) ??
+            state.recipes.find(r => r.name.trim().toLowerCase() === nameKey) ??
+            state.savedRecipes.find(r => r.name.trim().toLowerCase() === nameKey)
+          );
+        };
 
         // Build one MealTemplate per (slotName + time + recipe) combo, with
         // a weekly recurrence whose `days[]` is the set of weekdays that
@@ -1224,19 +1329,22 @@ export const useMealStore = create<AppStore>()(
         const now = Date.now();
         let idCounter = 0;
         const nextTemplates: MealTemplate[] = [];
-        // Track all ingredients to feed Planned Ingredients.
-        const ingredientFeed: { name: string; mealName: string }[] = [];
 
         buckets.forEach(bucket => {
-          const recipe = recipeById.get(bucket.recipeId);
-          // Fall back to lightweight defaults if recipe is missing.
-          const calories      = recipe?.calories ?? 0;
-          const macros        = recipe?.macros ?? { protein: 0, carbs: 0, fats: 0 };
+          const recipe = resolveNutrition(bucket.recipeId, bucket.recipeName);
+          // Fall back to deterministic non-zero nutrition if the recipe can't be
+          // resolved, so plan meals always contribute to the Home progress.
+          const fb            = fallbackNutrition(bucket.recipeName);
+          const calories      = recipe?.calories && recipe.calories > 0 ? recipe.calories : fb.calories;
+          const macros        = recipe?.macros ?? fb.macros;
           const ingredients   = recipe ? cloneIngredients(recipe.ingredients) : [];
 
+          // Plan day indices are Monday=0..Sunday=6, but recurrence.days uses
+          // the JS weekday convention Sunday=0..Saturday=6. Convert so the
+          // meals a user planned for "Monday" actually recur on Mondays.
           const recurrence: RecurrenceRule = {
             type: 'weekly',
-            days: [...new Set(bucket.days)].sort((a, b) => a - b),
+            days: [...new Set(bucket.days.map(d => (d + 1) % 7))].sort((a, b) => a - b),
           };
 
           nextTemplates.push({
@@ -1248,24 +1356,98 @@ export const useMealStore = create<AppStore>()(
             macros,
             recurrence,
           });
-
-          ingredients.forEach(ing => {
-            ingredientFeed.push({ name: ing.name, mealName: bucket.recipeName });
-          });
         });
+
+        // Materialize today's log immediately from the new templates so the
+        // Home tab and Day Detail reflect the plan the instant it's activated.
+        const today = toIsoDate(new Date());
+        const todayMeals: MealEntry[] = nextTemplates
+          .filter(t => isTemplateApplicableOnDate(t, today))
+          .map(t => ({
+            id:          newId(),
+            name:        t.name,
+            time:        t.time,
+            calories:    t.calories,
+            ingredients: t.ingredients,
+            macros:      t.macros,
+            status:      'pending',
+            templateId:  t.id,
+          }));
+
+        // Preserve past days (history / streaks) but discard today + any future
+        // logs so they re-resolve from the new plan. This guarantees an old
+        // plan's meals are fully replaced everywhere when a new plan activates.
+        const refreshedLogs: Record<string, DailyLog> = {};
+        Object.entries(state.logs).forEach(([d, log]) => {
+          if (d < today) refreshedLogs[d] = log;
+        });
+        refreshedLogs[today] = {
+          date: today,
+          meals: todayMeals,
+          waterMl: state.logs[today]?.waterMl ?? 0,
+        };
+
+        // If the plan defines explicit daily targets (premade plans), reflect
+        // them in the Home tab goals. Built plans have no targets, so the
+        // user's onboarding-derived goals are kept.
+        const nextGoals = plan.targets
+          ? {
+              ...state.goals,
+              dailyCalories: plan.targets.calories,
+              protein: plan.targets.protein,
+              carbs: plan.targets.carbs,
+              fats: plan.targets.fats,
+            }
+          : state.goals;
 
         set({
           templates: nextTemplates,
-          profile: { ...state.profile, activePlanName: plan.name },
+          logs: refreshedLogs,
+          goals: nextGoals,
+          // Building/activating a plan satisfies the onboarding "first plan"
+          // step, so clear the persistent Home nudge.
+          profile: { ...state.profile, activePlanName: plan.name, pendingFirstPlan: false },
         });
 
-        if (ingredientFeed.length > 0) {
-          get().ingestMidWeekIngredients(ingredientFeed);
-        }
+        // Rebuild Planned Ingredients from the new plan's templates for the
+        // current week — this clears the previous plan's planned items and
+        // repopulates from the meals that are actually scheduled.
+        get().refreshGroceryWeek(mondayOfWeek(today));
       },
 
       saveCurrentPlanAs: (name) => {
         const state = get();
+
+        // Fixed meal slots (Breakfast, Lunch, …) so each template lands in the
+        // right slot section rather than inventing a slot named after the meal.
+        const activeSlots = (state.profile.mealSlots ?? [])
+          .filter(s => !s.skipped)
+          .slice()
+          .sort((a, b) => a.time.localeCompare(b.time));
+        const slotNameForTime = (time: string): string => {
+          if (activeSlots.length === 0) return 'Meal';
+          const exact = activeSlots.find(s => s.time === time);
+          if (exact) return exact.name;
+          const tMin = toMinutesFromHHMM(time) ?? 0;
+          let best = activeSlots[0];
+          let bestDiff = Infinity;
+          for (const s of activeSlots) {
+            const sMin = toMinutesFromHHMM(s.time) ?? 0;
+            const diff = Math.abs(sMin - tMin);
+            if (diff < bestDiff) { bestDiff = diff; best = s; }
+          }
+          return best.name;
+        };
+        // Prefer a real recipe id (so the plan view can show calories/meta);
+        // otherwise fall back to the template id so every meal stays distinct
+        // (using a constant would collapse the "Meals in this plan" list).
+        const recipeIdForTemplate = (t: MealTemplate): string => {
+          const match = state.recipes.find(
+            r => r.name.trim().toLowerCase() === t.name.trim().toLowerCase(),
+          );
+          return match?.id ?? t.id;
+        };
+
         // Reverse-map templates -> 7-day plan structure using each template's
         // weekly recurrence days (falling back to "every day" for `daily`).
         const days: PlanDayMeal[][] = Array.from({ length: 7 }, () => [] as PlanDayMeal[]);
@@ -1279,11 +1461,15 @@ export const useMealStore = create<AppStore>()(
               default:        return [];
             }
           })();
+          const slotName = slotNameForTime(t.time);
+          const recipeId = recipeIdForTemplate(t);
           targetDays.forEach(d => {
-            days[d].push({
-              slotName: t.name,
+            // recurrence.days is JS weekday (Sun=0); plan.days is Monday=0.
+            const planIdx = (d + 6) % 7;
+            days[planIdx].push({
+              slotName,
               time: t.time,
-              recipeId: 'custom',
+              recipeId,
               recipeName: t.name,
             });
           });
@@ -1331,9 +1517,225 @@ export const useMealStore = create<AppStore>()(
           ),
         }));
       },
+
+      // ─── Swap coordination ──────────────────────────────────────────────
+      setPendingSwap: (swap) => set({ pendingSwap: swap }),
+      clearPendingSwap: () => set({ pendingSwap: null }),
+      setCustomizeDraft: (draft) => set({ customizeDraft: draft }),
+      clearCustomizeDraft: () => set({ customizeDraft: null }),
+
+      swapMealInDay: (date, slot, recipe) => {
+        set(state => {
+          const log = state.logs[date] ?? { date, meals: [], waterMl: 0 };
+          // Identify the existing entry for this slot: match slotId first,
+          // then fall back to time (legacy entries that predate slotId).
+          const matchIdx = log.meals.findIndex(m =>
+            slot.slotId ? m.slotId === slot.slotId : m.time === slot.time,
+          );
+          const nextEntry: MealEntry = {
+            id: matchIdx >= 0
+              ? log.meals[matchIdx].id
+              : newId(),
+            name: recipe.name,
+            time: slot.time,
+            calories: recipe.calories,
+            ingredients: cloneIngredients(recipe.ingredients),
+            macros: recipe.macros,
+            status: matchIdx >= 0 ? log.meals[matchIdx].status : 'pending',
+            slotId: slot.slotId,
+            category: recipe.category,
+          };
+          const meals = matchIdx >= 0
+            ? log.meals.map((m, i) => (i === matchIdx ? nextEntry : m))
+            : [...log.meals, nextEntry];
+          meals.sort((a, b) => a.time.localeCompare(b.time));
+          return { logs: { ...state.logs, [date]: { ...log, meals } } };
+        });
+
+        // Feed ingredients into the grocery system.
+        if (recipe.ingredients.length > 0) {
+          get().ingestMidWeekIngredients(
+            recipe.ingredients.map(i => ({ name: i.name, mealName: recipe.name })),
+          );
+        }
+        // Auto-save the recipe so it stays available in Saved Recipes.
+        get().ensureRecipeSaved({
+          recipeId: recipe.recipeId,
+          name: recipe.name,
+          category: recipe.category,
+          calories: recipe.calories,
+          cookTimeMin: recipe.cookTimeMin,
+          macros: recipe.macros,
+          ingredients: recipe.ingredients,
+          steps: recipe.steps,
+          source: recipe.source ?? 'manual',
+        });
+      },
+
+      // ── Meal edit session (popup + macro/ingredient edit routes) ───────────
+      openMealEditSession: (date, context, entry) => {
+        // Deep-ish clone so draft edits don't mutate the stored entry until commit.
+        const draft: MealEntry = {
+          ...entry,
+          servings: entry.servings ?? 1,
+          macros: { ...entry.macros },
+          nutrients: { ...(entry.nutrients ?? {}) },
+          ingredients: entry.ingredients.map(i => ({
+            ...i,
+            macros: i.macros ? { ...i.macros } : undefined,
+            nutrients: i.nutrients ? { ...i.nutrients } : undefined,
+          })),
+        };
+        set({ mealEditSession: { date, context, draft } });
+      },
+
+      updateMealDraft: (patch) => {
+        set(state => {
+          if (!state.mealEditSession) return state;
+          return {
+            mealEditSession: {
+              ...state.mealEditSession,
+              draft: { ...state.mealEditSession.draft, ...patch },
+            },
+          };
+        });
+      },
+
+      updateDraftIngredient: (ingredientId, patch) => {
+        set(state => {
+          if (!state.mealEditSession) return state;
+          const draft = state.mealEditSession.draft;
+          return {
+            mealEditSession: {
+              ...state.mealEditSession,
+              draft: {
+                ...draft,
+                ingredients: draft.ingredients.map(i =>
+                  i.id === ingredientId ? { ...i, ...patch } : i,
+                ),
+              },
+            },
+          };
+        });
+      },
+
+      removeDraftIngredient: (ingredientId) => {
+        set(state => {
+          if (!state.mealEditSession) return state;
+          const draft = state.mealEditSession.draft;
+          return {
+            mealEditSession: {
+              ...state.mealEditSession,
+              draft: {
+                ...draft,
+                ingredients: draft.ingredients.filter(i => i.id !== ingredientId),
+              },
+            },
+          };
+        });
+      },
+
+      commitMealEditSession: () => {
+        const session = get().mealEditSession;
+        if (!session) return;
+        get().editMealOnDay(session.date, session.draft);
+        set({ mealEditSession: null });
+      },
+
+      closeMealEditSession: () => set({ mealEditSession: null }),
+
+      // ── Cloud sync merge ───────────────────────────────────────────────────
+      applyServerSnapshot: (snapshot, dirtyKeys) => {
+        set(state => {
+          const usersDirty = dirtyKeys.has(entityKey.usersSelf());
+
+          const profile =
+            snapshot.profile && !usersDirty
+              ? { ...state.profile, ...stripUndefined(snapshot.profile) }
+              : state.profile;
+          const goals =
+            snapshot.goals && !usersDirty
+              ? { ...state.goals, ...stripUndefined(snapshot.goals) }
+              : state.goals;
+
+          // Weight log — union by date; server wins unless the date is dirty.
+          let weightLog = state.weightLog;
+          if (snapshot.weightLog) {
+            const byDate = new Map(state.weightLog.map(e => [e.date, e]));
+            snapshot.weightLog.forEach(e => {
+              if (!dirtyKeys.has(entityKey.weightLog(e.date))) byDate.set(e.date, e);
+            });
+            weightLog = Array.from(byDate.values()).sort((a, b) => a.date.localeCompare(b.date));
+          }
+
+          // Saved recipes — union by id.
+          let savedRecipes = state.savedRecipes;
+          if (snapshot.savedRecipes) {
+            const byId = new Map(state.savedRecipes.map(r => [r.id, r]));
+            snapshot.savedRecipes.forEach(r => {
+              if (!dirtyKeys.has(entityKey.savedRecipe(r.id))) byId.set(r.id, r);
+            });
+            savedRecipes = Array.from(byId.values());
+          }
+
+          // Grocery — union by key; a moving item is protected across all tables.
+          let grocery = state.grocery;
+          if (snapshot.groceryItems) {
+            const items = { ...state.grocery.items };
+            snapshot.groceryItems.forEach(it => {
+              if (!isGroceryKeyDirty(dirtyKeys, it.key)) {
+                items[it.key] = { ...items[it.key], ...it };
+              }
+            });
+            grocery = { ...state.grocery, items };
+          }
+
+          // Logs — union per date by meal id; keep local water + local-only meals.
+          let logs = state.logs;
+          if (snapshot.logsByDate) {
+            logs = { ...state.logs };
+            for (const [date, meals] of Object.entries(snapshot.logsByDate)) {
+              const byId = new Map((logs[date]?.meals ?? []).map(m => [m.id, m]));
+              meals.forEach(m => {
+                if (!dirtyKeys.has(entityKey.mealLog(m.id))) byId.set(m.id, m);
+              });
+              logs[date] = {
+                date,
+                meals: Array.from(byId.values()),
+                waterMl: logs[date]?.waterMl ?? 0,
+              };
+            }
+          }
+
+          return { profile, goals, weightLog, savedRecipes, grocery, logs };
+        });
+        get().recalcStreak();
+      },
     }),
     {
       name:    'meal-app-store-v2',
+      version: 4,
+      // Assign UUIDs to any records (meals + saved recipes) with a non-UUID id,
+      // so their local id can double as the Supabase primary key. v4 re-runs this
+      // to heal meals created by UI paths that briefly still generated legacy
+      // `meal-<ts>` ids (those fail the uuid-typed meal_logs.id on sync).
+      // templateId references are left intact (local-only).
+      migrate: (persisted, _version) => {
+        const p = (persisted ?? {}) as Partial<AppStore>;
+        if (p.logs) {
+          for (const log of Object.values(p.logs)) {
+            (log?.meals ?? []).forEach(m => {
+              if (!isUuid(m.id)) m.id = newId();
+            });
+          }
+        }
+        if (p.savedRecipes) {
+          p.savedRecipes.forEach(r => {
+            if (!isUuid(r.id)) r.id = newId();
+          });
+        }
+        return p as AppStore;
+      },
       storage: createJSONStorage(() => appStorage),
       // Shallow merge by default discards any new top-level/profile fields
       // we add in later releases (e.g. dietaryRestrictions/allergies, recipes,
@@ -1341,9 +1743,22 @@ export const useMealStore = create<AppStore>()(
       // any field missing on persisted state.
       merge: (persisted, current) => {
         const p = (persisted ?? {}) as Partial<AppStore>;
+
+        // Backfill non-zero nutrition on any completely-empty meal/template/recipe
+        // so completed meals always contribute to the Home progress totals.
+        const rawLogs = (p.logs ?? current.logs ?? {}) as Record<string, DailyLog>;
+        const logs: Record<string, DailyLog> = {};
+        for (const [date, log] of Object.entries(rawLogs)) {
+          logs[date] = { ...log, meals: (log?.meals ?? []).map(ensureNutrition) };
+        }
+        const templates = (p.templates ?? current.templates ?? []).map(ensureNutrition);
+        const savedRecipes = (p.savedRecipes ?? current.savedRecipes ?? []).map(ensureNutrition);
+
         return {
           ...current,
           ...p,
+          logs,
+          templates,
           profile: {
             ...DEFAULT_PROFILE,
             ...(p.profile ?? {}),
@@ -1358,20 +1773,33 @@ export const useMealStore = create<AppStore>()(
                                     // Backfill skipped: false on slots persisted before that field existed.
                                     ? p.profile.mealSlots.map(s => ({ ...s, skipped: s.skipped ?? false }))
                                     : DEFAULT_PROFILE.mealSlots,
+            trackedNutrients:     p.profile?.trackedNutrients ?? DEFAULT_TRACKED_NUTRIENTS,
             activePlanName:       p.profile?.activePlanName,
+            // Anyone with a persisted profile predates onboarding — treat them as
+            // already onboarded so they aren't trapped in the flow. Only a truly
+            // fresh install (no persisted profile) sees onboarding.
+            onboardingComplete:   p.profile?.onboardingComplete ?? (p.profile ? true : false),
+            pendingFirstPlan:     p.profile?.pendingFirstPlan ?? false,
           },
           goals: {
             ...DEFAULT_GOALS,
             ...(p.goals ?? {}),
             // Older stores didn't carry waterTargetCups.
             waterTargetCups: p.goals?.waterTargetCups ?? DEFAULT_GOALS.waterTargetCups,
+            secondaryTargets: p.goals?.secondaryTargets ?? {},
           },
           recipes:      p.recipes      ?? current.recipes,
-          savedRecipes: p.savedRecipes ?? current.savedRecipes,
+          savedRecipes,
           grocery:      p.grocery      ?? current.grocery,
           weightLog:    p.weightLog    ?? current.weightLog ?? [],
           plans:        p.plans        ?? current.plans,
           savedPlans:   p.savedPlans   ?? current.savedPlans ?? [],
+          viewedRecipeIds: p.viewedRecipeIds ?? current.viewedRecipeIds ?? [],
+          // Ephemeral swap coordination — always start clean on launch so a
+          // stale persisted swap target can never fire on the wrong screen.
+          pendingSwap:    null,
+          customizeDraft: null,
+          mealEditSession: null,
         } as AppStore;
       },
     }

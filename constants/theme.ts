@@ -4,26 +4,35 @@ import { DarkTheme } from '@react-navigation/native';
 // ─── App colour palette (dark-only) ──────────────────────────────────────────
 
 export const COLORS = {
-  // Backgrounds
-  bg:       '#1C1C1E',   // main screen background
-  card:     '#2C2C2E',   // card / surface background
-  elevated: '#3A3A3C',   // modals, inputs, elevated surfaces
+  // Backgrounds — dark near-black base with translucent-white surfaces layered
+  // on top (design-authority mockup: cards/inputs/buttons are white overlays).
+  bg:       '#0F0F0F',                  // main screen background
+  card:     'rgba(255,255,255,0.04)',   // card / surface background
+  elevated: 'rgba(255,255,255,0.08)',   // modals, inputs, elevated surfaces
 
   // Borders & separators
-  border:   '#3A3A3C',
+  border:   'rgba(255,255,255,0.08)',
 
   // Text
   text:          '#FFFFFF',
-  textSecondary: '#8E8E93',
-  textMuted:     '#48484A',
+  textSecondary: 'rgba(255,255,255,0.5)',
+  textMuted:     'rgba(255,255,255,0.3)',
 
-  // Accents
-  green:  '#34C759',   // completed / success
-  red:    '#FF3B30',   // missed / error
-  blue:   '#4F8EF7',   // primary action / progress
-  orange: '#FF9500',   // fats / warning
-  purple: '#BF5AF2',   // optional nutrient accent
+  // Accents (kept as 6-digit hex — several styles append alpha, e.g. green+'22')
+  green:  '#4ade80',   // completed / success / primary action
+  red:    '#f87171',   // missed / error
+  blue:   '#60a5fa',   // progress / info
+  orange: '#fb923c',   // fats / warning
+  purple: '#a78bfa',   // optional nutrient accent
 } as const;
+
+// ─── Layout constants ────────────────────────────────────────────────────────
+
+// Generous inset for the bottom of every full-screen page so footers and
+// final scroll items are never squeezed against the home indicator. Pair this
+// with `edges={['top','bottom']}` on the SafeAreaView; the SafeAreaView pads
+// for the device safe area, this constant pads for visual breathing room.
+export const SCREEN_BOTTOM_INSET = 24;
 
 // ─── Navigation theme ─────────────────────────────────────────────────────────
 

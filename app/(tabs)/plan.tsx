@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import {
   Pressable,
   ScrollView,
@@ -7,14 +7,13 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { router } from 'expo-router';
+import { Screen } from '@/components/Screen';
+import { router, useFocusEffect } from 'expo-router';
 
 import { COLORS } from '@/constants/theme';
-import { toIsoDate, useMealStore } from '@/store/useMealStore';
+import { isTemplateApplicableOnDate, toIsoDate, useMealStore } from '@/store/useMealStore';
 import { CartIcon } from '@/components/CartIcon';
 import { ProfileIcon } from '@/components/ProfileIcon';
-import { PlannedIngredientsSection } from '@/components/grocery/PlannedIngredientsSection';
 import { ExplorePlansSection } from '@/components/plans/ExplorePlansSection';
 import { SavedPlansSection } from '@/components/plans/SavedPlansSection';
 import { ActionTile } from '@/components/recipes/ActionTile';
@@ -65,20 +64,60 @@ export default function PlanScreen() {
   const logs = useMealStore(s => s.logs);
   const profile = useMealStore(s => s.profile);
   const savedPlans = useMealStore(s => s.savedPlans);
+  const templates = useMealStore(s => s.templates);
+  const groceryItems = useMealStore(s => s.grocery.items);
+
+  // A day's meals come from its materialized log if it exists, otherwise from
+  // the active plan's recurring templates. This lets the calendar mark days
+  // and the Day Detail summary show counts without needing to visit each day.
+  const mealsForDate = useCallback(
+    (iso: string): { count: number; calories: number } => {
+      const log = logs[iso];
+      if (log) {
+        return {
+          count: log.meals.length,
+          calories: log.meals.reduce((s, m) => s + (m.calories ?? 0), 0),
+        };
+      }
+      const applicable = templates.filter(t => isTemplateApplicableOnDate(t, iso));
+      return {
+        count: applicable.length,
+        calories: applicable.reduce((s, t) => s + (t.calories ?? 0), 0),
+      };
+    },
+    [logs, templates],
+  );
+
+  const plannedCount = useMemo(
+    () => Object.values(groceryItems).filter(i => i.section === 'planned').length,
+    [groceryItems]
+  );
 
   const todayIso = toIsoDate(new Date());
   const [selectedDate, setSelectedDate] = useState(todayIso);
   const [miniMonthAnchor, setMiniMonthAnchor] = useState(todayIso);
+
+  // Reset calendar to the present every time the Plan tab is focused.
+  // Modern apps (Apple Calendar, Google Calendar) snap back to today on
+  // re-entry so the user always starts from the current day.
+  useFocusEffect(
+    useCallback(() => {
+      const t = toIsoDate(new Date());
+      setSelectedDate(t);
+      setMiniMonthAnchor(t);
+    }, []),
+  );
 
   // Active plan card — only renders when a plan is active.
   const activePlan = profile.activePlanName
     ? savedPlans.find(p => p.name === profile.activePlanName)
     : undefined;
 
-  // Day Detail button summary: derive directly from today's logs so the
-  // preview reflects every meal (planned + ad-hoc) on the selected day.
-  const dayMeals = logs[selectedDate]?.meals ?? [];
-  const dayCal = dayMeals.reduce((s, m) => s + (m.calories ?? 0), 0);
+  // Day Detail button summary: reflect the meals scheduled on the selected day
+  // (from the log if visited, otherwise resolved from the active plan).
+  const daySummary = mealsForDate(selectedDate);
+  const dayCal = daySummary.calories;
+  const dayMealCount = daySummary.count;
   const dayLabel = toMidnight(selectedDate).toLocaleDateString('en-US', {
     weekday: 'long',
     month: 'short',
@@ -86,7 +125,7 @@ export default function PlanScreen() {
   });
 
   return (
-    <SafeAreaView style={styles.safe} edges={['top']}>
+    <Screen edges={['top']}>
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
         <View style={styles.headerRow}>
           <Text style={styles.title}>Plan</Text>
@@ -155,27 +194,40 @@ export default function PlanScreen() {
           <View style={styles.monthGrid}>
             {monthGridRows(miniMonthAnchor).map((row, rowIdx) => (
               <View key={rowIdx} style={styles.miniRow}>
-                {row.map((iso, colIdx) => (
-                  <Pressable
-                    key={`${iso ?? 'nil'}-${rowIdx}-${colIdx}`}
-                    onPress={() => {
-                      if (!iso) return;
-                      setSelectedDate(iso);
-                    }}
-                    style={[
-                      styles.monthCell,
-                      iso === selectedDate && styles.monthCellSelected,
-                    ]}
-                  >
-                    <Text style={[
-                      styles.monthCellText,
-                      !iso && styles.monthCellHiddenText,
-                      iso === selectedDate && styles.monthCellTextSelected,
-                    ]}>
-                      {iso ? toMidnight(iso).getDate() : ''}
-                    </Text>
-                  </Pressable>
-                ))}
+                {row.map((iso, colIdx) => {
+                  // "Today" is signalled with green text + a small dot
+                  // beneath the number. "Selected" is the filled green
+                  // tint. They stack: today + selected = filled tint AND
+                  // green dot below.
+                  const isToday = iso === todayIso;
+                  const isSelected = iso === selectedDate;
+                  const hasMeals = iso ? mealsForDate(iso).count > 0 : false;
+                  return (
+                    <Pressable
+                      key={`${iso ?? 'nil'}-${rowIdx}-${colIdx}`}
+                      onPress={() => {
+                        if (!iso) return;
+                        setSelectedDate(iso);
+                      }}
+                      style={[
+                        styles.monthCell,
+                        isSelected && styles.monthCellSelected,
+                      ]}
+                    >
+                      <Text style={[
+                        styles.monthCellText,
+                        !iso && styles.monthCellHiddenText,
+                        isToday && styles.monthCellTextToday,
+                        isSelected && styles.monthCellTextSelected,
+                      ]}>
+                        {iso ? toMidnight(iso).getDate() : ''}
+                      </Text>
+                      {hasMeals && (
+                        <View style={[styles.monthCellMealDot, isToday && styles.monthCellMealDotToday]} />
+                      )}
+                    </Pressable>
+                  );
+                })}
               </View>
             ))}
           </View>
@@ -190,25 +242,45 @@ export default function PlanScreen() {
           <View style={{ flex: 1 }}>
             <Text style={styles.dayDetailLabel} numberOfLines={1}>{dayLabel}</Text>
             <Text style={styles.dayDetailMeta}>
-              {dayMeals.length} {dayMeals.length === 1 ? 'meal' : 'meals'} · {dayCal.toLocaleString()} cal
+              {dayMealCount} {dayMealCount === 1 ? 'meal' : 'meals'} · {Math.round(dayCal).toLocaleString()} cal
             </Text>
           </View>
           <Text style={styles.dayDetailChevron}>›</Text>
         </TouchableOpacity>
 
-        <PlannedIngredientsSection />
+        {/* Planned Ingredients — opens the full sorting page. */}
+        <TouchableOpacity
+          style={styles.plannedBtn}
+          onPress={() => router.push('/grocery/planned-ingredients')}
+          activeOpacity={0.85}
+        >
+          <View style={{ flex: 1 }}>
+            <Text style={styles.plannedLabel}>Planned Ingredients</Text>
+            <Text style={styles.plannedMeta}>
+              {plannedCount > 0
+                ? `${plannedCount} ${plannedCount === 1 ? 'item' : 'items'} to sort`
+                : 'All sorted'}
+            </Text>
+          </View>
+          {plannedCount > 0 ? (
+            <View style={styles.plannedBadge}>
+              <Text style={styles.plannedBadgeText}>{plannedCount}</Text>
+            </View>
+          ) : null}
+          <Text style={styles.dayDetailChevron}>›</Text>
+        </TouchableOpacity>
 
         <ExplorePlansSection />
 
         <SavedPlansSection />
       </ScrollView>
-    </SafeAreaView>
+    </Screen>
   );
 }
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: COLORS.bg },
-  scroll: { padding: 14, paddingBottom: 40, gap: 12 },
+  scroll: { padding: 14, paddingBottom: 96, gap: 12 },
 
   headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
   headerActions: { flexDirection: 'row', alignItems: 'center', gap: 10 },
@@ -231,7 +303,27 @@ const styles = StyleSheet.create({
   monthCellSelected: { backgroundColor: COLORS.green + '44' },
   monthCellHiddenText: { color: 'transparent' },
   monthCellText: { color: COLORS.textSecondary, fontSize: 12 },
+  monthCellTextToday: { color: COLORS.green, fontWeight: '700' },
   monthCellTextSelected: { color: COLORS.green, fontWeight: '700' },
+  monthCellTodayDot: {
+    position: 'absolute',
+    bottom: 2,
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: COLORS.green,
+  },
+  // Small dot under any day that has meals scheduled. Green on today,
+  // muted on other days (today is also emphasized via green bold text).
+  monthCellMealDot: {
+    position: 'absolute',
+    bottom: 2,
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: COLORS.textMuted,
+  },
+  monthCellMealDotToday: { backgroundColor: COLORS.green },
 
   // Current Plan card
   currentPlanCard: {
@@ -267,4 +359,26 @@ const styles = StyleSheet.create({
   dayDetailLabel: { color: COLORS.text, fontSize: 15, fontWeight: '700' },
   dayDetailMeta: { color: COLORS.textSecondary, fontSize: 12, marginTop: 2 },
   dayDetailChevron: { color: COLORS.textSecondary, fontSize: 22, paddingLeft: 8 },
+
+  plannedBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.card,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    padding: 14,
+  },
+  plannedLabel: { color: COLORS.text, fontSize: 15, fontWeight: '700' },
+  plannedMeta: { color: COLORS.textSecondary, fontSize: 12, marginTop: 2 },
+  plannedBadge: {
+    minWidth: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: '#FF9F0A',
+    paddingHorizontal: 7,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  plannedBadgeText: { color: '#1A1207', fontSize: 11, fontWeight: '800' },
 });

@@ -9,7 +9,7 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { Screen } from '@/components/Screen';
 import { router, useLocalSearchParams } from 'expo-router';
 
 import { COLORS } from '@/constants/theme';
@@ -173,7 +173,7 @@ export default function MealEditorScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.safe} edges={['top']}>
+    <Screen edges={['top', 'bottom']}>
       <KeyboardAvoidingView
         style={styles.keyboardSafe}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -297,7 +297,7 @@ export default function MealEditorScreen() {
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
-    </SafeAreaView>
+    </Screen>
   );
 }
 
