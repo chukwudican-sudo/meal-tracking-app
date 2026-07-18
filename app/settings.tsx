@@ -10,12 +10,13 @@ import {
 import { Screen } from '@/components/Screen';
 
 import { COLORS } from '@/constants/theme';
-import { signOut } from '@/lib/auth';
+import { signOut, useAuth } from '@/lib/auth';
 import { engine } from '@/lib/sync/engine';
 import { useMealStore } from '@/store/useMealStore';
 
 export default function SettingsScreen() {
   const resetUserData = useMealStore(s => s.resetUserData);
+  const { session } = useAuth();
 
   const handleBack = () => {
     if (router.canGoBack()) router.back();
@@ -34,6 +35,17 @@ export default function SettingsScreen() {
       Alert.alert('Log out failed', error);
       return;
     }
+    resetUserData();
+    router.replace('/onboarding');
+  };
+
+  // Logout while still pending email verification: no confirmed session ever
+  // existed on this device, so NOTHING was pushed to the cloud. Wiping local
+  // data here is permanent and unrecoverable — hence the separate hard warning.
+  // signOut() may report "session missing" (there's no session); that's fine —
+  // we only need to clear local state, so don't block on its result.
+  const finishUnverifiedLogout = async () => {
+    await signOut();
     resetUserData();
     router.replace('/onboarding');
   };
@@ -58,6 +70,28 @@ export default function SettingsScreen() {
   };
 
   const handleLogout = () => {
+    // No confirmed session means the account is still unverified: its data was
+    // never backed up to Supabase, so logging out permanently deletes it. Warn
+    // clearly and distinctly rather than silently wiping (the normal flow below
+    // assumes a real session whose data is already/​flushable to the cloud).
+    if (!session) {
+      Alert.alert(
+        'Log out and erase your data?',
+        "Your email isn't verified yet, so your profile, meals, weight, and plans have never been backed up to the cloud. " +
+          "Logging out will permanently erase them from this device and they can't be recovered.\n\n" +
+          'Verify your email first to save your data.',
+        [
+          { text: 'Stay', style: 'cancel' },
+          {
+            text: 'Log out & erase',
+            style: 'destructive',
+            onPress: () => { void finishUnverifiedLogout(); },
+          },
+        ],
+      );
+      return;
+    }
+
     Alert.alert(
       'Log out?',
       'You can sign back in anytime.',

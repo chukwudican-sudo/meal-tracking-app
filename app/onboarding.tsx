@@ -31,6 +31,7 @@ import {
 } from '@/constants/onboardingCalc';
 import { COLORS } from '@/constants/theme';
 import { signInWithEmail, signUpWithEmail } from '@/lib/auth';
+import { engine } from '@/lib/sync/engine';
 import type { ActivityLevel, GoalType, NutrientKey } from '@/store/types';
 import { useMealStore } from '@/store/useMealStore';
 
@@ -205,9 +206,19 @@ export default function OnboardingScreen() {
     else router.replace('/(tabs)');
   };
 
-  const loginComplete = () => {
+  // Returning-user login. onboardingComplete is a LOCAL-ONLY flag (never stored
+  // on the server), so we must set it here to let the user into the tabs — but
+  // only once the post-login pull has actually restored their profile. Marking
+  // it done unconditionally is what let a wiped/empty local cache slip into the
+  // app showing "Add your name" and blank tabs. Drive the reconcile ourselves
+  // (rather than passively waiting for SyncProvider's listener to notice the
+  // new session) so there's no race and a real failure reason is available.
+  const loginComplete = async (userId: string): Promise<{ ok: true } | { ok: false; error: string }> => {
+    const result = await confirmLoginData(userId);
+    if (!result.ok) return result;
     updateProfile({ onboardingComplete: true });
     router.replace('/(tabs)');
+    return { ok: true };
   };
 
   // Weight display used for the results screens (st treated as lbs).
@@ -957,7 +968,13 @@ function ActivationStep({ onBuild, onLater }: { onBuild: () => void; onLater: ()
   );
 }
 
-function LoginView({ onBack, onDone }: { onBack: () => void; onDone: () => void }) {
+function LoginView({
+  onBack,
+  onDone,
+}: {
+  onBack: () => void;
+  onDone: (userId: string) => Promise<{ ok: true } | { ok: false; error: string }>;
+}) {
   const [email, setEmail] = useState('');
   const [pw, setPw] = useState('');
   const [loading, setLoading] = useState(false);
@@ -967,13 +984,20 @@ function LoginView({ onBack, onDone }: { onBack: () => void; onDone: () => void 
     if (!email.includes('@') || pw.length < 1 || loading) return;
     setLoading(true);
     setError(null);
-    const { error: err } = await signInWithEmail(email, pw);
-    setLoading(false);
-    if (err) {
-      setError(err);
+    const { error: err, userId } = await signInWithEmail(email, pw);
+    if (err || !userId) {
+      setLoading(false);
+      setError(err ?? 'Sign-in succeeded but no account id was returned. Please try again.');
       return;
     }
-    onDone();
+    // Keep the spinner up while the post-login pull restores the account. onDone
+    // navigates into the app on success; on failure the account had no data to
+    // restore, so we stay here and surface the real reason rather than empty tabs.
+    const result = await onDone(userId);
+    if (!result.ok) {
+      setLoading(false);
+      setError(result.error);
+    }
   };
 
   return (
@@ -1006,6 +1030,31 @@ function LoginView({ onBack, onDone }: { onBack: () => void; onDone: () => void 
       </View>
     </Screen>
   );
+}
+
+// ─── Login data gate ───────────────────────────────────────────────────────────
+
+// After a returning user signs in, drive the sync engine's reconcile directly
+// (rather than passively waiting for SyncProvider's auth listener to notice the
+// new session and do it) — that passive approach raced the listener: by the time
+// a subscriber attached, the reconcile could already have started AND finished,
+// so no transition was ever observed and the caller just hung until a timeout,
+// showing a generic message no matter what actually happened. engine.onSignIn()
+// is idempotent (SyncProvider's own effect will no-op into a flush() once it
+// sees the same userId), so calling it here directly is safe.
+async function confirmLoginData(
+  userId: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  await engine.onSignIn(userId);
+
+  const hasProfile = !!useMealStore.getState().profile.firstName;
+  if (hasProfile) return { ok: true };
+
+  const { lastError } = engine.getSnapshot();
+  const reason = lastError ?? 'the pull completed but no profile came back for this account';
+  // eslint-disable-next-line no-console
+  console.warn(`[login] no profile restored for ${userId}: ${reason}`);
+  return { ok: false, error: reason };
 }
 
 // ─── Nutrient label helpers ────────────────────────────────────────────────────

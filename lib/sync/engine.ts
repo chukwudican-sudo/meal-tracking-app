@@ -79,6 +79,25 @@ class SyncEngine {
     // they can be flushed the next time this account signs in on this device.
     // deactivate() persists them to storage and drops the in-memory copy.
     outbox.deactivate();
+
+    // The local cache is about to be wiped by resetUserData() on logout. Drop
+    // this account's delta cursor — but NOT sync:lastUserId — so the next
+    // sign-in for the SAME account still resolves to mode 'same' (a pull merges
+    // into the empty local cache) yet, with cursor === null, is forced to do a
+    // FULL pull rather than an incremental one. A delta pull can legitimately
+    // return nothing when the server hasn't changed since the last sync, which
+    // would otherwise leave the wiped cache empty forever (missing profile +
+    // blank tabs). Clearing sync:lastUserId instead would flip mode to 'claim',
+    // which protects the (now-empty) local data and re-uploads it over the good
+    // server copy — the opposite of what we want.
+    if (this.userId) {
+      try {
+        await AsyncStorage.removeItem(cursorKey(this.userId));
+      } catch {
+        // best-effort; worst case is one extra delta pull on next sign-in
+      }
+    }
+
     this.userId = null;
     this.setStatus('idle');
   }
@@ -163,6 +182,11 @@ class SyncEngine {
       this.setStatus(this.online ? 'idle' : 'offline');
     } catch (e: any) {
       this.lastError = e?.message ?? 'Sync failed';
+      // Surface the real reason the pull/reconcile failed (network, RLS, schema
+      // mismatch, …) — silent here previously meant a login-time failure had no
+      // visible trace in the console at all.
+      // eslint-disable-next-line no-console
+      console.warn(`[sync] reconcile failed for ${userId}: ${this.lastError}`);
       this.setStatus('error');
     }
   }

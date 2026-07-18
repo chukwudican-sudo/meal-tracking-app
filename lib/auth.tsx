@@ -30,6 +30,16 @@ export interface AuthResult {
   // True when a sign-up succeeded but the user must verify their email before a
   // session is issued (email confirmation is enabled on the project).
   needsVerification?: boolean;
+  // The signed-in user's id, when a session was actually created. Lets a caller
+  // drive the sync engine's reconcile deterministically instead of waiting on
+  // the AuthProvider/SyncProvider listener chain to notice the new session.
+  userId?: string;
+  // Set when a call was throttled by Supabase's email send rate limit, so the
+  // UI can show a friendly "please wait" message and start a cooldown instead
+  // of surfacing a raw error (or nothing at all).
+  rateLimited?: boolean;
+  // Seconds the caller should wait before retrying, when known.
+  retryAfterSeconds?: number;
 }
 
 export async function signUpWithEmail(email: string, password: string): Promise<AuthResult> {
@@ -55,11 +65,12 @@ export async function signUpWithEmail(email: string, password: string): Promise<
 }
 
 export async function signInWithEmail(email: string, password: string): Promise<AuthResult> {
-  const { error } = await supabase.auth.signInWithPassword({
+  const { data, error } = await supabase.auth.signInWithPassword({
     email: email.trim(),
     password,
   });
-  return { error: error ? error.message : null };
+  if (error) return { error: error.message };
+  return { error: null, userId: data.user?.id };
 }
 
 export async function signOut(): Promise<AuthResult> {
@@ -80,13 +91,43 @@ export async function updatePassword(newPassword: string): Promise<AuthResult> {
 }
 
 // Re-send the signup confirmation email (used by the Home verify banner).
+// Supabase throttles resends (a per-email cooldown, ~60s by default, plus a
+// global hourly cap). When that trips, translate the raw error into a friendly
+// "please wait" message and report how long to wait so the UI can surface it.
 export async function resendVerificationEmail(email: string): Promise<AuthResult> {
   const { error } = await supabase.auth.resend({
     type: 'signup',
     email: email.trim(),
     options: { emailRedirectTo: EMAIL_CONFIRM_REDIRECT },
   });
-  return { error: error ? error.message : null };
+  if (!error) return { error: null };
+
+  const status = (error as { status?: number }).status;
+  const code = (error as { code?: string }).code;
+  const message = error.message ?? '';
+  const isRateLimited =
+    status === 429 ||
+    code === 'over_email_send_rate_limit' ||
+    /rate limit|for security purposes|after \d+\s*seconds?/i.test(message);
+
+  if (isRateLimited) {
+    const seconds = parseRetryAfterSeconds(message);
+    return {
+      error: seconds
+        ? `Please wait ${seconds}s before requesting another email.`
+        : 'Please wait before requesting another email.',
+      rateLimited: true,
+      retryAfterSeconds: seconds ?? 60,
+    };
+  }
+  return { error: message || 'Could not resend the email. Please try again.' };
+}
+
+// Supabase's throttle message looks like "... you can only request this after
+// 47 seconds." Pull that number out when present.
+function parseRetryAfterSeconds(message: string): number | null {
+  const match = message.match(/after (\d+)\s*seconds?/i);
+  return match ? Number(match[1]) : null;
 }
 
 // Deep links from email confirmation / password reset arrive as
