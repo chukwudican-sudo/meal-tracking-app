@@ -7,6 +7,7 @@ import { supabase } from '@/lib/supabase';
 import type {
   GroceryItem,
   MealEntry,
+  MealPlan,
   SavedRecipe,
   UserGoals,
   UserProfile,
@@ -126,6 +127,48 @@ export async function pushItem(userId: string, item: OutboxItem): Promise<void> 
       return;
     }
 
+    case 'plans': {
+      const plan = p.plan as MealPlan;
+      if (item.op === 'delete') {
+        // Cascades to plan_slots + plan_day_meals via FK on delete.
+        const { error } = await supabase
+          .from('plans')
+          .delete()
+          .eq('id', plan.id)
+          .eq('user_id', userId);
+        throwIf(error, 'plans.delete');
+        return;
+      }
+      const isActive = !!p.isActive;
+      const { planRow, slotRows, dayMealRows } = M.planToRows(userId, plan, isActive);
+      // Enforce the one-active-per-user partial unique index regardless of push
+      // order: clear is_active on every OTHER plan before marking this one active.
+      if (isActive) {
+        const clr = await supabase
+          .from('plans')
+          .update({ is_active: false })
+          .eq('user_id', userId)
+          .neq('id', plan.id);
+        throwIf(clr.error, 'plans.clear_active');
+      }
+      const upP = await supabase.from('plans').upsert(planRow, { onConflict: 'id' });
+      throwIf(upP.error, 'plans.upsert');
+      // Replace children so removed/edited slots + day meals don't linger.
+      const delM = await supabase.from('plan_day_meals').delete().eq('plan_id', plan.id);
+      throwIf(delM.error, 'plan_day_meals.delete');
+      const delS = await supabase.from('plan_slots').delete().eq('plan_id', plan.id);
+      throwIf(delS.error, 'plan_slots.delete');
+      if (slotRows.length > 0) {
+        const insS = await supabase.from('plan_slots').insert(slotRows);
+        throwIf(insS.error, 'plan_slots.insert');
+      }
+      if (dayMealRows.length > 0) {
+        const insM = await supabase.from('plan_day_meals').insert(dayMealRows);
+        throwIf(insM.error, 'plan_day_meals.insert');
+      }
+      return;
+    }
+
     case 'kitchen_items':
     case 'cart_items':
     case 'planned_ingredients': {
@@ -157,8 +200,15 @@ export async function pushItem(userId: string, item: OutboxItem): Promise<void> 
 export async function pullSince(userId: string, since: string | null): Promise<ServerSnapshot> {
   const snapshot: ServerSnapshot = {};
 
+  // Per-section diagnostics: elapsed ms + rows fetched, logged as one summary
+  // line at the end. Lets us see exactly which table (and how many rows) is slow
+  // when a login pull drags — e.g. to tell a flaky network from a heavy table.
+  const perf: Record<string, { ms: number; rows: number }> = {};
+  const pullStart = Date.now();
+
   // users (profile + goals) — omitted from the snapshot when unchanged in a delta.
   {
+    const s = Date.now();
     let q = supabase.from('users').select('*').eq('id', userId);
     if (since != null) q = q.gt('updated_at', since);
     const { data, error } = await q.maybeSingle();
@@ -168,10 +218,12 @@ export async function pullSince(userId: string, since: string | null): Promise<S
       snapshot.profile = profile;
       snapshot.goals = goals;
     }
+    perf.users = { ms: Date.now() - s, rows: data ? 1 : 0 };
   }
 
   // weight_logs
   {
+    const s = Date.now();
     let q = supabase.from('weight_logs').select('*').eq('user_id', userId);
     if (since != null) q = q.gt('updated_at', since);
     const { data, error } = await q;
@@ -182,10 +234,12 @@ export async function pullSince(userId: string, since: string | null): Promise<S
       byDate.set(e.date, e); // last row per date wins
     });
     snapshot.weightLog = Array.from(byDate.values()).sort((a, b) => a.date.localeCompare(b.date));
+    perf.weight_logs = { ms: Date.now() - s, rows: (data ?? []).length };
   }
 
   // meal_logs (+ ingredients) — children fetched only for the changed meals.
   {
+    const s = Date.now();
     let q = supabase.from('meal_logs').select('*').eq('user_id', userId);
     if (since != null) q = q.gt('updated_at', since);
     const { data: logs, error } = await q;
@@ -206,6 +260,7 @@ export async function pullSince(userId: string, since: string | null): Promise<S
       (byDate[date] ??= []).push(entry);
     });
     snapshot.logsByDate = byDate;
+    perf.meal_logs = { ms: Date.now() - s, rows: (logs ?? []).length };
   }
 
   // saved_recipes (+ recipes, ingredients, steps). A recipe's content can change
@@ -213,6 +268,7 @@ export async function pullSince(userId: string, since: string | null): Promise<S
   // are the union of changed saved rows and changed user-owned recipes; we then
   // load the saved rows for those recipes and rebuild them fully.
   {
+    const s = Date.now();
     let savedRows: any[] = [];
     if (since == null) {
       const { data: saved, error } = await supabase.from('saved_recipes').select('*').eq('user_id', userId);
@@ -258,18 +314,89 @@ export async function pullSince(userId: string, since: string | null): Promise<S
       ingByRecipe = groupBy(ings ?? [], r => r.recipe_id);
       stepByRecipe = groupBy(steps ?? [], r => r.recipe_id);
     }
-    snapshot.savedRecipes = savedRows.map(s =>
+    snapshot.savedRecipes = savedRows.map(sr =>
       M.rowsToSavedRecipe(
-        s,
-        recipeById.get(s.recipe_id),
-        ingByRecipe.get(s.recipe_id) ?? [],
-        stepByRecipe.get(s.recipe_id) ?? [],
+        sr,
+        recipeById.get(sr.recipe_id),
+        ingByRecipe.get(sr.recipe_id) ?? [],
+        stepByRecipe.get(sr.recipe_id) ?? [],
       ),
     );
+    perf.saved_recipes = { ms: Date.now() - s, rows: savedRows.length };
+  }
+
+  // plans (+ plan_slots, plan_day_meals). A plan's content spans three tables,
+  // so on a delta the affected plan ids are the union of changed rows across all
+  // three; we then load those plans fully and rebuild them. is_active lives on
+  // the plans row, so we always resolve the active plan's name from a full read
+  // of the user's plans (cheap; a user has few plans).
+  {
+    const s = Date.now();
+    let planRows: any[] = [];
+    if (since == null) {
+      const { data, error } = await supabase.from('plans').select('*').eq('user_id', userId);
+      throwIf(error, 'plans.select');
+      planRows = data ?? [];
+    } else {
+      const [
+        { data: changedPlans, error: cpErr },
+        { data: changedSlots, error: csErr },
+        { data: changedMeals, error: cmErr },
+      ] = await Promise.all([
+        supabase.from('plans').select('id').eq('user_id', userId).gt('updated_at', since),
+        supabase.from('plan_slots').select('plan_id').gt('updated_at', since),
+        supabase.from('plan_day_meals').select('plan_id').gt('updated_at', since),
+      ]);
+      throwIf(cpErr, 'plans.select.delta');
+      throwIf(csErr, 'plan_slots.select.delta');
+      throwIf(cmErr, 'plan_day_meals.select.delta');
+      const affected = new Set<string>();
+      (changedPlans ?? []).forEach(r => affected.add(r.id));
+      (changedSlots ?? []).forEach(r => affected.add(r.plan_id));
+      (changedMeals ?? []).forEach(r => affected.add(r.plan_id));
+      if (affected.size > 0) {
+        // RLS scopes plan_slots/plan_day_meals to the user's plans, so re-scope
+        // by user_id here to avoid rebuilding a plan id that isn't ours.
+        const { data, error } = await supabase
+          .from('plans')
+          .select('*')
+          .eq('user_id', userId)
+          .in('id', Array.from(affected));
+        throwIf(error, 'plans.select');
+        planRows = data ?? [];
+      }
+    }
+
+    const planIds = planRows.map(p => p.id);
+    if (planIds.length > 0) {
+      const [{ data: slots, error: sErr }, { data: meals, error: mErr }] = await Promise.all([
+        supabase.from('plan_slots').select('*').in('plan_id', planIds),
+        supabase.from('plan_day_meals').select('*').in('plan_id', planIds),
+      ]);
+      throwIf(sErr, 'plan_slots.select');
+      throwIf(mErr, 'plan_day_meals.select');
+      const slotsByPlan = groupBy(slots ?? [], r => r.plan_id);
+      const mealsByPlan = groupBy(meals ?? [], r => r.plan_id);
+      snapshot.plans = planRows.map(pr =>
+        M.rowsToPlan(pr, slotsByPlan.get(pr.id) ?? [], mealsByPlan.get(pr.id) ?? []).plan,
+      );
+    } else if (since == null) {
+      snapshot.plans = [];
+    }
+
+    // Resolve the active plan's name (id-based is_active -> local name pointer).
+    // Activating a plan bumps updated_at on both the newly-active and the
+    // previously-active plan (the projector upserts both), so an activation
+    // change is always in a delta's affected set and the is_active flag we
+    // fetched here is current.
+    const activeRow = planRows.find(p => p.is_active);
+    if (activeRow) snapshot.activePlanName = activeRow.name;
+    perf.plans = { ms: Date.now() - s, rows: planRows.length };
   }
 
   // grocery (kitchen / cart / planned)
   {
+    const s = Date.now();
     const kq = supabase.from('kitchen_items').select('*').eq('user_id', userId);
     const cq = supabase.from('cart_items').select('*').eq('user_id', userId);
     const pq = supabase.from('planned_ingredients').select('*').eq('user_id', userId);
@@ -288,7 +415,19 @@ export async function pullSince(userId: string, since: string | null): Promise<S
       ...(planned ?? []).map(r => M.rowToGroceryItem('planned_ingredients', r)),
     ];
     snapshot.groceryItems = items;
+    perf.grocery = { ms: Date.now() - s, rows: items.length };
   }
+
+  // One structured summary per pull: total time, mode, per-table ms + row counts,
+  // whether a profile came back, and the resolved active plan. This is the line
+  // to check first if a login pull is slow or returns unexpectedly empty data.
+  // eslint-disable-next-line no-console
+  console.info(
+    `[sync:pull] ${since == null ? 'full' : 'delta'} user=${userId.slice(0, 8)} ` +
+      `total=${Date.now() - pullStart}ms hasProfile=${!!snapshot.profile} ` +
+      `plans=${snapshot.plans?.length ?? '-'} activePlan=${snapshot.activePlanName ?? '-'}`,
+    perf,
+  );
 
   return snapshot;
 }

@@ -19,6 +19,7 @@ import { MealCard } from '@/components/MealCard';
 import { WeekStrip } from '@/components/WeekStrip';
 import { MealDetailModal } from '@/components/MealDetailModal';
 import { EmailVerificationBanner } from '@/components/EmailVerificationBanner';
+import { SyncStatusIcon } from '@/components/SyncStatusIcon';
 import type { MealEntry } from '@/store/types';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -146,6 +147,7 @@ export default function HomeScreen() {
                 <Text style={styles.streakText}>{streak} day streak</Text>
               </View>
             )}
+            <SyncStatusIcon />
             <ProfileIcon />
             <NotificationIcon />
           </View>

@@ -19,6 +19,7 @@ import { Screen } from '@/components/Screen';
 import { router } from 'expo-router';
 
 import { COLORS } from '@/constants/theme';
+import { newId } from '@/lib/sync/uuid';
 import { useMealStore } from '@/store/useMealStore';
 import { useToastStore } from '@/store/useToastStore';
 import type {
@@ -1066,7 +1067,8 @@ export default function BuildPlanScreen() {
   function handleActivate() {
     const planName = autoPlanName();
     const plan: MealPlan = {
-      id: `plan-built-${Date.now()}`,
+      // UUID so the local id doubles as the server plans.id primary key.
+      id: newId(),
       name: planName,
       description: 'Custom plan built from your picks.',
       disclaimer: undefined,

@@ -3,8 +3,9 @@ import type { ServerSnapshot } from '@/store/types';
 export type { ServerSnapshot };
 
 // Logical tables the sync layer knows how to push/pull. Child tables
-// (meal_log_ingredients, recipe_ingredients, recipe_steps, recipes) are
-// handled inside their parent's repository operation, not as top-level ops.
+// (meal_log_ingredients, recipe_ingredients, recipe_steps, recipes,
+// plan_slots, plan_day_meals) are handled inside their parent's repository
+// operation, not as top-level ops.
 export type SyncTable =
   | 'users'
   | 'meal_logs'
@@ -12,7 +13,8 @@ export type SyncTable =
   | 'saved_recipes'
   | 'kitchen_items'
   | 'cart_items'
-  | 'planned_ingredients';
+  | 'planned_ingredients'
+  | 'plans';
 
 export type OutboxOp = 'upsert' | 'delete';
 
@@ -28,6 +30,11 @@ export interface OutboxItem {
   attempts: number;
   nextAttemptAt: number;
   deadLetter?: boolean;
+  // When this write was first queued. Drives the "stuck too long" UI signal —
+  // an item pending well past a normal round-trip is worth surfacing even
+  // before it officially dead-letters. Optional for items persisted before this
+  // field existed (backfilled on load).
+  enqueuedAt?: number;
 }
 
 // ─── Entity-key builders ───────────────────────────────────────────────────
@@ -40,6 +47,7 @@ export const entityKey = {
   mealLog: (mealId: string) => `meal_logs:${mealId}`,
   weightLog: (date: string) => `weight_logs:${date}`,
   savedRecipe: (savedRecipeId: string) => `saved_recipes:${savedRecipeId}`,
+  plan: (planId: string) => `plans:${planId}`,
   // Grocery keys are table-scoped so a section move (delete-old + upsert-new)
   // produces two distinct keys that both survive outbox coalescing.
   grocery: (table: SyncTable, groceryKey: string) => `${table}:${groceryKey}`,

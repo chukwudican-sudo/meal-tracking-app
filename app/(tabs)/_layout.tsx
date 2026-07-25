@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { View } from 'react-native';
-import { router, Tabs } from 'expo-router';
+import { router, Tabs, useSegments } from 'expo-router';
 
 import { CustomTabBar } from '@/components/CustomTabBar';
 import { AddMealScreen } from '@/components/addMeal/AddMealScreen';
@@ -37,9 +37,21 @@ export default function TabLayout() {
   const authed = !!session || pendingEmailVerification;
   const canEnter = ready && onboardingComplete && authed;
 
+  // This layout is the navigation anchor, so it stays mounted underneath
+  // /onboarding and this gate keeps running during login. During the login
+  // window the session flips to authed BEFORE onboardingComplete is set (that
+  // only happens after the post-login pull confirms real data), which would
+  // trip the redirect below and remount /onboarding to its first step — a
+  // visible Welcome-screen flash. Skip the redirect while onboarding is already
+  // the active route so we never redundantly replace it onto itself.
+  const segments = useSegments();
+  const onOnboarding = segments[0] === 'onboarding';
+
   useEffect(() => {
-    if (ready && (!onboardingComplete || !authed)) router.replace('/onboarding');
-  }, [ready, onboardingComplete, authed]);
+    if (ready && (!onboardingComplete || !authed) && !onOnboarding) {
+      router.replace('/onboarding');
+    }
+  }, [ready, onboardingComplete, authed, onOnboarding]);
 
   if (!canEnter) {
     return <View style={{ flex: 1, backgroundColor: COLORS.bg }} />;

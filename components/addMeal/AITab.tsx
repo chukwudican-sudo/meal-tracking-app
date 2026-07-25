@@ -12,12 +12,16 @@ import {
   View,
 } from 'react-native';
 import { Audio } from 'expo-av';
+import { router } from 'expo-router';
 
 import { COLORS } from '@/constants/theme';
-import { aiClient, isStubAI } from '@/ai/aiClient';
-import type { ChatMessage, DayContext, MealDraft } from '@/ai/types';
+import { aiClient } from '@/ai/aiClient';
+import { AIError } from '@/ai/aiEdgeClient';
+import { estimateNutrition } from '@/ai/estimateNutrition';
+import { fixMeal } from '@/ai/fixMeal';
+import type { DayContext, MealDraft } from '@/ai/types';
 import { newId } from '@/lib/sync/uuid';
-import type { Ingredient, MealEntry } from '@/store/types';
+import type { Ingredient, MealEntry, RecipeCategory } from '@/store/types';
 import { useMealStore } from '@/store/useMealStore';
 
 interface Props {
@@ -33,77 +37,90 @@ function nowHHMM(): string {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
-// Shell ingredient derivation: split the description into items and distribute
-// the estimated calories/macros evenly so each row carries some nutrition.
-function deriveIngredients(text: string, draft: MealDraft): Ingredient[] {
-  const parts = text
-    .split(/,|\band\b|\n|\+/i)
-    .map(p => p.trim())
-    .filter(p => p.length > 1)
-    .slice(0, 8);
-  if (parts.length === 0) return [];
-  const n = parts.length;
-  const split = (total: number, i: number) =>
-    Math.round(total / n) + (i === 0 ? total - Math.round(total / n) * n : 0);
-  return parts.map((name, i) => ({
-    id: `aiing-${Date.now()}-${i}`,
-    name: name.length > 40 ? name.slice(0, 40) : name,
-    quantity: 1,
-    unit: 'serving',
-    servings: 1,
-    calories: split(draft.calories, i),
-    macros: {
-      protein: split(draft.macros.protein, i),
-      carbs: split(draft.macros.carbs, i),
-      fats: split(draft.macros.fats, i),
-    },
-  }));
-}
-
-export function AITab({ context, date, onLogged }: Props) {
+export function AITab({ date, onLogged }: Props) {
   const addMealToDay = useMealStore(s => s.addMealToDay);
   const ingestMidWeekIngredients = useMealStore(s => s.ingestMidWeekIngredients);
 
   const [input, setInput] = useState('');
   const [draft, setDraft] = useState<MealDraft | null>(null);
   const [ingredients, setIngredients] = useState<Ingredient[]>([]);
+  const [category, setCategory] = useState<RecipeCategory | undefined>(undefined);
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
   const [recording, setRecording] = useState(false);
   const recordingRef = useRef<Audio.Recording | null>(null);
-  const historyRef = useRef<ChatMessage[]>([]);
   const fullTextRef = useRef('');
 
   const cals = draft?.calories ?? 0;
   const macros = draft?.macros ?? ZERO_MACROS;
   const hasEstimate = draft != null;
 
+  // Shared handler for both the initial estimate (EstimateError) and the
+  // correction (FixError) — both subclass AIError with the same code set.
+  function handleAIError(e: unknown) {
+    console.warn('AI request failed:', e);
+    if (e instanceof AIError && e.code === 'not_premium') {
+      setNote('AI Describe is a Premium feature.');
+      Alert.alert(
+        'Premium feature',
+        'AI Describe uses AI to estimate nutrition from a description. Upgrade to Premium to use it.',
+        [
+          { text: 'Not now', style: 'cancel' },
+          {
+            text: 'Upgrade',
+            onPress: () =>
+              router.push({ pathname: '/settings/coming-soon', params: { title: 'Subscription' } }),
+          },
+        ],
+      );
+      return;
+    }
+    if (e instanceof AIError && e.code === 'rate_limited') {
+      setNote(e.message || "You've hit the hourly limit for AI. Try again later.");
+      return;
+    }
+    if (e instanceof AIError && e.code === 'ai_failed') {
+      // The edge function's Gemini call itself failed (e.g. a transient 503) or
+      // timed out. Prefer the server's specific message; it's retry-worthy.
+      setNote(e.message || 'The AI is temporarily unavailable. Please try again in a moment.');
+      return;
+    }
+    if (e instanceof AIError && e.code === 'unauthorized') {
+      setNote('Your session expired. Please sign in again.');
+      return;
+    }
+    setNote('Something went wrong. Try again.');
+  }
+
   async function estimate() {
     const trimmed = input.trim();
     if (!trimmed || busy) return;
     setBusy(true);
+    // Clear any note from a previous attempt so a stale error/success message
+    // never lingers on screen while this new request is in flight.
+    setNote('');
     const combined = [fullTextRef.current, trimmed].filter(Boolean).join('. ');
     try {
-      const next = draft
-        ? await aiClient.fixMeal({ fixText: trimmed, currentDraft: draft, history: historyRef.current }, context)
-        : await aiClient.parseMeal({ text: combined }, context);
-      setDraft(next);
-      setIngredients(deriveIngredients(combined, next));
-      setNote(
-        draft
-          ? `Updated estimate for "${next.name}". Add more details to refine.`
-          : `Estimated "${next.name}". Add corrections below to refine.`,
-      );
-      historyRef.current = [
-        ...historyRef.current,
-        { role: 'user', content: trimmed },
-        { role: 'assistant', content: JSON.stringify(next) },
-      ];
+      if (draft) {
+        // Correction goes through the fix-meal edge function (Gemini). It
+        // returns the complete corrected meal, so refresh both the draft totals
+        // and the ingredient breakdown from the response.
+        const result = await fixMeal(trimmed, draft, ingredients);
+        setDraft(result.draft);
+        setIngredients(result.ingredients);
+        setNote(`Updated estimate for "${result.draft.name}". Add more details to refine.`);
+      } else {
+        // Initial estimate goes through the Supabase edge function (Gemini).
+        const result = await estimateNutrition(combined);
+        setDraft(result.draft);
+        setIngredients(result.ingredients);
+        setCategory(result.category);
+        setNote(`Estimated "${result.draft.name}". Add corrections below to refine.`);
+      }
       fullTextRef.current = combined;
       setInput('');
     } catch (e) {
-      console.warn('AI estimate failed:', e);
-      setNote('Something went wrong estimating. Try again.');
+      handleAIError(e);
     } finally {
       setBusy(false);
     }
@@ -122,6 +139,7 @@ export function AITab({ context, date, onLogged }: Props) {
       status: 'pending',
       isAdHoc: true,
       servings: 1,
+      ...(category ? { category } : {}),
     };
     addMealToDay(date, entry);
     if (ingredients.length > 0) {
@@ -205,9 +223,6 @@ export function AITab({ context, date, onLogged }: Props) {
         )}
 
         {note ? <Text style={styles.note}>{note}</Text> : null}
-        {isStubAI && !note ? (
-          <Text style={styles.stubNotice}>Stub mode — add an OpenAI key in .env to enable real estimates.</Text>
-        ) : null}
       </ScrollView>
 
       {/* Input area */}
@@ -312,7 +327,6 @@ const styles = StyleSheet.create({
   ingCal: { color: COLORS.textSecondary, fontSize: 13 },
 
   note: { color: COLORS.textSecondary, fontSize: 13, marginTop: 14, lineHeight: 19 },
-  stubNotice: { color: COLORS.textMuted, fontSize: 11, marginTop: 14, textAlign: 'center' },
 
   inputBar: {
     flexDirection: 'row',

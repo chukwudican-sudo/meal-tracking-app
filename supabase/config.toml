@@ -385,6 +385,24 @@ deno_version = 2
 # [edge_runtime.secrets]
 # secret_key = "env(SECRET_VALUE)"
 
+# AI Describe backend. verify_jwt=true (the default) makes the gateway reject
+# unauthenticated calls before our code runs. The GEMINI_API_KEY secret is set
+# out-of-band via `supabase secrets set` and must never live in the repo.
+[functions.estimate-nutrition]
+enabled = true
+verify_jwt = true
+
+# AI correction backend (fix-meal). Same gateway/secret setup as
+# estimate-nutrition above.
+[functions.fix-meal]
+enabled = true
+verify_jwt = true
+
+# AI photo-scan backend (scan-meal, vision). Same gateway/secret setup.
+[functions.scan-meal]
+enabled = true
+verify_jwt = true
+
 [analytics]
 enabled = true
 port = 54327

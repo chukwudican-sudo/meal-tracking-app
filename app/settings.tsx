@@ -11,6 +11,7 @@ import { Screen } from '@/components/Screen';
 
 import { COLORS } from '@/constants/theme';
 import { signOut, useAuth } from '@/lib/auth';
+import { clearPendingPassword } from '@/lib/pendingCredentials';
 import { engine } from '@/lib/sync/engine';
 import { useMealStore } from '@/store/useMealStore';
 
@@ -35,6 +36,7 @@ export default function SettingsScreen() {
       Alert.alert('Log out failed', error);
       return;
     }
+    void clearPendingPassword();
     resetUserData();
     router.replace('/onboarding');
   };
@@ -46,26 +48,17 @@ export default function SettingsScreen() {
   // we only need to clear local state, so don't block on its result.
   const finishUnverifiedLogout = async () => {
     await signOut();
+    void clearPendingPassword();
     resetUserData();
     router.replace('/onboarding');
   };
 
   const performLogout = async () => {
-    // Stop capturing + flush queued writes while the token is still valid.
-    const { pending, deadLetter } = await engine.prepareSignOut();
-    const unsynced = pending + deadLetter;
-    if (unsynced > 0) {
-      Alert.alert(
-        'Unsynced changes',
-        `${unsynced} change${unsynced === 1 ? '' : 's'} haven't been saved to the cloud yet — you may be offline. ` +
-          `They'll stay on this device and finish syncing the next time you sign in here. Log out anyway?`,
-        [
-          { text: 'Stay', style: 'cancel', onPress: () => engine.resumeAfterCancelledSignOut() },
-          { text: 'Log out anyway', style: 'destructive', onPress: () => { void finishLogout(); } },
-        ],
-      );
-      return;
-    }
+    // Offline-first: logout is instant. Stop capturing + attempt a best-effort
+    // flush while the token is still valid, but never block on the result —
+    // anything not yet pushed stays durably queued on-device and finishes
+    // syncing automatically the next time this account signs in here.
+    await engine.prepareSignOut();
     await finishLogout();
   };
 

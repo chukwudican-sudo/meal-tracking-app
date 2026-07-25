@@ -59,7 +59,8 @@
           "photosPermission": "Used to upload meal photos for AI identification."
         }
       ],
-      "@react-native-community/datetimepicker"
+      "@react-native-community/datetimepicker",
+      "expo-secure-store"
     ],
     "experiments": {
       "typedRoutes": true,

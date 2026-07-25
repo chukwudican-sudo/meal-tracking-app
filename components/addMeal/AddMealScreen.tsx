@@ -12,6 +12,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { COLORS } from '@/constants/theme';
 import { APP_LOGO, APP_NAME } from '@/constants/app';
 import { useMealStore, toIsoDate } from '@/store/useMealStore';
+import { newId } from '@/lib/sync/uuid';
 import type { ChatMessage, DayContext, MealDraft } from '@/ai/types';
 
 import { ScanTab } from './ScanTab';
@@ -116,9 +117,10 @@ export function AddMealScreen({ visible, date, onClose }: Props) {
                 // ScanTab's "Log" path bypasses the draft card entirely:
                 // it logs the meal directly to today and closes the screen.
                 if (src.logImmediately) {
-                  const entryId = `${date}-scan-${Date.now()}`;
+                  // UUID required — meal_logs.id is a uuid column on the server;
+                  // a composite string id logs locally but fails to sync.
                   useMealStore.getState().addMealToDay(date, {
-                    id: entryId,
+                    id: newId(),
                     name: draft.name,
                     time: draft.time,
                     calories: draft.calories,

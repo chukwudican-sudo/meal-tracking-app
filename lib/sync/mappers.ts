@@ -10,7 +10,9 @@ import type {
   GrocerySection,
   Ingredient,
   MealEntry,
+  MealPlan,
   NutrientKey,
+  PlanDayMeal,
   RecipeCategory,
   RecipeDifficulty,
   SavedRecipe,
@@ -19,7 +21,7 @@ import type {
   UserProfile,
   WeightLogEntry,
 } from '@/store/types';
-import { newId } from './uuid';
+import { isUuid, newId } from './uuid';
 import { cupsToLiters, litersToCups } from './units';
 import type { SyncTable } from './types';
 
@@ -319,6 +321,111 @@ export function rowsToSavedRecipe(
     favourited: savedRow.is_bookmarked ?? false,
     addedAt: savedRow.saved_at ?? new Date().toISOString(),
   };
+}
+
+// ─── Plans (+ plan_slots, plan_day_meals) ──────────────────────────────────
+// A local MealPlan is a thin, weekly (Mon=0..Sun=6) structure whose day meals
+// reference a recipe by a loose id + a denormalized name. We denormalize it into
+// the normalized 3-table schema: one `plans` row, synthesized `plan_slots` (one
+// per distinct slotName+time), and one `plan_day_meals` row per PlanDayMeal.
+// recipe_ref + recipe_name preserve the local reference/name losslessly; recipe_id
+// is set only when it resolves to a real recipe UUID (seeded premade or a synced
+// saved recipe, whose server recipes.id equals its SavedRecipe.id).
+
+export interface PlanRows {
+  planRow: Record<string, unknown>;
+  slotRows: Record<string, unknown>[];
+  dayMealRows: Record<string, unknown>[];
+}
+
+// Resolve a local PlanDayMeal.recipeId to a server recipes UUID, or null when it
+// can't (AI 'custom-*' cards, '__empty__'/'__removed__' sentinels, unknown ids).
+function resolvePlanRecipeUuid(ref: string): string | null {
+  const premade = premadeUuidForSlug(ref);
+  if (premade) return premade;
+  return isUuid(ref) ? ref : null;
+}
+
+export function planToRows(userId: string, plan: MealPlan, isActive: boolean): PlanRows {
+  const planRow = {
+    id: plan.id,
+    user_id: userId,
+    name: plan.name,
+    is_active: isActive,
+  };
+
+  // One synthesized slot per distinct (slotName, time), ordered by time.
+  const slotKey = (slotName: string, time: string) => `${slotName}|${time}`;
+  const slotIdByKey = new Map<string, string>();
+  const slotMeta: { key: string; slotName: string; time: string }[] = [];
+  plan.days.forEach(dayMeals => {
+    (dayMeals ?? []).forEach(m => {
+      const key = slotKey(m.slotName, m.time);
+      if (!slotIdByKey.has(key)) {
+        slotIdByKey.set(key, newId());
+        slotMeta.push({ key, slotName: m.slotName, time: m.time });
+      }
+    });
+  });
+  slotMeta.sort((a, b) => a.time.localeCompare(b.time));
+  const slotRows = slotMeta.map((s, idx) => ({
+    id: slotIdByKey.get(s.key),
+    plan_id: plan.id,
+    slot_name: s.slotName,
+    slot_time: s.time || null,
+    is_custom: false,
+    sort_order: idx,
+  }));
+
+  const dayMealRows: Record<string, unknown>[] = [];
+  plan.days.forEach((dayMeals, dayIdx) => {
+    (dayMeals ?? []).forEach(m => {
+      dayMealRows.push({
+        id: newId(),
+        plan_id: plan.id,
+        plan_slot_id: slotIdByKey.get(slotKey(m.slotName, m.time)),
+        day_of_week: dayIdx, // local Mon=0..Sun=6, self-contained for these tables
+        recipe_id: resolvePlanRecipeUuid(m.recipeId),
+        recipe_ref: m.recipeId,
+        recipe_name: m.recipeName,
+        is_day_override: false,
+      });
+    });
+  });
+
+  return { planRow, slotRows, dayMealRows };
+}
+
+export function rowsToPlan(
+  planRow: Record<string, any>,
+  slotRows: Record<string, any>[],
+  dayMealRows: Record<string, any>[],
+): { plan: MealPlan; isActive: boolean } {
+  const slotById = new Map((slotRows ?? []).map(s => [s.id, s]));
+
+  const days: PlanDayMeal[][] = Array.from({ length: 7 }, () => [] as PlanDayMeal[]);
+  (dayMealRows ?? []).forEach(dm => {
+    const dow = typeof dm.day_of_week === 'number' ? dm.day_of_week : Number(dm.day_of_week);
+    if (!(dow >= 0 && dow <= 6)) return;
+    const slot = slotById.get(dm.plan_slot_id);
+    days[dow].push({
+      slotName: slot?.slot_name ?? '',
+      time: slot?.slot_time ?? '',
+      // Prefer the local reference we stored; fall back to the FK, then the empty sentinel.
+      recipeId: dm.recipe_ref ?? dm.recipe_id ?? '__empty__',
+      recipeName: dm.recipe_name ?? '',
+    });
+  });
+  days.forEach(d => d.sort((a, b) => a.time.localeCompare(b.time)));
+
+  const plan: MealPlan = {
+    id: planRow.id,
+    name: planRow.name ?? 'Plan',
+    days,
+    savedAt: planRow.created_at ?? new Date().toISOString(),
+    source: 'user',
+  };
+  return { plan, isActive: !!planRow.is_active };
 }
 
 // ─── Grocery items (kitchen / cart / planned) ──────────────────────────────

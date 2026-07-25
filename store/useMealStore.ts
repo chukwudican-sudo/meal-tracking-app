@@ -172,6 +172,96 @@ export function isTemplateApplicableOnDate(template: MealTemplate, date: string)
   return false;
 }
 
+// Turn a weekly MealPlan into runtime MealTemplates (one per distinct
+// slot+time+recipe pairing, with a weekly recurrence covering the weekdays it
+// appears on). Shared by activatePlan and the non-destructive
+// hydrateActivePlanIfNeeded so both derive identical templates.
+function buildTemplatesFromPlan(state: AppStore, plan: MealPlan): MealTemplate[] {
+  const recipeById = new Map(state.recipes.map(r => [r.id, r]));
+  const savedById = new Map(state.savedRecipes.map(r => [r.id, r]));
+  const savedByRecipeId = new Map(
+    state.savedRecipes.filter(r => r.recipeId).map(r => [r.recipeId as string, r]),
+  );
+  // Resolve a plan meal's nutrition from premade recipes first, then the
+  // user's saved/AI recipes (by id, source id, or name). Without this,
+  // custom recipes referenced by a plan resolved to 0 calories, so the
+  // Home progress rings never moved when those meals were completed.
+  const resolveNutrition = (recipeId: string, recipeName: string) => {
+    const nameKey = recipeName.trim().toLowerCase();
+    return (
+      recipeById.get(recipeId) ??
+      savedById.get(recipeId) ??
+      savedByRecipeId.get(recipeId) ??
+      state.recipes.find(r => r.name.trim().toLowerCase() === nameKey) ??
+      state.savedRecipes.find(r => r.name.trim().toLowerCase() === nameKey)
+    );
+  };
+
+  // Build one MealTemplate per (slotName + time + recipe) combo, with
+  // a weekly recurrence whose `days[]` is the set of weekdays that
+  // pairing appears on. Weekday convention: Mon=0..Sun=6.
+  type Bucket = {
+    slotName: string;
+    time: string;
+    recipeId: string;
+    recipeName: string;
+    days: number[];
+  };
+  const buckets = new Map<string, Bucket>();
+
+  plan.days.forEach((dayMeals, dayIdx) => {
+    (dayMeals ?? []).forEach(m => {
+      const key = `${m.slotName}|${m.time}|${m.recipeId}|${m.recipeName}`;
+      const bucket = buckets.get(key);
+      if (bucket) {
+        bucket.days.push(dayIdx);
+      } else {
+        buckets.set(key, {
+          slotName: m.slotName,
+          time: m.time,
+          recipeId: m.recipeId,
+          recipeName: m.recipeName,
+          days: [dayIdx],
+        });
+      }
+    });
+  });
+
+  const now = Date.now();
+  let idCounter = 0;
+  const nextTemplates: MealTemplate[] = [];
+
+  buckets.forEach(bucket => {
+    const recipe = resolveNutrition(bucket.recipeId, bucket.recipeName);
+    // Fall back to deterministic non-zero nutrition if the recipe can't be
+    // resolved, so plan meals always contribute to the Home progress.
+    const fb          = fallbackNutrition(bucket.recipeName);
+    const calories    = recipe?.calories && recipe.calories > 0 ? recipe.calories : fb.calories;
+    const macros      = recipe?.macros ?? fb.macros;
+    const ingredients = recipe ? cloneIngredients(recipe.ingredients) : [];
+
+    // Plan day indices are Monday=0..Sunday=6, but recurrence.days uses
+    // the JS weekday convention Sunday=0..Saturday=6. Convert so the
+    // meals a user planned for "Monday" actually recur on Mondays.
+    const recurrence: RecurrenceRule = {
+      type: 'weekly',
+      days: [...new Set(bucket.days.map(d => (d + 1) % 7))].sort((a, b) => a - b),
+    };
+
+    nextTemplates.push({
+      id: `tpl-plan-${now}-${idCounter++}`,
+      name: bucket.recipeName,
+      time: bucket.time,
+      calories,
+      ingredients,
+      macros,
+      recurrence,
+    });
+  });
+
+  return nextTemplates;
+}
+
 // Find the Monday on-or-before a given ISO date (the start of that week).
 export function mondayOfWeek(iso: string): string {
   const d = new Date(iso + 'T00:00:00');
@@ -1276,87 +1366,7 @@ export const useMealStore = create<AppStore>()(
       // ─── Meal plan actions ─────────────────────────────────────────────
       activatePlan: (plan) => {
         const state = get();
-        const recipeById = new Map(state.recipes.map(r => [r.id, r]));
-        const savedById = new Map(state.savedRecipes.map(r => [r.id, r]));
-        const savedByRecipeId = new Map(
-          state.savedRecipes.filter(r => r.recipeId).map(r => [r.recipeId as string, r]),
-        );
-        // Resolve a plan meal's nutrition from premade recipes first, then the
-        // user's saved/AI recipes (by id, source id, or name). Without this,
-        // custom recipes referenced by a plan resolved to 0 calories, so the
-        // Home progress rings never moved when those meals were completed.
-        const resolveNutrition = (recipeId: string, recipeName: string) => {
-          const nameKey = recipeName.trim().toLowerCase();
-          return (
-            recipeById.get(recipeId) ??
-            savedById.get(recipeId) ??
-            savedByRecipeId.get(recipeId) ??
-            state.recipes.find(r => r.name.trim().toLowerCase() === nameKey) ??
-            state.savedRecipes.find(r => r.name.trim().toLowerCase() === nameKey)
-          );
-        };
-
-        // Build one MealTemplate per (slotName + time + recipe) combo, with
-        // a weekly recurrence whose `days[]` is the set of weekdays that
-        // pairing appears on. Weekday convention: Mon=0..Sun=6.
-        type Bucket = {
-          slotName: string;
-          time: string;
-          recipeId: string;
-          recipeName: string;
-          days: number[];
-        };
-        const buckets = new Map<string, Bucket>();
-
-        plan.days.forEach((dayMeals, dayIdx) => {
-          dayMeals.forEach(m => {
-            const key = `${m.slotName}|${m.time}|${m.recipeId}|${m.recipeName}`;
-            const bucket = buckets.get(key);
-            if (bucket) {
-              bucket.days.push(dayIdx);
-            } else {
-              buckets.set(key, {
-                slotName: m.slotName,
-                time: m.time,
-                recipeId: m.recipeId,
-                recipeName: m.recipeName,
-                days: [dayIdx],
-              });
-            }
-          });
-        });
-
-        const now = Date.now();
-        let idCounter = 0;
-        const nextTemplates: MealTemplate[] = [];
-
-        buckets.forEach(bucket => {
-          const recipe = resolveNutrition(bucket.recipeId, bucket.recipeName);
-          // Fall back to deterministic non-zero nutrition if the recipe can't be
-          // resolved, so plan meals always contribute to the Home progress.
-          const fb            = fallbackNutrition(bucket.recipeName);
-          const calories      = recipe?.calories && recipe.calories > 0 ? recipe.calories : fb.calories;
-          const macros        = recipe?.macros ?? fb.macros;
-          const ingredients   = recipe ? cloneIngredients(recipe.ingredients) : [];
-
-          // Plan day indices are Monday=0..Sunday=6, but recurrence.days uses
-          // the JS weekday convention Sunday=0..Saturday=6. Convert so the
-          // meals a user planned for "Monday" actually recur on Mondays.
-          const recurrence: RecurrenceRule = {
-            type: 'weekly',
-            days: [...new Set(bucket.days.map(d => (d + 1) % 7))].sort((a, b) => a - b),
-          };
-
-          nextTemplates.push({
-            id: `tpl-plan-${now}-${idCounter++}`,
-            name: bucket.recipeName,
-            time: bucket.time,
-            calories,
-            ingredients,
-            macros,
-            recurrence,
-          });
-        });
+        const nextTemplates = buildTemplatesFromPlan(state, plan);
 
         // Materialize today's log immediately from the new templates so the
         // Home tab and Day Detail reflect the plan the instant it's activated.
@@ -1412,6 +1422,76 @@ export const useMealStore = create<AppStore>()(
         // Rebuild Planned Ingredients from the new plan's templates for the
         // current week — this clears the previous plan's planned items and
         // repopulates from the meals that are actually scheduled.
+        get().refreshGroceryWeek(mondayOfWeek(today));
+      },
+
+      // Non-destructive re-activation used on restore (after a login pull). Only
+      // runs when there's an active plan pointer but NO local templates (fresh
+      // device / wiped cache), so it never clobbers a live in-app activation.
+      // Unlike activatePlan it PRESERVES all existing logs — past, today, and
+      // future — and only fills today's missing slots + sets templates so future
+      // days repopulate. This must run AFTER meal_logs are pulled so already
+      // logged/synced meals win and aren't duplicated.
+      hydrateActivePlanIfNeeded: () => {
+        const state = get();
+        const activeName = state.profile.activePlanName;
+        if (!activeName) return;
+        if (state.templates.length > 0) return; // a plan is already live; leave it
+
+        const plan =
+          state.savedPlans.find(p => p.name === activeName) ??
+          state.plans.find(p => p.name === activeName);
+        if (!plan) return;
+
+        const nextTemplates = buildTemplatesFromPlan(state, plan);
+
+        const today = toIsoDate(new Date());
+        const existingToday = state.logs[today]?.meals ?? [];
+        // Key existing meals by slot-time+name so we don't re-add a meal the pull
+        // already restored (synced/logged meals win).
+        const existingKeys = new Set(existingToday.map(m => `${m.time}|${m.name}`));
+        const materialized: MealEntry[] = nextTemplates
+          .filter(t => isTemplateApplicableOnDate(t, today))
+          .filter(t => !existingKeys.has(`${t.time}|${t.name}`))
+          .map(t => ({
+            id:          newId(),
+            name:        t.name,
+            time:        t.time,
+            calories:    t.calories,
+            ingredients: t.ingredients,
+            macros:      t.macros,
+            status:      'pending' as const,
+            templateId:  t.id,
+          }));
+
+        const mergedTodayMeals = [...existingToday, ...materialized].sort((a, b) =>
+          (a.time ?? '').localeCompare(b.time ?? ''),
+        );
+
+        const nextGoals = plan.targets
+          ? {
+              ...state.goals,
+              dailyCalories: plan.targets.calories,
+              protein: plan.targets.protein,
+              carbs: plan.targets.carbs,
+              fats: plan.targets.fats,
+            }
+          : state.goals;
+
+        set({
+          templates: nextTemplates,
+          goals: nextGoals,
+          logs: {
+            ...state.logs,
+            [today]: {
+              date: today,
+              meals: mergedTodayMeals,
+              waterMl: state.logs[today]?.waterMl ?? 0,
+            },
+          },
+          profile: { ...state.profile, pendingFirstPlan: false },
+        });
+
         get().refreshGroceryWeek(mondayOfWeek(today));
       },
 
@@ -1477,7 +1557,8 @@ export const useMealStore = create<AppStore>()(
         days.forEach(d => d.sort((a, b) => a.time.localeCompare(b.time)));
 
         const plan: MealPlan = {
-          id: `plan-user-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          // UUID so the local id doubles as the server plans.id primary key.
+          id: newId(),
           name,
           description: undefined,
           disclaimer: undefined,
@@ -1707,18 +1788,41 @@ export const useMealStore = create<AppStore>()(
             }
           }
 
-          return { profile, goals, weightLog, savedRecipes, grocery, logs };
+          // Plans — union by id (never premade); server wins unless the plan is dirty.
+          let savedPlans = state.savedPlans;
+          if (snapshot.plans) {
+            const byId = new Map(state.savedPlans.map(pl => [pl.id, pl]));
+            snapshot.plans.forEach(pl => {
+              if (!dirtyKeys.has(entityKey.plan(pl.id))) byId.set(pl.id, pl);
+            });
+            savedPlans = Array.from(byId.values());
+          }
+
+          // Active-plan pointer — mirror the server is_active flag onto the local
+          // name-based pointer, but never clobber a local activation still pending
+          // in the outbox (any dirty plan key means the user just changed plans).
+          let nextProfile = profile;
+          const anyPlanDirty = Array.from(dirtyKeys).some(k => k.startsWith('plans:'));
+          if (snapshot.activePlanName != null && !anyPlanDirty) {
+            nextProfile = { ...nextProfile, activePlanName: snapshot.activePlanName };
+          }
+
+          return { profile: nextProfile, goals, weightLog, savedRecipes, grocery, logs, savedPlans };
         });
         get().recalcStreak();
       },
     }),
     {
       name:    'meal-app-store-v2',
-      version: 4,
-      // Assign UUIDs to any records (meals + saved recipes) with a non-UUID id,
-      // so their local id can double as the Supabase primary key. v4 re-runs this
-      // to heal meals created by UI paths that briefly still generated legacy
-      // `meal-<ts>` ids (those fail the uuid-typed meal_logs.id on sync).
+      version: 6,
+      // Assign UUIDs to any records (meals + saved recipes + saved plans) with a
+      // non-UUID id, so their local id can double as the Supabase primary key. v4
+      // re-runs this to heal meals created by UI paths that briefly still
+      // generated legacy `meal-<ts>` ids (those fail the uuid-typed meal_logs.id
+      // on sync); v5 additionally heals saved-plan ids (were `plan-user-<ts>-…` /
+      // `plan-built-<ts>`) so plans can sync into the uuid-typed plans.id; v6
+      // re-runs it once more to heal scan-path meal ids (were `<date>-scan-<ts>`
+      // before the scan flow switched to newId()).
       // templateId references are left intact (local-only).
       migrate: (persisted, _version) => {
         const p = (persisted ?? {}) as Partial<AppStore>;
@@ -1732,6 +1836,11 @@ export const useMealStore = create<AppStore>()(
         if (p.savedRecipes) {
           p.savedRecipes.forEach(r => {
             if (!isUuid(r.id)) r.id = newId();
+          });
+        }
+        if (p.savedPlans) {
+          p.savedPlans.forEach(pl => {
+            if (!isUuid(pl.id)) pl.id = newId();
           });
         }
         return p as AppStore;

@@ -314,6 +314,10 @@ export interface ServerSnapshot {
   savedRecipes?: SavedRecipe[];
   groceryItems?: GroceryItem[];
   logsByDate?: Record<string, MealEntry[]>;
+  // User plans (never premade). activePlanName mirrors the server's is_active
+  // flag back to the local name-based pointer.
+  plans?: MealPlan[];
+  activePlanName?: string;
 }
 
 // ─── Zustand store shape ──────────────────────────────────────────────────────
@@ -398,6 +402,11 @@ export interface AppStore {
   // per day (weekly recurrence). Sets profile.activePlanName. Ingests any
   // missing ingredients into Planned Ingredients.
   activatePlan: (plan: MealPlan) => void;
+  // Non-destructive re-activation on restore: if there's an active plan pointer
+  // but no local templates (fresh device / wiped cache), re-derive templates and
+  // fill today's missing slots WITHOUT clobbering existing/synced logs. No-op if
+  // templates already exist. Run after meal_logs are pulled.
+  hydrateActivePlanIfNeeded: () => void;
   // Snapshots current templates[] into a MealPlan and pushes onto savedPlans.
   saveCurrentPlanAs: (name: string) => MealPlan;
   renameSavedPlan: (id: string, name: string) => void;

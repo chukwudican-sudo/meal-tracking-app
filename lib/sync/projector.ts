@@ -6,7 +6,7 @@
 // cheap; per-record content hashes avoid spurious writes.
 
 import { useMealStore } from '@/store/useMealStore';
-import type { AppStore, GroceryItem, MealEntry, SavedRecipe, ServerSnapshot } from '@/store/types';
+import type { AppStore, GroceryItem, MealEntry, MealPlan, SavedRecipe, ServerSnapshot } from '@/store/types';
 import { outbox } from './outbox';
 import { entityKey } from './types';
 import { sectionToTable } from './mappers';
@@ -16,6 +16,7 @@ interface MealSnap { hash: string; date: string; entry: MealEntry; slotName: str
 interface WeightSnap { hash: string }
 interface SavedSnap { hash: string; sr: SavedRecipe }
 interface GrocerySnap { hash: string; table: SyncTable; name: string; item: GroceryItem }
+interface PlanSnap { hash: string; plan: MealPlan; isActive: boolean }
 
 function slotNameFor(state: AppStore, entry: MealEntry): string | null {
   if (!entry.slotId) return entry.category ?? null;
@@ -40,6 +41,13 @@ function savedHash(sr: SavedRecipe): string {
 }
 function groceryHash(item: GroceryItem): string {
   return JSON.stringify([item.name, item.section, item.category, item.struckThrough]);
+}
+function planHash(plan: MealPlan, isActive: boolean): string {
+  return JSON.stringify([
+    plan.name,
+    isActive, // an activation flip must re-push so is_active moves server-side
+    plan.days.map(day => (day ?? []).map(m => [m.slotName, m.time, m.recipeId, m.recipeName])),
+  ]);
 }
 function usersHash(state: AppStore): string {
   const p = state.profile;
@@ -80,6 +88,17 @@ function buildGrocery(state: AppStore): Map<string, GrocerySnap> {
   }
   return map;
 }
+function buildPlans(state: AppStore): Map<string, PlanSnap> {
+  const map = new Map<string, PlanSnap>();
+  const activeName = state.profile.activePlanName;
+  for (const plan of state.savedPlans) {
+    // Only user plans sync; the premade catalog is read-only seed data.
+    if (plan.source === 'premade') continue;
+    const isActive = !!activeName && plan.name === activeName;
+    map.set(plan.id, { hash: planHash(plan, isActive), plan, isActive });
+  }
+  return map;
+}
 
 class Projector {
   private unsub: (() => void) | null = null;
@@ -89,11 +108,14 @@ class Projector {
   private prevGroceryRef: unknown = null;
   private prevProfileRef: unknown = null;
   private prevGoalsRef: unknown = null;
+  private prevSavedPlansRef: unknown = null;
+  private prevActivePlanName: string | undefined = undefined;
 
   private meals = new Map<string, MealSnap>();
   private weights = new Map<string, WeightSnap>();
   private saved = new Map<string, SavedSnap>();
   private grocery = new Map<string, GrocerySnap>();
+  private plans = new Map<string, PlanSnap>();
   private usersHashValue = '';
 
   start(): void {
@@ -116,6 +138,7 @@ class Projector {
     this.weights = buildWeights(s);
     this.saved = buildSaved(s);
     this.grocery = buildGrocery(s);
+    this.plans = buildPlans(s);
     this.usersHashValue = usersHash(s);
     this.prevLogsRef = s.logs;
     this.prevWeightRef = s.weightLog;
@@ -123,6 +146,8 @@ class Projector {
     this.prevGroceryRef = s.grocery;
     this.prevProfileRef = s.profile;
     this.prevGoalsRef = s.goals;
+    this.prevSavedPlansRef = s.savedPlans;
+    this.prevActivePlanName = s.profile.activePlanName;
   }
 
   // Enqueue upserts for the entire current dataset (first-time upload).
@@ -132,6 +157,7 @@ class Projector {
     buildWeights(s).forEach((_snap, date) => this.upsertWeight(date));
     buildSaved(s).forEach((snap) => this.upsertSaved(snap.sr));
     buildGrocery(s).forEach((snap, key) => this.upsertGrocery(key, snap));
+    buildPlans(s).forEach((snap) => this.upsertPlan(snap));
     this.upsertUsers();
     this.rebaseline();
   }
@@ -166,6 +192,11 @@ class Projector {
       if (!serverGroceryKeys.has(key)) this.upsertGrocery(key, snap);
     });
 
+    const serverPlanIds = new Set((snapshot.plans ?? []).map(pl => pl.id));
+    buildPlans(s).forEach(snap => {
+      if (!serverPlanIds.has(snap.plan.id)) this.upsertPlan(snap);
+    });
+
     this.rebaseline();
   }
 
@@ -187,6 +218,13 @@ class Projector {
     if (state.grocery !== this.prevGroceryRef) {
       this.diffGrocery(state);
       this.prevGroceryRef = state.grocery;
+    }
+    // Plans change when the catalog changes OR the active pointer flips (the
+    // latter lives on profile.activePlanName, so gate on its value not the ref).
+    if (state.savedPlans !== this.prevSavedPlansRef || state.profile.activePlanName !== this.prevActivePlanName) {
+      this.diffPlans(state);
+      this.prevSavedPlansRef = state.savedPlans;
+      this.prevActivePlanName = state.profile.activePlanName;
     }
     if (state.profile !== this.prevProfileRef || state.goals !== this.prevGoalsRef) {
       const h = usersHash(state);
@@ -240,6 +278,19 @@ class Projector {
     this.saved = curr;
   }
 
+  private diffPlans(state: AppStore): void {
+    const curr = buildPlans(state);
+    curr.forEach((snap, id) => {
+      if (this.plans.get(id)?.hash !== snap.hash) this.upsertPlan(snap);
+    });
+    this.plans.forEach((snap, id) => {
+      if (!curr.has(id)) {
+        outbox.enqueue({ table: 'plans', op: 'delete', entityKey: entityKey.plan(id), payload: { plan: snap.plan } });
+      }
+    });
+    this.plans = curr;
+  }
+
   private diffGrocery(state: AppStore): void {
     const curr = buildGrocery(state);
     curr.forEach((snap, key) => {
@@ -280,6 +331,12 @@ class Projector {
   }
   private upsertGrocery(key: string, snap: GrocerySnap): void {
     outbox.enqueue({ table: snap.table, op: 'upsert', entityKey: entityKey.grocery(snap.table, key), payload: { item: snap.item } });
+  }
+  private upsertPlan(snap: PlanSnap): void {
+    outbox.enqueue({
+      table: 'plans', op: 'upsert', entityKey: entityKey.plan(snap.plan.id),
+      payload: { plan: snap.plan, isActive: snap.isActive },
+    });
   }
   private upsertUsers(): void {
     const s = useMealStore.getState();

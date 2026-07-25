@@ -8,14 +8,21 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react';
+import { AppState } from 'react-native';
 import * as Linking from 'expo-linking';
 import type { Session, User } from '@supabase/supabase-js';
 
 import { supabase } from './supabase';
 import { useMealStore } from '@/store/useMealStore';
+import {
+  clearPendingPassword,
+  getPendingCredentials,
+  savePendingPassword,
+} from './pendingCredentials';
 
 // Deep links Supabase sends the user back to. These must be added to the
 // project's Auth "Redirect URLs" allow-list in the Supabase dashboard.
@@ -40,6 +47,11 @@ export interface AuthResult {
   rateLimited?: boolean;
   // Seconds the caller should wait before retrying, when known.
   retryAfterSeconds?: number;
+  // True when a sign-up targeted an email that already has an account. With
+  // email confirmation on, Supabase hides this to prevent enumeration, so we
+  // detect it ourselves — the caller should send the user to log in rather than
+  // treat it as a new, unverified account.
+  alreadyRegistered?: boolean;
 }
 
 export async function signUpWithEmail(email: string, password: string): Promise<AuthResult> {
@@ -51,6 +63,21 @@ export async function signUpWithEmail(email: string, password: string): Promise<
     options: { emailRedirectTo: 'mealapp://auth/callback' },
   });
   if (error) return { error: error.message };
+
+  // Enumeration protection: signing up with an already-registered email while
+  // "Confirm email" is on returns a user with an empty `identities` array and no
+  // session (rather than an error). Treat that as "already registered" and send
+  // the user to log in — do NOT arm the verify banner, or a returning, already
+  // confirmed account would be pushed back through onboarding + a spurious
+  // "verify your email" prompt.
+  const alreadyRegistered = !data.session && (data.user?.identities?.length ?? 0) === 0;
+  if (alreadyRegistered) {
+    return {
+      error: 'An account with this email already exists. Please log in.',
+      alreadyRegistered: true,
+    };
+  }
+
   // With "Confirm email" on, there's a user but no session until verification.
   const needsVerification = !data.session && !!data.user;
   if (needsVerification) {
@@ -60,6 +87,9 @@ export async function signUpWithEmail(email: string, password: string): Promise<
       email: email.trim(),
       pendingEmailVerification: true,
     });
+    // Keep the password briefly + securely so we can silently re-authenticate
+    // (and clear the banner) once the user taps the emailed confirmation link.
+    void savePendingPassword(email.trim(), password);
   }
   return { error: null, needsVerification };
 }
@@ -198,11 +228,42 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   // Once we observe a confirmed session, the account is verified — clear the
-  // pending flag permanently so the banner never returns.
+  // pending flag permanently so the banner never returns, and drop the stored
+  // signup password (it exists only to bridge the pre-verification window).
   useEffect(() => {
     if (isConfirmed(session) && pendingEmailVerification) {
       useMealStore.getState().updateProfile({ pendingEmailVerification: false });
+      void clearPendingPassword();
     }
+  }, [session, pendingEmailVerification]);
+
+  // Silent re-auth on foreground: while the verify banner is showing, the user
+  // may have just tapped the emailed confirmation link in their browser. Expo Go
+  // can't reliably deep-link back into an exact auth state, so when the app
+  // returns to the foreground we quietly retry sign-in with the stored signup
+  // credentials. If the email is now confirmed a session is issued (which flips
+  // isConfirmed -> clears the banner + password above); if not, sign-in fails
+  // with "Email not confirmed" and we simply leave the banner as-is.
+  const lastSilentAttemptRef = useRef(0);
+  useEffect(() => {
+    const trySilentReauth = async () => {
+      if (!pendingEmailVerification || isConfirmed(session)) return;
+      const now = Date.now();
+      if (now - lastSilentAttemptRef.current < 15_000) return; // throttle
+      lastSilentAttemptRef.current = now;
+      const creds = await getPendingCredentials();
+      if (!creds) return;
+      // On success, onAuthStateChange updates `session`; failures (email still
+      // unconfirmed) are expected and intentionally swallowed.
+      await supabase.auth.signInWithPassword({ email: creds.email, password: creds.password });
+    };
+
+    const sub = AppState.addEventListener('change', s => {
+      if (s === 'active') void trySilentReauth();
+    });
+    // Also attempt once now (covers the app already being foregrounded).
+    void trySilentReauth();
+    return () => sub.remove();
   }, [session, pendingEmailVerification]);
 
   const value = useMemo<AuthContextValue>(

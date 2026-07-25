@@ -31,9 +31,17 @@ class Outbox {
   private userId: string | null = null;
   private items: OutboxItem[] = [];
   private persistTimer: ReturnType<typeof setTimeout> | null = null;
+  // Notified whenever items are enqueued outside a flush cycle, so the engine
+  // can promptly schedule a drain + refresh its status snapshot.
+  private changeListener: (() => void) | null = null;
 
   get isActive(): boolean {
     return this.userId != null;
+  }
+
+  // Register a single listener (the engine) for enqueue notifications.
+  setChangeListener(cb: () => void): void {
+    this.changeListener = cb;
   }
 
   async activate(userId: string): Promise<void> {
@@ -43,6 +51,12 @@ class Outbox {
       this.items = raw ? (JSON.parse(raw) as OutboxItem[]) : [];
     } catch {
       this.items = [];
+    }
+    // Backfill enqueuedAt for items persisted before the field existed, giving
+    // them a fresh "stuck" window rather than instantly appearing overdue.
+    const now = Date.now();
+    for (const it of this.items) {
+      if (it.enqueuedAt == null) it.enqueuedAt = now;
     }
     this.purgeUnsyncable();
   }
@@ -70,10 +84,12 @@ class Outbox {
 
   enqueue(input: EnqueueInput): void {
     if (!this.userId) return; // pre-auth writes are captured by initial reconcile
-    // Coalesce: drop any pending (non-dead-letter) op for the same record.
-    this.items = this.items.filter(
-      it => !(it.entityKey === input.entityKey && !it.deadLetter),
-    );
+    // Coalesce: drop any existing op for the same record — including a
+    // dead-lettered one. A fresh edit fully supersedes the prior attempt, so the
+    // new item (attempts: 0) replaces it rather than piling up alongside a
+    // permanently-parked duplicate, which otherwise lets the queue grow unbounded.
+    this.items = this.items.filter(it => it.entityKey !== input.entityKey);
+    const now = Date.now();
     this.items.push({
       id: newId(),
       table: input.table,
@@ -81,9 +97,11 @@ class Outbox {
       entityKey: input.entityKey,
       payload: input.payload,
       attempts: 0,
-      nextAttemptAt: Date.now(),
+      nextAttemptAt: now,
+      enqueuedAt: now,
     });
     this.schedulePersist();
+    this.changeListener?.();
   }
 
   // Items eligible to send right now (not dead-lettered, backoff elapsed).
@@ -113,6 +131,24 @@ class Outbox {
     }
     this.schedulePersist();
     return it.deadLetter === true;
+  }
+
+  // Clear any pending exponential backoff so queued (non-dead-lettered) items
+  // are immediately eligible again. Called the moment connectivity returns: a
+  // reconnect invalidates the "keep waiting" premise of a backoff that was set
+  // while the network was flaky/absent, so the first retry after reconnect
+  // shouldn't be stalled by a stale timer. Returns how many were reset.
+  resetBackoff(): number {
+    const now = Date.now();
+    let n = 0;
+    for (const it of this.items) {
+      if (!it.deadLetter && it.nextAttemptAt > now) {
+        it.nextAttemptAt = now;
+        n += 1;
+      }
+    }
+    if (n > 0) this.schedulePersist();
+    return n;
   }
 
   // Give dead-lettered items another chance — e.g. on app launch/login, after a
@@ -153,6 +189,38 @@ class Outbox {
       else pending += 1;
     }
     return { pending, deadLetter };
+  }
+
+  // Soonest time any pending (non-dead-letter) item becomes eligible to retry,
+  // or null if nothing is pending. Lets the engine wake up exactly when the
+  // shortest backoff elapses instead of on a flat heartbeat.
+  earliestNextAttempt(): number | null {
+    let earliest: number | null = null;
+    for (const it of this.items) {
+      if (it.deadLetter) continue;
+      if (earliest === null || it.nextAttemptAt < earliest) earliest = it.nextAttemptAt;
+    }
+    return earliest;
+  }
+
+  // Whether any pending item has been queued longer than `thresholdMs` ("stuck"
+  // long enough to be worth surfacing), plus the soonest timestamp at which a
+  // not-yet-stuck item would cross that threshold (so the engine can schedule a
+  // single re-evaluation). `nextCrossAt` is null when nothing else can flip.
+  stuckState(now: number, thresholdMs: number): { stuck: boolean; nextCrossAt: number | null } {
+    let stuck = false;
+    let nextCrossAt: number | null = null;
+    for (const it of this.items) {
+      if (it.deadLetter) continue;
+      const queuedAt = it.enqueuedAt ?? now;
+      if (now - queuedAt >= thresholdMs) {
+        stuck = true;
+      } else {
+        const crossAt = queuedAt + thresholdMs;
+        if (nextCrossAt === null || crossAt < nextCrossAt) nextCrossAt = crossAt;
+      }
+    }
+    return { stuck, nextCrossAt };
   }
 
   async clear(userId: string): Promise<void> {

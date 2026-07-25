@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Image,
   KeyboardAvoidingView,
   Modal,
@@ -21,9 +22,12 @@ import {
 } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { router } from 'expo-router';
 
 import { COLORS } from '@/constants/theme';
-import { aiClient, isStubAI } from '@/ai/aiClient';
+import { aiClient } from '@/ai/aiClient';
+import { AIError } from '@/ai/aiEdgeClient';
+import { scanMeal } from '@/ai/scanMeal';
 import type { DayContext, MealDraft } from '@/ai/types';
 import type { UserGoals } from '@/store/types';
 import { rateMeal } from '@/utils/mealRating';
@@ -120,6 +124,41 @@ export function ScanTab({ context, onDraftReady }: Props) {
 
   // ─── Capture handlers ─────────────────────────────────────────────────
 
+  // Shared handler for scan/upload failures. Premium gate gets an Alert with a
+  // paywall CTA (matching AITab); everything else is a lightweight toast, since
+  // the camera view has no inline note slot. ScanError subclasses AIError.
+  function handleScanError(e: unknown) {
+    console.warn('Scan failed:', e);
+    if (e instanceof AIError && e.code === 'not_premium') {
+      Alert.alert(
+        'Premium feature',
+        'AI meal scanning uses AI to estimate nutrition from a photo. Upgrade to Premium to use it.',
+        [
+          { text: 'Not now', style: 'cancel' },
+          {
+            text: 'Upgrade',
+            onPress: () =>
+              router.push({ pathname: '/settings/coming-soon', params: { title: 'Subscription' } }),
+          },
+        ],
+      );
+      return;
+    }
+    if (e instanceof AIError && e.code === 'rate_limited') {
+      showToast(e.message || "You've hit the hourly limit for AI scans. Try again later.");
+      return;
+    }
+    if (e instanceof AIError && e.code === 'unauthorized') {
+      showToast('Your session expired. Please sign in again.');
+      return;
+    }
+    if (e instanceof AIError && e.code === 'ai_failed') {
+      showToast(e.message || 'The AI scanner is temporarily unavailable. Please try again.');
+      return;
+    }
+    showToast('Could not scan this meal. Try again.');
+  }
+
   async function handleCapture() {
     if (busy) return;
     if (mode === 'upload') return handleUpload();
@@ -133,15 +172,15 @@ export function ScanTab({ context, onDraftReady }: Props) {
         quality: 0.5,
       });
       if (!shot?.uri) throw new Error('Could not take photo');
-      const dataUri = shot.base64 ? `data:image/jpeg;base64,${shot.base64}` : shot.uri;
-      const result = await aiClient.parseMeal({ imageUri: dataUri }, context);
+      if (!shot.base64) throw new Error('Could not read photo data');
+      const result = await scanMeal(shot.base64, 'image/jpeg');
       setCapturedUri(shot.uri);
       setDraft(result);
       setServings(1);
       setBookmarked(false);
       setScanState('result');
     } catch (e) {
-      console.warn('Scan failed:', e);
+      handleScanError(e);
     } finally {
       setBusy(false);
     }
@@ -158,15 +197,15 @@ export function ScanTab({ context, onDraftReady }: Props) {
       });
       if (result.canceled || !result.assets?.[0]) return;
       const asset = result.assets[0];
-      const dataUri = asset.base64 ? `data:image/jpeg;base64,${asset.base64}` : asset.uri;
-      const parsed = await aiClient.parseMeal({ imageUri: dataUri }, context);
+      if (!asset.base64) throw new Error('Could not read image data');
+      const parsed = await scanMeal(asset.base64, asset.mimeType ?? 'image/jpeg');
       setCapturedUri(asset.uri);
       setDraft(parsed);
       setServings(1);
       setBookmarked(false);
       setScanState('result');
     } catch (e) {
-      console.warn('Upload failed:', e);
+      handleScanError(e);
     } finally {
       setBusy(false);
     }
@@ -278,12 +317,6 @@ export function ScanTab({ context, onDraftReady }: Props) {
             <View style={[styles.corner, styles.cornerBL]} />
             <View style={[styles.corner, styles.cornerBR]} />
           </View>
-
-          {isStubAI && (
-            <View style={styles.stubBadge}>
-              <Text style={styles.stubBadgeText}>Stub mode (no API key)</Text>
-            </View>
-          )}
 
           {busy && (
             <View style={styles.busyOverlay}>
@@ -589,6 +622,11 @@ function nowHHMM(): string {
 
 // ─── Styles ─────────────────────────────────────────────────────────────────
 
+// Opaque surface for sheets that overlay the captured photo. COLORS.card is a
+// translucent white (rgba(...,0.04)) meant to sit on the opaque app bg; over a
+// photo it lets the image bleed through, so these surfaces need a solid color.
+const OPAQUE_SHEET_BG = '#1C1C1C';
+
 const styles = StyleSheet.create({
   full: { flex: 1, backgroundColor: '#000' },
   camera: { flex: 1, justifyContent: 'flex-end' },
@@ -598,11 +636,6 @@ const styles = StyleSheet.create({
   cornerTR: { top: 0, right: 0, borderRightWidth: 3, borderTopWidth: 3, borderTopRightRadius: 8 },
   cornerBL: { bottom: 0, left: 0, borderLeftWidth: 3, borderBottomWidth: 3, borderBottomLeftRadius: 8 },
   cornerBR: { bottom: 0, right: 0, borderRightWidth: 3, borderBottomWidth: 3, borderBottomRightRadius: 8 },
-  stubBadge: {
-    position: 'absolute', top: 14, alignSelf: 'center',
-    backgroundColor: 'rgba(0,0,0,0.6)', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12,
-  },
-  stubBadgeText: { color: '#bbb', fontSize: 11 },
   busyOverlay: {
     ...StyleSheet.absoluteFillObject,
     alignItems: 'center', justifyContent: 'center',
@@ -656,7 +689,7 @@ const styles = StyleSheet.create({
   sheet: {
     position: 'absolute', left: 0, right: 0, bottom: 0,
     height: '60%',
-    backgroundColor: COLORS.card,
+    backgroundColor: OPAQUE_SHEET_BG,
     borderTopLeftRadius: 22, borderTopRightRadius: 22,
     overflow: 'hidden',
   },
@@ -730,7 +763,7 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   fixCard: {
-    backgroundColor: COLORS.card,
+    backgroundColor: OPAQUE_SHEET_BG,
     borderTopLeftRadius: 22, borderTopRightRadius: 22,
     paddingHorizontal: 18,
     paddingTop: 8,

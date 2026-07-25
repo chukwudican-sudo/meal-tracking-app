@@ -30,7 +30,7 @@ import {
   type OnboardingGoal,
 } from '@/constants/onboardingCalc';
 import { COLORS } from '@/constants/theme';
-import { signInWithEmail, signUpWithEmail } from '@/lib/auth';
+import { signInWithEmail, signUpWithEmail, useAuth } from '@/lib/auth';
 import { engine } from '@/lib/sync/engine';
 import type { ActivityLevel, GoalType, NutrientKey } from '@/store/types';
 import { useMealStore } from '@/store/useMealStore';
@@ -213,11 +213,18 @@ export default function OnboardingScreen() {
   // app showing "Add your name" and blank tabs. Drive the reconcile ourselves
   // (rather than passively waiting for SyncProvider's listener to notice the
   // new session) so there's no race and a real failure reason is available.
+  // The success tail of a login: mark the local-only onboardingComplete flag and
+  // enter the app. Extracted so LoginView can also call it if the account data
+  // lands *after* a soft-timeout already surfaced an error (see onLateSuccess).
+  const finishLogin = () => {
+    updateProfile({ onboardingComplete: true });
+    router.replace('/(tabs)');
+  };
+
   const loginComplete = async (userId: string): Promise<{ ok: true } | { ok: false; error: string }> => {
     const result = await confirmLoginData(userId);
     if (!result.ok) return result;
-    updateProfile({ onboardingComplete: true });
-    router.replace('/(tabs)');
+    finishLogin();
     return { ok: true };
   };
 
@@ -229,7 +236,7 @@ export default function OnboardingScreen() {
   const noBack = stepId === 'welcome' || stepId === 'processing' || stepId === 'accountConfirm' || stepId === 'setupLoading';
 
   if (mode === 'login') {
-    return <LoginView onBack={() => setMode('flow')} onDone={loginComplete} />;
+    return <LoginView onBack={() => setMode('flow')} onDone={loginComplete} onLateSuccess={finishLogin} />;
   }
 
   return (
@@ -503,6 +510,7 @@ export default function OnboardingScreen() {
             email={answers.email}
             onEmailChange={e => patch({ email: e })}
             onContinue={() => go(1)}
+            onExistingAccount={() => setMode('login')}
           />
         );
 
@@ -760,13 +768,14 @@ function comingSoon(provider: string) {
 }
 
 function AccountStep({
-  appName, email, onEmailChange, onContinue,
-}: { appName: string; email: string; onEmailChange: (e: string) => void; onContinue: () => void }) {
+  appName, email, onEmailChange, onContinue, onExistingAccount,
+}: { appName: string; email: string; onEmailChange: (e: string) => void; onContinue: () => void; onExistingAccount: () => void }) {
   const [emailForm, setEmailForm] = useState(false);
   const [pw, setPw] = useState('');
   const [pw2, setPw2] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [existingAccount, setExistingAccount] = useState(false);
   const [verificationSent, setVerificationSent] = useState(false);
   const valid = email.includes('@') && pw.length >= 6 && pw === pw2;
 
@@ -774,8 +783,14 @@ function AccountStep({
     if (!valid || loading) return;
     setLoading(true);
     setError(null);
-    const { error: err, needsVerification } = await signUpWithEmail(email, pw);
+    const { error: err, needsVerification, alreadyRegistered } = await signUpWithEmail(email, pw);
     setLoading(false);
+    if (alreadyRegistered) {
+      // Don't re-arm onboarding/verify banner for an existing account — offer login.
+      setExistingAccount(true);
+      setError(err);
+      return;
+    }
     if (err) {
       setError(err);
       return;
@@ -818,17 +833,22 @@ function AccountStep({
       {emailForm ? (
         <View style={{ marginTop: 16, gap: 10 }}>
           <TextInput style={styles.input} placeholder="Email" placeholderTextColor={COLORS.textMuted}
-            autoCapitalize="none" keyboardType="email-address" autoComplete="email" value={email} onChangeText={onEmailChange} />
+            autoCapitalize="none" keyboardType="email-address" autoComplete="email" value={email}
+            onChangeText={e => { setExistingAccount(false); onEmailChange(e); }} />
           <TextInput style={styles.input} placeholder="Password (min 6 characters)" placeholderTextColor={COLORS.textMuted}
             secureTextEntry value={pw} onChangeText={setPw} />
           <TextInput style={styles.input} placeholder="Confirm password" placeholderTextColor={COLORS.textMuted}
             secureTextEntry value={pw2} onChangeText={setPw2} />
           {error ? <Text style={styles.errorText}>{error}</Text> : null}
-          <PrimaryButton
-            label={loading ? 'Creating account…' : 'Create Account'}
-            disabled={!valid || loading}
-            onPress={handleCreate}
-          />
+          {existingAccount ? (
+            <PrimaryButton label="Log in instead" onPress={onExistingAccount} />
+          ) : (
+            <PrimaryButton
+              label={loading ? 'Creating account…' : 'Create Account'}
+              disabled={!valid || loading}
+              onPress={handleCreate}
+            />
+          )}
         </View>
       ) : null}
 
@@ -971,17 +991,42 @@ function ActivationStep({ onBuild, onLater }: { onBuild: () => void; onLater: ()
 function LoginView({
   onBack,
   onDone,
+  onLateSuccess,
 }: {
   onBack: () => void;
   onDone: (userId: string) => Promise<{ ok: true } | { ok: false; error: string }>;
+  onLateSuccess: () => void;
 }) {
   const [email, setEmail] = useState('');
   const [pw, setPw] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const { session } = useAuth();
+  const hasProfile = useMealStore(s => !!s.profile.firstName);
+  const attemptedRef = useRef(false);
+  const finishedRef = useRef(false);
+
+  // Recover from a "stuck" error. confirmLoginData uses a soft timeout, so it can
+  // return a failure (e.g. "couldn't load your account data") while the in-flight
+  // reconcile is still running and then succeeds moments later. When that late
+  // success lands — the session is valid AND the profile is now restored — clear
+  // the (now-false) error and enter the app instead of stranding the user on it.
+  // Gated on an actual login attempt so it never hijacks a user who merely opened
+  // this screen while already signed in, and fires at most once.
+  useEffect(() => {
+    if (!attemptedRef.current || finishedRef.current) return;
+    if (error && session && hasProfile) {
+      finishedRef.current = true;
+      setError(null);
+      setLoading(false);
+      onLateSuccess();
+    }
+  }, [error, session, hasProfile, onLateSuccess]);
+
   const handleLogin = async () => {
     if (!email.includes('@') || pw.length < 1 || loading) return;
+    attemptedRef.current = true;
     setLoading(true);
     setError(null);
     const { error: err, userId } = await signInWithEmail(email, pw);
@@ -994,7 +1039,9 @@ function LoginView({
     // navigates into the app on success; on failure the account had no data to
     // restore, so we stay here and surface the real reason rather than empty tabs.
     const result = await onDone(userId);
-    if (!result.ok) {
+    if (result.ok) {
+      finishedRef.current = true;
+    } else {
       setLoading(false);
       setError(result.error);
     }
@@ -1028,33 +1075,78 @@ function LoginView({
           onPress={handleLogin}
         />
       </View>
+
+      {loading ? (
+        <View style={styles.loginOverlay} pointerEvents="auto">
+          <ActivityIndicator size="large" color={COLORS.green} />
+          <Text style={styles.loginOverlayText}>Signing you in…</Text>
+        </View>
+      ) : null}
     </Screen>
   );
 }
 
 // ─── Login data gate ───────────────────────────────────────────────────────────
 
-// After a returning user signs in, drive the sync engine's reconcile directly
-// (rather than passively waiting for SyncProvider's auth listener to notice the
-// new session and do it) — that passive approach raced the listener: by the time
-// a subscriber attached, the reconcile could already have started AND finished,
-// so no transition was ever observed and the caller just hung until a timeout,
-// showing a generic message no matter what actually happened. engine.onSignIn()
-// is idempotent (SyncProvider's own effect will no-op into a flush() once it
-// sees the same userId), so calling it here directly is safe.
+// After a returning user signs in, kick off the sync engine's reconcile and wait
+// for the account data to actually land. The reliable success signal is the
+// pulled profile appearing in the store — watched via a store subscription —
+// NOT engine.onSignIn() resolving. Depending on that promise was fragile: in
+// some login races (a concurrent SyncProvider reconcile, or a tunnel-triggered
+// JS reload orphaning the tracked promise) it stayed pending well past the pull,
+// tripping the 20s timeout even though the pull had finished in ~1.5s and the
+// profile was already in the store. Reasons we resolve:
+//   • 'restored' — profile.firstName is set (the pull merged real data in)
+//   • 'empty'    — the reconcile finished but no profile came back (new/empty acct)
+//   • 'timeout'  — neither happened within the bound (hung network)
+const LOGIN_PULL_TIMEOUT_MS = 20_000;
+
 async function confirmLoginData(
   userId: string,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  await engine.onSignIn(userId);
+  const hasProfile = () => !!useMealStore.getState().profile.firstName;
 
-  const hasProfile = !!useMealStore.getState().profile.firstName;
-  if (hasProfile) return { ok: true };
+  // Kick the reconcile. We deliberately don't gate success on this promise
+  // resolving (see note above); it's only used as a fast "empty account" signal.
+  const reconcileDone = engine.onSignIn(userId).catch(() => {});
 
-  const { lastError } = engine.getSnapshot();
-  const reason = lastError ?? 'the pull completed but no profile came back for this account';
+  if (hasProfile()) return { ok: true };
+
+  const outcome = await new Promise<'restored' | 'empty' | 'timeout'>(resolve => {
+    let settled = false;
+    const finish = (v: 'restored' | 'empty' | 'timeout') => {
+      if (settled) return;
+      settled = true;
+      unsub();
+      clearTimeout(timer);
+      resolve(v);
+    };
+    // Succeed the instant the pulled profile lands in the store.
+    const unsub = useMealStore.subscribe(s => {
+      if (s.profile.firstName) finish('restored');
+    });
+    const timer = setTimeout(() => finish('timeout'), LOGIN_PULL_TIMEOUT_MS);
+    // Guard the tiny window between the initial check and subscribing, in case
+    // the snapshot landed in between (subscribe only fires on future updates).
+    if (hasProfile()) finish('restored');
+    // If the reconcile completes and there's still no profile, fail fast rather
+    // than waiting out the full timeout — this is a genuinely empty account.
+    void reconcileDone.then(() => finish(hasProfile() ? 'restored' : 'empty'));
+  });
+
+  if (outcome === 'restored') return { ok: true };
+
+  if (outcome === 'empty') {
+    const { lastError } = engine.getSnapshot();
+    const reason = lastError ?? 'the pull completed but no profile came back for this account';
+    // eslint-disable-next-line no-console
+    console.warn(`[login] no profile restored for ${userId}: ${reason}`);
+    return { ok: false, error: reason };
+  }
+
   // eslint-disable-next-line no-console
-  console.warn(`[login] no profile restored for ${userId}: ${reason}`);
-  return { ok: false, error: reason };
+  console.warn(`[login] account pull timed out for ${userId}`);
+  return { ok: false, error: "We couldn't load your account data. Check your connection and try again." };
 }
 
 // ─── Nutrient label helpers ────────────────────────────────────────────────────
@@ -1091,6 +1183,14 @@ const styles = StyleSheet.create({
   errorText: { color: COLORS.red, fontSize: 13, marginTop: 2 },
   forgotLink: { alignSelf: 'flex-start', paddingVertical: 4 },
   forgotLinkText: { color: COLORS.green, fontSize: 14, fontWeight: '600' },
+  loginOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: COLORS.bg,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 14,
+  },
+  loginOverlayText: { color: COLORS.textSecondary, fontSize: 15, fontWeight: '600' },
 
   card: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
