@@ -40,10 +40,12 @@ export interface CallGeminiJSONOptions {
   timeoutMs?: number;
   /** Log line prefix, e.g. '[estimate-nutrition]', so logs are attributable per function. */
   logPrefix: string;
-  /** Optional inline image (bare base64, no data: prefix) for vision requests. */
-  imageBase64?: string;
-  /** MIME type for imageBase64 (e.g. 'image/jpeg'). Required when imageBase64 is set. */
-  imageMimeType?: string;
+  /**
+   * Optional inline images (bare base64, no data: prefix) for vision requests.
+   * One or more; each is sent as its own inlineData part, in order, before the
+   * text prompt.
+   */
+  images?: { base64: string; mimeType: string }[];
 }
 
 function sleep(ms: number): Promise<void> {
@@ -60,14 +62,14 @@ export async function callGeminiJSON(opts: CallGeminiJSONOptions): Promise<unkno
     temperature = 0.3,
     timeoutMs = DEFAULT_TIMEOUT_MS,
     logPrefix,
-    imageBase64,
-    imageMimeType,
+    images,
   } = opts;
 
-  // Image first, then text — per Gemini's guidance for single-image prompts.
+  // Images first, then text — per Gemini's guidance for image prompts. Each
+  // image is its own inlineData part; a single-image caller just passes one.
   const parts: Array<Record<string, unknown>> = [];
-  if (imageBase64) {
-    parts.push({ inlineData: { mimeType: imageMimeType ?? 'image/jpeg', data: imageBase64 } });
+  for (const img of images ?? []) {
+    parts.push({ inlineData: { mimeType: img.mimeType, data: img.base64 } });
   }
   parts.push({ text: userText });
 

@@ -17,7 +17,7 @@
 import { handlePreflight } from '../_shared/cors.ts';
 import { errorResponse, jsonResponse } from '../_shared/errors.ts';
 import { createAdminClient, getAuthedUser } from '../_shared/auth.ts';
-import { isEntitled } from '../_shared/entitlement.ts';
+import { consumeFreeScan, resolveEntitlement } from '../_shared/entitlement.ts';
 import { isRateLimited, logAiUsage } from '../_shared/rateLimit.ts';
 import { callGeminiJSON, GeminiTimeoutError } from '../_shared/gemini.ts';
 
@@ -197,31 +197,44 @@ Deno.serve(async (req: Request) => {
   }
   if (!draft) return errorResponse('invalid_input', 'A valid current meal is required', 400);
 
-  // Load the authoritative profile row (never trust client-sent entitlement).
-  const { data: profileRow, error: profileErr } = await admin
-    .from('users')
-    .select('subscription_status, dietary_preferences, allergies')
-    .eq('id', user.id)
-    .single();
+  // Load the authoritative profile row (never trust client-sent entitlement)
+  // and check the rate limit together — both only depend on user.id, so
+  // there's no reason to pay for two sequential DB round-trips.
+  const [profileResult, rateLimitResult] = await Promise.all([
+    admin
+      .from('users')
+      .select('subscription_status, free_scans_remaining, dietary_preferences, allergies')
+      .eq('id', user.id)
+      .single(),
+    isRateLimited(admin, user.id, FUNCTION_NAME, RATE_LIMIT, RATE_WINDOW_MS).catch((e) => {
+      console.error(`${LOG_PREFIX} rate limit check failed:`, e);
+      return null;
+    }),
+  ]);
 
+  const { data: profileRow, error: profileErr } = profileResult;
   if (profileErr || !profileRow) {
     return errorResponse('ai_failed', 'Could not load your profile', 500);
   }
 
   // Entitlement gate — re-checked on every call (a fix is a separate request
-  // from the initial estimate); the app uses this to trigger the paywall.
-  if (!isEntitled(profileRow.subscription_status)) {
-    return errorResponse('not_premium', 'AI corrections are a Premium feature', 402);
+  // from the initial estimate). Subscribers are unlimited; everyone else spends
+  // a free scan (consumed only on success, below). not_premium triggers the
+  // paywall in the app.
+  const entitlement = resolveEntitlement(profileRow.subscription_status, profileRow.free_scans_remaining);
+  if (!entitlement.allowed) {
+    return errorResponse(
+      'not_premium',
+      "You've used all your free AI scans. Upgrade to Premium for unlimited access.",
+      402,
+    );
   }
 
-  let limited: boolean;
-  try {
-    limited = await isRateLimited(admin, user.id, FUNCTION_NAME, RATE_LIMIT, RATE_WINDOW_MS);
-  } catch (e) {
-    console.error(`${LOG_PREFIX} rate limit check failed:`, e);
+  // null means the rate-limit check itself errored (caught above).
+  if (rateLimitResult === null) {
     return errorResponse('ai_failed', 'Could not check usage', 500);
   }
-  if (limited) {
+  if (rateLimitResult) {
     return errorResponse('rate_limited', "You've reached the hourly limit for AI corrections. Try again later.", 429);
   }
 
@@ -251,9 +264,15 @@ Deno.serve(async (req: Request) => {
     return errorResponse('ai_failed', message, 502);
   }
 
-  // Only log a call once it actually succeeded, so our own failures/timeouts
-  // don't burn the user's hourly quota.
-  await logAiUsage(admin, user.id, FUNCTION_NAME);
+  // Only charge the call (rate-limit log + free scan) once it succeeded, so our
+  // own failures/timeouts don't burn the user's quota or free scans.
+  // Usage logging is fire-and-forget bookkeeping — don't block the response on
+  // it. consumeFreeScan stays awaited: it's the atomic guard enforcing the
+  // free-scan limit and must register before we respond.
+  void logAiUsage(admin, user.id, FUNCTION_NAME);
+  if (!entitlement.isSubscriber) {
+    await consumeFreeScan(admin, user.id);
+  }
 
   return jsonResponse(corrected, 200);
 });

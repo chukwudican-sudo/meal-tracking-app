@@ -38,6 +38,14 @@ npx supabase db push
 | `functions/estimate-nutrition` | AI Describe backend. Verifies the caller's session, checks `subscription_status in ('active','trial')` (returns `not_premium` otherwise so the app can trigger the paywall), enforces a 30-calls/hour per-user limit via `ai_usage_log`, then calls Gemini (`gemini-3.6-flash`, held server-side) and returns structured JSON (`meal_name`, `description`, `calories`, `protein`, `carbs`, `fats`, `meal_type`, `health_rating`, `ingredients[]`). |
 | `functions/fix-meal` | AI correction backend. Takes the current meal estimate (`currentDraft`: `meal_name`, `calories`, `protein`, `carbs`, `fats`, `ingredients[]`) plus a free-text `fixText` correction, and returns the fully corrected meal in the same shape — preserving what was already right and only changing what the correction addresses. Same session/premium/rate-limit plumbing as `estimate-nutrition`, on its own independent 30-calls/hour bucket (`function_name = 'fix-meal'`). Text-only for now; the image-capable fix flows (ScanTab, FixResultScreen, MealDetailModal) still use the legacy client. |
 | `functions/scan-meal` | AI photo-scan backend (vision). Takes a meal photo as inline base64 (`imageBase64` + optional `mimeType`, no Supabase Storage) and returns a minimal estimate (`meal_name`, `calories`, `protein`, `carbs`, `fats` — no ingredients). Sends the image inline to Gemini (`gemini-3.6-flash`, multimodal) per request. Same session/premium/rate-limit plumbing, on its own independent 30-calls/hour bucket (`function_name = 'scan-meal'`). Wired to ScanTab's Scan/Upload capture; the image-based re-evaluate flow still uses the legacy client. |
+| `functions/scan-kitchen` | AI kitchen/pantry scan backend (multi-image vision). Takes 1–4 fridge/pantry photos as inline base64 (`images: [{ base64, mimeType }]`, no Supabase Storage) and returns the distinct ingredients visible (`ingredients: [{ name, category }]`), each `category` constrained to the app's 8 `IngredientCategory` values. Sends all images inline to Gemini (`gemini-3.6-flash`, multimodal) per request. Same session/entitlement/rate-limit plumbing, on its own independent 30-calls/hour bucket (`function_name = 'scan-kitchen'`). Wired to `KitchenScanModal`'s capture → review flow. |
+| `functions/suggest-kitchen-recipes` | AI "What Can I Make" backend (text-only). Takes `kitchenItems: string[]` (My Kitchen ingredient names) and returns a batch of ~10 full recipe suggestions (`suggestions: [{ name, category, calories, cookTimeMin, difficulty, protein, carbs, fats, ingredients[], steps[] }]`). Profile context (diet, allergies, goals) is loaded server-side from the `users` row — never trusted from the client. Same session/entitlement (including free scans)/rate-limit plumbing, on its own independent 30-calls/hour bucket (`function_name = 'suggest-kitchen-recipes'`). Wired to the What Can I Make screen. |
+| `functions/generate-meal-suggestions` | AI "Build My Plan" backend (text-only). Takes `mealType` (Breakfast/Lunch/Dinner/Snacks), `count` (1–8), and the Build My Plan onboarding answers (`cuisines[]`, `cookTime`, `loves[]`, `avoid[]`, optional `description`), and returns that many meal suggestions in the same suggestion shape as `suggest-kitchen-recipes` (`category` locked to the requested `mealType`). Profile context (diet, allergies, goals) is loaded server-side from the `users` row — never trusted from the client. Same session/entitlement (including free scans)/rate-limit plumbing, on its own independent 30-calls/hour bucket (`function_name = 'generate-meal-suggestions'`). Wired to Build My Plan's post-build "Describe what you want" swap flow and the Suggest-more pool-exhaustion fallback. Shares its prompt/sanitization helpers with `generate-plan-shortlist` via `_shared/mealPromptHelpers.ts`. |
+| `functions/generate-plan-shortlist` | AI "Build My Plan" shortlist backend (text-only). Takes `mealTypes: string[]` (any subset of Breakfast/Lunch/Dinner/Snacks), the user's picked `proteins[]`/`carbs[]`/`fats[]` (primary personalisation signal), the optional secondary prefs (`cuisines[]`, `cookTime`, `loves[]`, `avoid[]`), and an optional `countPerType` override, and returns `shortlist: { [mealType]: [ suggestion, … ] }` — one array of options per requested type (defaults: mains 4, snacks 2) in the same per-item shape as `generate-meal-suggestions` minus `category`. One Gemini round-trip per call. Profile context (diet, allergies, goals) is loaded server-side from the `users` row — never trusted from the client. Same session/entitlement (including free scans)/rate-limit plumbing, on its own independent 30-calls/hour bucket (`function_name = 'generate-plan-shortlist'`). Wired to Build My Plan's initial shortlist generation and the per-meal-type "Generate more" top-up. |
+| `functions/generate-recipe-concept` | AI Custom Recipe concept backend (text-only, cheap first stage). Takes a freeform `description` (+ optional `mealType`) and returns a lightweight preview concept: `{ name, description, calories, protein, carbs, fats }` — no ingredients/steps. Profile context (diet, allergies, goals) is loaded server-side. **Free-scan-pool gated** like the scan features (same session/entitlement-including-free-scans/rate-limit plumbing, own independent 30-calls/hour bucket `function_name = 'generate-recipe-concept'`), so it's freely triable within the free allowance. Wired to the Custom Recipe screen's Describe → concept + Fix/refine flow. |
+| `functions/generate-recipe-steps` | AI Custom Recipe "unlock full recipe" backend (text-only, second stage). Takes the concept the user already saw (`{ name, description, calories, protein, carbs, fats, mealType? }`) and returns `{ ingredients: [{ name, quantity, unit }], steps: string[] }`, kept consistent with the shown macros. Profile context (diet, allergies) is loaded server-side. **Subscription-only gated** — `isEntitled(subscription_status)` with NO free-scan fallback (non-subscribers always get `not_premium`/402, and this function never consumes a free scan). Still rate-limited on its own 30-calls/hour bucket (`function_name = 'generate-recipe-steps'`). Wired to the Custom Recipe screen's Generate CTA. |
+| `functions/recipe-assistant` | AI in-recipe chat backend (text-only). Takes `{ recipeName, recipeSource: 'ai'\|'premade', ingredients[], steps[], messages: [{ role, text }] }` (full chat history, last entry the new user message) and returns `{ reply }`. Profile context (diet, allergies) is loaded server-side for substitution-safety. **Two entitlement gates, both `not_premium`/402:** (1) active subscription, unconditional (premium-only, no free tier); (2) for `recipeSource === 'ai'` only, a non-empty `steps` array (sequencing proof that `generate-recipe-steps` already ran). **Unlimited/unmetered as a product feature** — never `consumeFreeScan`s and never presented to the user as having any limit. It does still carry the same technical `isRateLimited`/`logAiUsage` backstop as every other function, just on a deliberately generous bucket (60 calls/minute, `function_name = 'recipe-assistant'`) meant only to catch a runaway client bug or scripted abuse — if it ever fires the error message is the same generic wording as any other transient failure. Wired to the Recipe Assistant panel on the recipe detail screen. |
+| `functions/revenuecat-webhook` | **Not an AI function** — keeps `users.subscription_status`/`subscription_provider`/`subscription_expiry_date` in sync with RevenueCat so the two subscription-only gates above (`generate-recipe-steps`, `recipe-assistant`) see the same entitlement the client already unlocked via `lib/purchases.ts`. Grants Pro (`'trial'` or `'active'`, from `period_type`) on `INITIAL_PURCHASE`/`RENEWAL`/`UNCANCELLATION`/`PRODUCT_CHANGE`/`SUBSCRIPTION_EXTENDED`; revokes it (`'expired'`) on `EXPIRATION`; deliberately no-ops on `CANCELLATION`/`BILLING_ISSUE` (access continues until the real `EXPIRATION` event); acks-and-ignores anything else (`TRANSFER`, paywall UI events, future event types). Auth is a **shared secret**, not a Supabase JWT — see "RevenueCat webhook setup" below. `verify_jwt = false` (config.toml). |
 
 ### `_shared/` — reuse this for every future AI function
 
@@ -50,9 +58,9 @@ New AI edge functions should compose these instead of hand-rolling their own:
 | `_shared/cors.ts` | `corsHeaders`, `handlePreflight(req)` for the `OPTIONS` request. |
 | `_shared/errors.ts` | `AIErrorCode` (`invalid_input \| unauthorized \| not_premium \| rate_limited \| ai_failed`), `jsonResponse()`, `errorResponse()`. Keep the client-consumed error contract identical across functions. |
 | `_shared/auth.ts` | `createAdminClient()` (service-role client — needed since `subscription_status` is trigger-protected) and `getAuthedUser(req, admin)`. |
-| `_shared/entitlement.ts` | `isEntitled(status)` — the single source of truth for what counts as "premium" (`active`/`trial`). Change the policy once here, not per function. |
+| `_shared/entitlement.ts` | `isEntitled(status)` — single source of truth for what counts as "premium" (`active`/`trial`). `resolveEntitlement(status, freeScansRemaining)` gates a call: subscribers are unlimited, everyone else is allowed while `free_scans_remaining > 0` (read-only; doesn't consume). `consumeFreeScan(admin, userId)` atomically spends one free scan via the `consume_free_scan` RPC — call it (like `logAiUsage`) only after a successful call, and only for non-subscribers. |
 | `_shared/rateLimit.ts` | `isRateLimited(admin, userId, functionName, limit, windowMs)` + `logAiUsage(...)` against `ai_usage_log`. Log usage only after a successful AI call so failures don't burn quota. |
-| `_shared/gemini.ts` | `callGeminiJSON({ apiKey, model, systemInstruction, userText, responseSchema, logPrefix })` — structured-output Gemini call with a 15s timeout (`GeminiTimeoutError`) and **one** automatic retry after a 500ms delay, scoped to transient upstream rejections only (`GeminiHttpError` with status 429/503). Never retries after a timeout (would double the worst-case wait) or on other status codes (retrying an ambiguous server error risks masking a real request bug). Logs duration on every attempt. Optionally accepts `imageBase64` + `imageMimeType` for vision requests (sent as an inline image part, image-first). |
+| `_shared/gemini.ts` | `callGeminiJSON({ apiKey, model, systemInstruction, userText, responseSchema, logPrefix })` — structured-output Gemini call with a 15s timeout (`GeminiTimeoutError`) and **one** automatic retry after a 500ms delay, scoped to transient upstream rejections only (`GeminiHttpError` with status 429/503). Never retries after a timeout (would double the worst-case wait) or on other status codes (retrying an ambiguous server error risks masking a real request bug). Logs duration on every attempt. Optionally accepts `images: [{ base64, mimeType }]` for vision requests — one or more images, each sent as its own inline part before the text prompt (image-first). |
 
 Each function still owns its own prompt/schema/response-mapping and whatever
 extra profile context it needs (dietary prefs, goals, kitchen items, etc.) —
@@ -72,6 +80,23 @@ npx supabase secrets set GEMINI_API_KEY=<your-gemini-key>
 npx supabase functions deploy estimate-nutrition
 npx supabase functions deploy fix-meal
 npx supabase functions deploy scan-meal
+npx supabase functions deploy scan-kitchen
+npx supabase functions deploy suggest-kitchen-recipes
+npx supabase functions deploy generate-meal-suggestions
+npx supabase functions deploy generate-plan-shortlist
+npx supabase functions deploy generate-recipe-concept
+npx supabase functions deploy generate-recipe-steps
+npx supabase functions deploy recipe-assistant
+
+# Redeploy any function whose shared code changed (they bundle their own copy of
+# `_shared/`): e.g. after the multi-image `_shared/gemini.ts` or free-scan
+# `_shared/entitlement.ts` changes, redeploy all of the above.
+
+# revenuecat-webhook is unrelated to the AI functions/GEMINI_API_KEY above —
+# see "RevenueCat webhook setup" below for its own secret + deploy command.
+
+# 3. Push new migrations (e.g. the consume_free_scan RPC)
+npx supabase db push
 ```
 
 `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are injected by the platform —
@@ -91,6 +116,40 @@ is cosmetic only and unrelated to this gate.
 
 The error contract the client consumes is `{ error: { code, message } }` with
 `code` in `invalid_input | unauthorized | not_premium | rate_limited | ai_failed`.
+
+### RevenueCat webhook setup
+
+`functions/revenuecat-webhook` needs its own secret (separate from
+`GEMINI_API_KEY`) and one manual RevenueCat-dashboard step that can't be done
+from inside this codebase:
+
+```bash
+# 1. Generate a long random string and store it as a function secret. Any
+#    generator works, e.g.:
+openssl rand -hex 32
+
+npx supabase secrets set REVENUECAT_WEBHOOK_SECRET=<the-random-string>
+
+# 2. Deploy (note --no-verify-jwt: RevenueCat sends its own shared secret in
+#    the Authorization header, not a Supabase JWT, so the platform-level JWT
+#    check must be off for this one function — see config.toml).
+npx supabase functions deploy revenuecat-webhook --no-verify-jwt
+```
+
+Then, in the RevenueCat dashboard: **Project settings → Integrations →
+Webhooks → Add new configuration**. Enter:
+- **URL**: `https://<your-project-ref>.supabase.co/functions/v1/revenuecat-webhook`
+- **Authorization header value**: the exact same random string from step 1
+  above (RevenueCat sends this back verbatim in every request's
+  `Authorization` header; the function 401s anything that doesn't match).
+- Leave event filtering unset (the function safely acks-and-ignores any event
+  type it doesn't act on) unless you want to reduce noise.
+
+Without this dashboard step, purchases still work locally (RevenueCat →
+`useEntitlementStore` unlocks the two client-only gates immediately) but
+`users.subscription_status` never updates, so `generate-recipe-steps` and
+`recipe-assistant` will keep rejecting a paying subscriber with `not_premium`
+the first time they're used after a fresh purchase.
 
 ## Manual dashboard steps (not code)
 

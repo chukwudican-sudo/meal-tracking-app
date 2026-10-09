@@ -403,6 +403,73 @@ verify_jwt = true
 enabled = true
 verify_jwt = true
 
+# AI kitchen/pantry scan backend (scan-kitchen, multi-image vision). Same
+# gateway/secret setup.
+[functions.scan-kitchen]
+enabled = true
+verify_jwt = true
+
+# AI "What Can I Make" backend (suggest-kitchen-recipes). Same gateway/secret
+# setup; text-only, returns a batch of full recipes from the user's kitchen.
+[functions.suggest-kitchen-recipes]
+enabled = true
+verify_jwt = true
+
+# AI "Build My Plan" backend (generate-meal-suggestions). Same gateway/secret
+# setup; text-only, returns meal suggestions for a given meal type + wizard
+# preferences. Used for the post-build swap/Describe/catalog-topup flow.
+[functions.generate-meal-suggestions]
+enabled = true
+verify_jwt = true
+
+# AI "Build My Plan" shortlist backend (generate-plan-shortlist). Same gateway/
+# secret setup; text-only, returns a curated shortlist of options per meal type
+# personalised to the user's protein/carb/fat picks + secondary preferences.
+[functions.generate-plan-shortlist]
+enabled = true
+verify_jwt = true
+
+# AI Custom Recipe concept backend (generate-recipe-concept). Same gateway/
+# secret setup; text-only, cheap first stage that returns a lightweight preview
+# (name + description + rough macros). Free-scan-pool gated.
+[functions.generate-recipe-concept]
+enabled = true
+verify_jwt = true
+
+# AI Custom Recipe steps backend (generate-recipe-steps). Same gateway/secret
+# setup; text-only, returns the full ingredient list + numbered steps.
+# Subscription-only gated (no free-scan pool).
+[functions.generate-recipe-steps]
+enabled = true
+verify_jwt = true
+
+# AI in-recipe chat backend (recipe-assistant). Same gateway/secret setup;
+# text-only. Subscription-mandatory + steps-exist sequencing check for AI
+# recipes. Deliberately unmetered (no rate limit / usage logging).
+[functions.recipe-assistant]
+enabled = true
+verify_jwt = true
+
+# RevenueCat purchase-lifecycle webhook. verify_jwt MUST be false — RevenueCat
+# sends its own dashboard-configured shared secret in the Authorization
+# header (checked in-function against REVENUECAT_WEBHOOK_SECRET), not a
+# Supabase JWT; the gateway would otherwise reject every request before our
+# code runs. Keeps users.subscription_status in sync so the two
+# subscription-only AI functions (generate-recipe-steps, recipe-assistant)
+# see the same entitlement the client already unlocked via RevenueCat.
+[functions.revenuecat-webhook]
+enabled = true
+verify_jwt = false
+
+# Permanently deletes the calling user's own Supabase auth account (and,
+# transitively, all of their app data via existing ON DELETE CASCADE
+# foreign keys). verify_jwt = true (default) so only a genuinely
+# authenticated caller can reach this at all, and the function only ever
+# acts on that caller's own user id — never anyone else's.
+[functions.delete-account]
+enabled = true
+verify_jwt = true
+
 [analytics]
 enabled = true
 port = 54327
