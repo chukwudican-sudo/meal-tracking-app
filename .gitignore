@@ -42,3 +42,6 @@ app-example
 # generated native folders
 /ios
 /android
+
+# raw Cursor chat exports (personal; kept local only)
+docs/handover/chat-history/
