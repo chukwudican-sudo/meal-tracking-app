@@ -22,13 +22,14 @@ import {
 } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { router } from 'expo-router';
 
 import { COLORS } from '@/constants/theme';
 import { aiClient } from '@/ai/aiClient';
 import { AIError } from '@/ai/aiEdgeClient';
 import { scanMeal } from '@/ai/scanMeal';
+import { compressPhotoToBase64 } from '@/lib/media/compressPhoto';
 import type { DayContext, MealDraft } from '@/ai/types';
+import { openPaywall } from '@/lib/paywall';
 import type { UserGoals } from '@/store/types';
 import { rateMeal } from '@/utils/mealRating';
 import { useMealStore } from '@/store/useMealStore';
@@ -124,24 +125,14 @@ export function ScanTab({ context, onDraftReady }: Props) {
 
   // ─── Capture handlers ─────────────────────────────────────────────────
 
-  // Shared handler for scan/upload failures. Premium gate gets an Alert with a
-  // paywall CTA (matching AITab); everything else is a lightweight toast, since
-  // the camera view has no inline note slot. ScanError subclasses AIError.
-  function handleScanError(e: unknown) {
+  // Shared handler for scan/upload failures. Premium gate opens the shared
+  // paywall (matching AITab) and retries the same capture on a successful
+  // purchase; everything else is a lightweight toast, since the camera view
+  // has no inline note slot. ScanError subclasses AIError.
+  function handleScanError(e: unknown, retry: () => void) {
     console.warn('Scan failed:', e);
     if (e instanceof AIError && e.code === 'not_premium') {
-      Alert.alert(
-        'Premium feature',
-        'AI meal scanning uses AI to estimate nutrition from a photo. Upgrade to Premium to use it.',
-        [
-          { text: 'Not now', style: 'cancel' },
-          {
-            text: 'Upgrade',
-            onPress: () =>
-              router.push({ pathname: '/settings/coming-soon', params: { title: 'Subscription' } }),
-          },
-        ],
-      );
+      openPaywall({ reason: 'scan_limit', onSuccess: retry });
       return;
     }
     if (e instanceof AIError && e.code === 'rate_limited') {
@@ -167,20 +158,19 @@ export function ScanTab({ context, onDraftReady }: Props) {
     if (!cameraRef.current) return;
     setBusy(true);
     try {
-      const shot = await cameraRef.current.takePictureAsync({
-        base64: true,
-        quality: 0.5,
-      });
+      const shot = await cameraRef.current.takePictureAsync({ quality: 0.5 });
       if (!shot?.uri) throw new Error('Could not take photo');
-      if (!shot.base64) throw new Error('Could not read photo data');
-      const result = await scanMeal(shot.base64, 'image/jpeg');
+      // Resize + recompress before sending (raw captures are multi-MB).
+      const { base64, mimeType } = await compressPhotoToBase64(shot.uri);
+      if (!base64) throw new Error('Could not read photo data');
+      const result = await scanMeal(base64, mimeType);
       setCapturedUri(shot.uri);
       setDraft(result);
       setServings(1);
       setBookmarked(false);
       setScanState('result');
     } catch (e) {
-      handleScanError(e);
+      handleScanError(e, () => void handleCapture());
     } finally {
       setBusy(false);
     }
@@ -193,19 +183,20 @@ export function ScanTab({ context, onDraftReady }: Props) {
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ['images'],
         quality: 0.5,
-        base64: true,
       });
       if (result.canceled || !result.assets?.[0]) return;
       const asset = result.assets[0];
-      if (!asset.base64) throw new Error('Could not read image data');
-      const parsed = await scanMeal(asset.base64, asset.mimeType ?? 'image/jpeg');
+      // Resize + recompress before sending (library photos can be multi-MB).
+      const { base64, mimeType } = await compressPhotoToBase64(asset.uri);
+      if (!base64) throw new Error('Could not read image data');
+      const parsed = await scanMeal(base64, mimeType);
       setCapturedUri(asset.uri);
       setDraft(parsed);
       setServings(1);
       setBookmarked(false);
       setScanState('result');
     } catch (e) {
-      handleScanError(e);
+      handleScanError(e, () => void handleUpload());
     } finally {
       setBusy(false);
     }

@@ -111,13 +111,13 @@ export default function AccountSettingsScreen() {
         <NavRow label="Export My Data" onPress={() => navComingSoon('Export My Data')} />
       </FormSection>
 
-      {/* Account deletion needs a server-side function (remove the Supabase auth
-          user + all rows) that isn't built yet. Disabled until then so it can't
-          land users in a broken half-deleted state. */}
-      <View style={styles.deleteRow} accessibilityState={{ disabled: true }}>
-        <Text style={styles.deleteTextDisabled}>Delete Account</Text>
-        <Text style={styles.comingSoonNote}>Coming soon</Text>
-      </View>
+      <TouchableOpacity
+        style={styles.deleteRow}
+        onPress={() => router.push('/settings/account-delete-confirm')}
+        activeOpacity={0.7}
+      >
+        <Text style={styles.deleteText}>Delete Account</Text>
+      </TouchableOpacity>
     </FormPage>
   );
 }
@@ -178,9 +178,6 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     alignItems: 'center',
     marginTop: 8,
-    gap: 4,
-    opacity: 0.5,
   },
-  deleteTextDisabled: { color: COLORS.textMuted, fontSize: 14, fontWeight: '600' },
-  comingSoonNote: { color: COLORS.textMuted, fontSize: 12 },
+  deleteText: { color: COLORS.red, fontSize: 14, fontWeight: '600' },
 });

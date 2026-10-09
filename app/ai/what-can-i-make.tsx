@@ -3,7 +3,6 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { router } from 'expo-router';
 import { useMemo, useState } from 'react';
 import {
-  ActivityIndicator,
   ScrollView,
   StyleSheet,
   Text,
@@ -12,53 +11,36 @@ import {
   View,
 } from 'react-native';
 
+import { AIError } from '@/ai/aiEdgeClient';
+import { suggestKitchenRecipes } from '@/ai/suggestKitchenRecipes';
+import type { RecipeConcept } from '@/ai/types';
 import { KitchenScanModal } from '@/components/grocery/KitchenScanModal';
+import { ProgressiveLoader } from '@/components/ProgressiveLoader';
 import { Screen } from '@/components/Screen';
 import { RecipeCard } from '@/components/recipes/RecipeCard';
-import { normalizeIngredientName } from '@/constants/ingredientCategories';
+import { CATEGORY_DOT, CATEGORY_ORDER, normalizeIngredientName } from '@/constants/ingredientCategories';
 import { COLORS } from '@/constants/theme';
-import type { GroceryItem, IngredientCategory, RecipeTemplate } from '@/store/types';
+import { openPaywall } from '@/lib/paywall';
+import type { GroceryItem, IngredientCategory } from '@/store/types';
 import { useMealStore } from '@/store/useMealStore';
 import { useToastStore } from '@/store/useToastStore';
 
 const INITIAL = 6;
 const MORE = 4;
 
-const CATEGORY_ORDER: IngredientCategory[] = [
-  'Proteins',
-  'Carbs & Grains',
-  'Fruits & Vegetables',
-  'Dairy',
-  'Oils & Fats',
-  'Spices & Seasonings',
-  'Condiments',
-  'Other',
-];
-
-const CATEGORY_DOT: Record<IngredientCategory, string> = {
-  'Proteins': '#f87171',
-  'Carbs & Grains': '#facc15',
-  'Fruits & Vegetables': '#4ade80',
-  'Dairy': '#60a5fa',
-  'Oils & Fats': '#fb923c',
-  'Spices & Seasonings': '#a78bfa',
-  'Condiments': '#5eead4',
-  'Other': 'rgba(255,255,255,0.45)',
-};
-
 interface Suggestion {
-  recipe: RecipeTemplate;
+  recipe: RecipeConcept;
   missing: string[]; // ingredient names missing from the kitchen
 }
 
 type Phase = 'overview' | 'loading' | 'results';
 
 export default function WhatCanIMakeScreen() {
-  const recipes = useMealStore(s => s.recipes);
   const grocery = useMealStore(s => s.grocery);
   const profile = useMealStore(s => s.profile);
   const addManualKitchenItem = useMealStore(s => s.addManualKitchenItem);
   const addManualCartItem = useMealStore(s => s.addManualCartItem);
+  const setPendingRecipeConcept = useMealStore(s => s.setPendingRecipeConcept);
   const showToast = useToastStore(s => s.showToast);
 
   const kitchenItems = useMemo(
@@ -84,38 +66,14 @@ export default function WhatCanIMakeScreen() {
   const dietary = (profile.dietaryRestrictions ?? []).map(d => d.toLowerCase());
   const allergies = (profile.allergies ?? []).map(a => a.toLowerCase());
 
-  // Placeholder matcher (AI shell): score every recipe by how many of its
-  // ingredients are already in the Kitchen, respecting allergies/diet.
-  const pool = useMemo<Suggestion[]>(() => {
-    const list: Suggestion[] = [];
-    for (const r of recipes) {
-      const hasAllergen = r.ingredients.some(i =>
-        allergies.some(a => a && i.name.toLowerCase().includes(a)),
-      );
-      if (hasAllergen) continue;
-      if (dietary.includes('vegetarian') || dietary.includes('vegan')) {
-        const MEAT = ['chicken', 'beef', 'turkey', 'salmon', 'tuna', 'pork', 'bacon', 'fish'];
-        if (r.ingredients.some(i => MEAT.some(m => i.name.toLowerCase().includes(m)))) continue;
-      }
-      const missing = r.ingredients
-        .filter(ing => !kitchenKeys.has(normalizeIngredientName(ing.name)))
-        .map(i => i.name);
-      list.push({ recipe: r, missing });
-    }
-    list.sort((a, b) => a.missing.length - b.missing.length);
-    const close = list.filter(s => s.missing.length <= 2);
-    return close.length > 0 ? close : list.slice(0, 8);
-  }, [recipes, kitchenKeys, dietary, allergies]);
-
   const [phase, setPhase] = useState<Phase>('overview');
+  const [pool, setPool] = useState<Suggestion[]>([]);
   const [count, setCount] = useState(INITIAL);
   const [input, setInput] = useState('');
   const [scanOpen, setScanOpen] = useState(false);
 
-  const shown = useMemo<Suggestion[]>(() => {
-    if (pool.length === 0) return [];
-    return Array.from({ length: count }, (_, i) => pool[i % pool.length]);
-  }, [pool, count]);
+  // Reveal more of the same AI batch — no wraparound, no refetch.
+  const shown = useMemo<Suggestion[]>(() => pool.slice(0, count), [pool, count]);
 
   const perfect = shown.filter(s => s.missing.length === 0);
   const partial = shown.filter(s => s.missing.length > 0);
@@ -134,14 +92,76 @@ export default function WhatCanIMakeScreen() {
     showToast('Added to kitchen');
   };
 
-  const findRecipes = () => {
-    setCount(INITIAL);
-    setPhase('loading');
-    setTimeout(() => setPhase('results'), 900);
+  // Shared handler for suggest failures. Premium gate opens the shared
+  // paywall (matching ScanTab) and retries the suggest call on a successful
+  // purchase; everything else is a lightweight toast.
+  const handleSuggestError = (e: unknown, retry: () => void) => {
+    console.warn('Kitchen recipe suggest failed:', e);
+    if (e instanceof AIError && e.code === 'not_premium') {
+      openPaywall({ reason: 'scan_limit', onSuccess: retry });
+      return;
+    }
+    if (
+      e instanceof AIError &&
+      (e.code === 'rate_limited' || e.code === 'ai_failed' || e.code === 'unauthorized')
+    ) {
+      showToast(e.message || 'Could not suggest recipes right now. Please try again.');
+      return;
+    }
+    showToast('Could not suggest recipes. Try again.');
   };
 
-  const openConcept = (recipe: RecipeTemplate) => {
-    router.push({ pathname: '/ai/custom', params: { recipeId: recipe.id } });
+  // Defense-in-depth safety filter (mirrors the old local matcher): drop any
+  // suggestion that still contains an allergen or meat when the user is
+  // vegetarian/vegan, even if the prompt already asked Gemini to avoid them.
+  const passesSafetyFilter = (recipe: RecipeConcept): boolean => {
+    const hasAllergen = recipe.ingredients.some(i =>
+      allergies.some(a => a && i.name.toLowerCase().includes(a)),
+    );
+    if (hasAllergen) return false;
+    if (dietary.includes('vegetarian') || dietary.includes('vegan')) {
+      const MEAT = ['chicken', 'beef', 'turkey', 'salmon', 'tuna', 'pork', 'bacon', 'fish'];
+      if (recipe.ingredients.some(i => MEAT.some(m => i.name.toLowerCase().includes(m)))) {
+        return false;
+      }
+    }
+    return true;
+  };
+
+  const findRecipes = async () => {
+    if (kitchenEmpty) return;
+    setCount(INITIAL);
+    setPhase('loading');
+    try {
+      const concepts = await suggestKitchenRecipes(kitchenItems.map(i => i.name));
+      const list: Suggestion[] = [];
+      for (const recipe of concepts) {
+        if (!passesSafetyFilter(recipe)) continue;
+        const missing = recipe.ingredients
+          .filter(ing => !kitchenKeys.has(normalizeIngredientName(ing.name)))
+          .map(i => i.name);
+        // Dedupe missing names (e.g. "salt" listed twice).
+        const seen = new Set<string>();
+        const uniqueMissing = missing.filter(n => {
+          const k = n.toLowerCase();
+          if (seen.has(k)) return false;
+          seen.add(k);
+          return true;
+        });
+        list.push({ recipe, missing: uniqueMissing });
+      }
+      list.sort((a, b) => a.missing.length - b.missing.length);
+      setPool(list);
+      setPhase('results');
+    } catch (e) {
+      handleSuggestError(e, () => void findRecipes());
+      setPhase('overview');
+    }
+  };
+
+  const openConcept = (recipe: RecipeConcept) => {
+    setPendingRecipeConcept(recipe);
+    router.push({ pathname: '/ai/custom', params: { fromKitchenAI: 'true' } });
   };
 
   const addMissing = (name: string) => {
@@ -274,10 +294,14 @@ export default function WhatCanIMakeScreen() {
 
       {/* ── Loading ──────────────────────────────────────────────────────── */}
       {phase === 'loading' ? (
-        <View style={styles.centerWrap}>
-          <ActivityIndicator size="large" color={COLORS.green} />
-          <Text style={styles.loadingText}>Checking what you can make…</Text>
-        </View>
+        <ProgressiveLoader
+          messages={[
+            'Checking your kitchen inventory…',
+            'Finding recipes you can make…',
+            'Matching them to your goals…',
+            'Almost done…',
+          ]}
+        />
       ) : null}
 
       {/* ── Results ──────────────────────────────────────────────────────── */}
@@ -296,7 +320,7 @@ export default function WhatCanIMakeScreen() {
               <Text style={[styles.sectionTitle, perfect.length > 0 && { marginTop: 22 }]}>
                 You&apos;re close
               </Text>
-              <Text style={styles.sectionSub}>Missing 1–2 items — tap one to add it to your Cart.</Text>
+              <Text style={styles.sectionSub}>Missing a few items — tap one to add it to your Cart.</Text>
               {partial.map((s, i) => renderResultCard(s, `partial-${i}`))}
             </>
           ) : null}
@@ -307,8 +331,12 @@ export default function WhatCanIMakeScreen() {
             </View>
           ) : null}
 
-          {shown.length > 0 ? (
-            <TouchableOpacity style={styles.suggestMore} onPress={() => setCount(c => c + MORE)} activeOpacity={0.85}>
+          {shown.length > 0 && count < pool.length ? (
+            <TouchableOpacity
+              style={styles.suggestMore}
+              onPress={() => setCount(c => Math.min(c + MORE, pool.length))}
+              activeOpacity={0.85}
+            >
               <Text style={styles.suggestMoreText}>Suggest More</Text>
             </TouchableOpacity>
           ) : null}
@@ -426,7 +454,6 @@ const styles = StyleSheet.create({
 
   // Loading
   centerWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32, gap: 12 },
-  loadingText: { color: 'rgba(255,255,255,0.5)', fontSize: 15, fontWeight: '600' },
 
   // Results
   sectionTitle: { color: '#ffffff', fontSize: 18, fontWeight: '700' },

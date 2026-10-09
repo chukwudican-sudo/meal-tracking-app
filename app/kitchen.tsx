@@ -14,32 +14,11 @@ import {
 import { CartIcon } from '@/components/CartIcon';
 import { KitchenScanModal } from '@/components/grocery/KitchenScanModal';
 import { Screen } from '@/components/Screen';
+import { CATEGORY_DOT, CATEGORY_ORDER } from '@/constants/ingredientCategories';
 import { COLORS } from '@/constants/theme';
 import type { GroceryItem, IngredientCategory } from '@/store/types';
 import { useMealStore } from '@/store/useMealStore';
 import { useToastStore } from '@/store/useToastStore';
-
-const CATEGORY_ORDER: IngredientCategory[] = [
-  'Proteins',
-  'Carbs & Grains',
-  'Fruits & Vegetables',
-  'Dairy',
-  'Oils & Fats',
-  'Spices & Seasonings',
-  'Condiments',
-  'Other',
-];
-
-const CATEGORY_DOT: Record<IngredientCategory, string> = {
-  'Proteins': COLORS.red,
-  'Carbs & Grains': '#FFD60A',
-  'Fruits & Vegetables': COLORS.green,
-  'Dairy': COLORS.blue,
-  'Oils & Fats': COLORS.orange,
-  'Spices & Seasonings': COLORS.purple,
-  'Condiments': '#5AC8FA',
-  'Other': COLORS.textSecondary,
-};
 
 export default function KitchenScreen() {
   const grocery = useMealStore(s => s.grocery);

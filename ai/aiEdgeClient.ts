@@ -47,10 +47,10 @@ export interface InvokeAIOptions {
 
 // Backstop for a hung request (e.g. the edge function's own Gemini timeout
 // somehow didn't fire, or the response never comes back at all). Set above the
-// edge function's internal Gemini timeout (15s) so, in the normal case, the
-// function's own clear message wins the race and reaches the client first —
-// this is just the worst-case ceiling.
-export const INVOKE_TIMEOUT_MS = 20000;
+// longest edge-function Gemini timeout (25s for scan-kitchen / suggest-kitchen-
+// recipes) so, in the normal case, the function's own clear message wins the
+// race and reaches the client first — this is just the worst-case ceiling.
+export const INVOKE_TIMEOUT_MS = 35000;
 
 export function nowHHMM(): string {
   const d = new Date();

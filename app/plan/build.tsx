@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   KeyboardAvoidingView,
   LayoutAnimation,
@@ -15,11 +16,18 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
 import { Screen } from '@/components/Screen';
 import { router } from 'expo-router';
 
 import { COLORS } from '@/constants/theme';
 import { newId } from '@/lib/sync/uuid';
+import { fetchAllFoodOptionsCombined, fetchMacroFoodOptions } from '@/lib/macroFoodOptions';
+import { AIError } from '@/ai/aiEdgeClient';
+import { generateMealSuggestions } from '@/ai/generateMealSuggestions';
+import { generatePlanShortlist } from '@/ai/generatePlanShortlist';
+import { openPaywall } from '@/lib/paywall';
+import { useEntitlementStore } from '@/store/useEntitlementStore';
 import { useMealStore } from '@/store/useMealStore';
 import { useToastStore } from '@/store/useToastStore';
 import type {
@@ -27,6 +35,7 @@ import type {
   MealSlot,
   PlanDayMeal,
   RecipeCategory,
+  RecipeConcept,
   RecipeTemplate,
   UserProfile,
 } from '@/store/types';
@@ -38,6 +47,16 @@ const WEEKDAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 // hold 5 meal cards. The last page holds 1–4 meal cards plus Suggest more
 // for a total of 5 items.
 const PAGE_SIZE = 5;
+// Opaque background for cards rendered inside a transparent Modal. COLORS.card
+// is a translucent white meant to sit on the opaque app background, so it looks
+// see-through inside a Modal — matches the ScanTab fix for the same issue.
+const OPAQUE_SHEET_BG = '#1C1C1C';
+// INITIAL_SEED and SUGGEST_BATCH are sized against the ~15-recipe-per-category
+// static catalog in constants/recipeSeed.ts. With 15 per category, the initial
+// seed (9) leaves 6 unseen, so the first Suggest more returns 5 fresh catalog
+// cards and a second returns the last 1 before the AI top-up kicks in — the
+// relationship is intentional, so keep these in sync if the catalog size or
+// per-category count changes.
 // Meals seeded the first time a slot is entered.
 const INITIAL_SEED = 9;
 // Meals generated per Suggest more click (or per Describe call: just 1).
@@ -113,6 +132,14 @@ function rankForGoal(
   const cuisineFilter = wantsEverything ? null : (prefs?.cuisines ?? []).map(c => c.toLowerCase());
   const loves = (prefs?.loves ?? []).map(t => t.toLowerCase());
   const avoid = (prefs?.avoid ?? []).map(t => t.toLowerCase());
+  // The macro picks are the primary signal for the AI shortlist, so let them
+  // bias the swap catalogue too — otherwise someone who asked for chicken and
+  // rice gets an unrelated catalogue the moment they swap a meal.
+  const macroPicks = [
+    ...(prefs?.proteins ?? []),
+    ...(prefs?.carbs ?? []),
+    ...(prefs?.fats ?? []),
+  ].map(t => t.toLowerCase());
 
   const scored = recipes.map(r => {
     let score = 0;
@@ -136,6 +163,9 @@ function rankForGoal(
 
     // Loves: each match adds a sizeable boost.
     loves.forEach(t => { if (text.includes(t)) score += 20; });
+
+    // Macro picks: same idea, slightly softer than an explicit "love".
+    macroPicks.forEach(t => { if (text.includes(t)) score += 15; });
 
     // Avoid: each match penalises heavily but doesn't hard-drop.
     avoid.forEach(t => { if (text.includes(t)) score -= 100; });
@@ -201,17 +231,20 @@ function distributeMealsIntoPages(meals: RecipeTemplate[]): Page[] {
   return pages;
 }
 
-function generateCustomCard(text: string, category: RecipeCategory): RecipeTemplate {
-  const trimmed = text.trim().slice(0, 60) || 'Custom recipe';
+// Turn an AI-generated RecipeConcept (no id) into a RecipeTemplate the pick
+// flow can render. The `custom-` prefix keeps these out of the catalogue
+// lookup (recipeById), matching how Describe-generated cards behaved before.
+function conceptToTemplate(concept: RecipeConcept, category: RecipeCategory): RecipeTemplate {
   return {
-    id: `custom-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-    name: trimmed,
+    id: `custom-${newId()}`,
+    name: concept.name,
     category,
-    calories: 450,
-    cookTimeMin: 20,
-    macros: { protein: 25, carbs: 45, fats: 15 },
-    ingredients: [],
-    steps: [`Prepare: ${trimmed}`, 'Plate and enjoy.'],
+    calories: concept.calories,
+    cookTimeMin: concept.cookTimeMin,
+    macros: concept.macros,
+    ingredients: concept.ingredients,
+    steps: concept.steps ?? [],
+    difficulty: concept.difficulty,
   };
 }
 
@@ -248,30 +281,44 @@ function buildPreviewDays(
 
 type Mode =
   | { kind: 'normal' }
-  | { kind: 'preview-swap'; dayIdx: number; mealIdx: number }
-  | { kind: 'summary-swap'; slotIdx: number; oldRecipeId: string };
+  | { kind: 'preview-swap'; dayIdx: number; mealIdx: number };
 
 type Step =
+  | { kind: 'macroPicker'; group: MacroGroup }
+  | { kind: 'secondaryPrefs'; questionIdx: 0 | 1 | 2 | 3 }
   | { kind: 'guide' }
-  | { kind: 'onboarding'; questionIdx: 0 | 1 | 2 | 3 }
+  | { kind: 'shortlist' }
   | { kind: 'pick'; slotIdx: number }
-  | { kind: 'summary'; slotIdx: number }
   | { kind: 'preview' };
 
-// ─── Mini onboarding ─────────────────────────────────────────────────────────
-// 4 short questions asked fresh every Build My Plan run. Answers live only
-// in component state — they're never persisted to profile (people's mood
-// changes day to day) — though we keep the previous session in a module-
-// level cache so the user can one-tap reuse last time's answers.
+// ─── Preferences ─────────────────────────────────────────────────────────────
+// Gathered fresh every Build My Plan run (re-shown on Regenerate). Answers live
+// only in component state — never persisted to profile (people's mood changes
+// day to day). The protein/carb/fat picks are the PRIMARY personalisation
+// signal for the AI shortlist; cuisines/cookTime/loves are light secondary
+// flavour cues and avoid is a hard constraint (all optional).
 
 type CookTime = 'quick' | 'moderate' | 'full';
 
 interface WizardPrefs {
+  proteins: string[];          // primary signal — preferred protein sources
+  carbs: string[];             // primary signal — preferred carb sources
+  fats: string[];              // primary signal — preferred fat sources
   cuisines: string[];          // multi-select; "Everything" is mutually exclusive
   cookTime: CookTime | null;   // single select
   loves: string[];             // chips + free text combined
   avoid: string[];             // chips + free text combined
 }
+
+// The three primary-signal groups, so the picker UI can be driven by one
+// generic handler instead of three near-identical copies.
+type MacroGroup = 'proteins' | 'carbs' | 'fats';
+const MACRO_GROUPS: MacroGroup[] = ['proteins', 'carbs', 'fats'];
+
+// Protein/carb/fat picker options now come from Supabase (macro_proteins /
+// macro_carbs / macro_fats), seeded from USDA FoodData Central and editable in
+// the Table Editor — see lib/macroFoodOptions.ts and scripts/import-macro-foods.ts.
+// The old hardcoded PROTEIN_OPTIONS/CARB_OPTIONS/FAT_OPTIONS arrays were removed.
 
 const CUISINE_OPTIONS: string[] = [
   'Nigerian',
@@ -286,11 +333,23 @@ const CUISINE_OPTIONS: string[] = [
 const EVERYTHING_KEY = 'Mixed or Everything';
 
 const LOVE_SUGGESTIONS = ['Chicken', 'Rice', 'Eggs', 'Pasta', 'Salmon', 'Beef', 'Potatoes', 'Tofu'];
-const AVOID_SUGGESTIONS = ['Mushrooms', 'Olives', 'Tomato', 'Cilantro', 'Liver', 'Tuna', 'Spicy'];
 
-const ONBOARDING_TOTAL = 4;
+// Secondary preference questions (cuisines, cook time, loves, avoid). Optional
+// depth after the primary protein/carb/fat picker.
+const SECONDARY_TOTAL = 4;
+
+// Extra options appended per "Generate more" tap for a single meal type. The
+// initial shortlist uses the server-side defaults (mains 4, snacks 2).
+const GENERATE_MORE_COUNT = 3;
+
+// Gentle-nudge threshold for swaps: within ±15% of the daily calorie target is
+// fine; beyond it we show a soft, non-blocking heads-up (never a block).
+const SWAP_NUDGE_THRESHOLD = 0.15;
 
 const EMPTY_PREFS: WizardPrefs = {
+  proteins: [],
+  carbs: [],
+  fats: [],
   cuisines: [],
   cookTime: null,
   loves: [],
@@ -305,7 +364,12 @@ export default function BuildPlanScreen() {
   const templates = useMealStore(s => s.templates);
   const activatePlan = useMealStore(s => s.activatePlan);
   const saveCurrentPlanAs = useMealStore(s => s.saveCurrentPlanAs);
+  const ensureRecipeSaved = useMealStore(s => s.ensureRecipeSaved);
+  const goals = useMealStore(s => s.goals);
+  const planAvoidFoods = useMealStore(s => s.planAvoidFoods);
+  const setPlanAvoidFoods = useMealStore(s => s.setPlanAvoidFoods);
   const showToast = useToastStore(s => s.showToast);
+  const isPro = useEntitlementStore(s => s.isPro);
   const insets = useSafeAreaInsets();
   const footerBottomPad = Math.max(insets.bottom, 16) + 16;
 
@@ -316,21 +380,102 @@ export default function BuildPlanScreen() {
     [profile.mealSlots],
   );
 
+  // Distinct meal types across the active slots, in slot (time) order. The AI
+  // shortlist is generated per meal type; when several slots share a type
+  // (e.g. two snack slots) they draw from the same type's picks.
+  const activeCategories = useMemo<RecipeCategory[]>(() => {
+    const seen = new Set<RecipeCategory>();
+    const out: RecipeCategory[] = [];
+    activeSlots.forEach(s => {
+      const c = categoryForSlot(s.name);
+      if (!seen.has(c)) { seen.add(c); out.push(c); }
+    });
+    return out;
+  }, [activeSlots]);
+
   const dietaryFiltered = useMemo(() => applyDietaryFilter(recipes, profile), [recipes, profile]);
 
+  // Catalogue lookup by id, for resolving nutrition in swap-time handlers where
+  // the render-scoped recipeById map isn't in scope yet.
+  const recipesById = useMemo(() => {
+    const m = new Map<string, RecipeTemplate>();
+    recipes.forEach(r => m.set(r.id, r));
+    return m;
+  }, [recipes]);
+
   // ── Wizard state ────────────────────────────────────────────────────────
-  // Flow: onboarding (4 quick questions, fresh every run) → guide (review)
-  // → pick → summary → preview. Onboarding-first lets the guide act as a
-  // confirmation screen showing both profile data and the user's answers
-  // before committing them to meal selection.
-  const [step, setStep] = useState<Step>({ kind: 'onboarding', questionIdx: 0 });
+  // Flow: macroPicker (required) → secondaryPrefs (optional, skippable) →
+  // guide (review) → AI shortlist call → shortlist (pick favourites) →
+  // preview (7-day schedule + swaps) → activate. The guide doubles as the
+  // confirm gate before the one AI call, so a scan is never spent until the
+  // user has seen exactly what it will be based on.
+  const [step, setStep] = useState<Step>({ kind: 'macroPicker', group: 'proteins' });
   const [mode, setMode] = useState<Mode>({ kind: 'normal' });
-  // Mini onboarding answers, gathered fresh each run. Used to bias meal
-  // suggestions in `byCategory`/`rankForGoal`.
+  // Preference answers, gathered fresh each run. The protein/carb/fat picks
+  // drive the AI shortlist; cuisines/cookTime/loves/avoid feed it too and also
+  // bias the swap catalogue via `byCategory`/`rankForGoal`.
   const [prefs, setPrefs] = useState<WizardPrefs>(EMPTY_PREFS);
-  // Free-text input boxes for love/avoid questions.
+
+  // Seed the avoid list from the persisted store on mount so returning users
+  // don't have to re-type items like "shellfish" every session.
+  const avoidSeeded = useRef(false);
+  useEffect(() => {
+    if (!avoidSeeded.current && planAvoidFoods.length > 0) {
+      avoidSeeded.current = true;
+      setPrefs(p => ({ ...p, avoid: planAvoidFoods }));
+    }
+  }, [planAvoidFoods]);
+
+  // Persist changes to the avoid list back to the store whenever they change,
+  // so they survive across sessions without explicit "save" buttons.
+  useEffect(() => {
+    setPlanAvoidFoods(prefs.avoid);
+  }, [prefs.avoid, setPlanAvoidFoods]);
+
+  // Free-text input boxes for the macro picker + love/avoid questions.
+  const [proteinInput, setProteinInput] = useState('');
+  const [carbInput, setCarbInput] = useState('');
+  const [fatInput, setFatInput] = useState('');
   const [loveInput, setLoveInput] = useState('');
   const [avoidInput, setAvoidInput] = useState('');
+
+  // Macro picker options, loaded once from Supabase (see lib/macroFoodOptions).
+  // null while loading; `macroOptionsError` flips true if the fetch fails, in
+  // which case the picker falls back to the free-text "add your own" box.
+  const [macroOptions, setMacroOptions] = useState<Record<MacroGroup, string[]> | null>(null);
+  const [macroOptionsError, setMacroOptionsError] = useState(false);
+  const [macroReloadKey, setMacroReloadKey] = useState(0);
+  // Search text for filtering the current macro group's checklist. Reset when
+  // moving between groups so each screen starts unfiltered.
+  const [macroSearch, setMacroSearch] = useState('');
+  // Combined all-food list for the avoid picker (proteins+carbs+fats merged,
+  // sorted by familiarity). Loaded in parallel with macroOptions.
+  const [allFoodOptions, setAllFoodOptions] = useState<string[] | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setMacroOptions(null);
+    setMacroOptionsError(false);
+    setAllFoodOptions(null);
+    fetchMacroFoodOptions()
+      .then(opts => { if (!cancelled) setMacroOptions(opts); })
+      .catch(() => { if (!cancelled) setMacroOptionsError(true); });
+    fetchAllFoodOptionsCombined()
+      .then(all => { if (!cancelled) setAllFoodOptions(all); })
+      .catch(() => { /* avoid list gracefully degrades to custom-only */ });
+    return () => { cancelled = true; };
+  }, [macroReloadKey]);
+
+  // AI shortlist state (redesigned flow). `shortlistByType` holds the options
+  // returned by generate-plan-shortlist per meal type; `selectedByType` holds
+  // the user's picked favourites per meal type (in pick order). Both are keyed
+  // by RecipeCategory since the AI generates per meal type, not per slot.
+  const [shortlistByType, setShortlistByType] = useState<Partial<Record<RecipeCategory, RecipeTemplate[]>>>({});
+  const [selectedByType, setSelectedByType] = useState<Partial<Record<RecipeCategory, RecipeTemplate[]>>>({});
+  // In-flight flags: whole-shortlist generation (initial / Regenerate) and the
+  // per-type "Generate more" top-up.
+  const [shortlistLoading, setShortlistLoading] = useState(false);
+  const [generateMoreLoadingByType, setGenerateMoreLoadingByType] = useState<Partial<Record<RecipeCategory, boolean>>>({});
 
   // Re-bucket recipes by category whenever profile, recipe pool, or wizard
   // prefs change. Pages already built for a slot keep their cards (we only
@@ -346,6 +491,12 @@ export default function BuildPlanScreen() {
   // Describe popup state — opened from the bottom button on each pick page.
   const [describeModalVisible, setDescribeModalVisible] = useState(false);
   const [describeModalText, setDescribeModalText] = useState('');
+  // In-flight flag for the Describe AI call (keeps the modal open + disables
+  // the Generate button while we wait).
+  const [describeLoading, setDescribeLoading] = useState(false);
+  // Per-slot in-flight flag for the Suggest-more AI top-up (only set on the
+  // catalog-exhaustion path, so normal Suggest more stays instant).
+  const [suggestMoreLoadingBySlot, setSuggestMoreLoadingBySlot] = useState<Record<string, boolean>>({});
   // Preview "Meals in this plan" collapse state.
   const [previewMealsExpanded, setPreviewMealsExpanded] = useState(false);
   // Per-slot: a flat array of meal cards. Keyed by slot.id so it survives
@@ -355,6 +506,20 @@ export default function BuildPlanScreen() {
   const [mealsBySlot, setMealsBySlot] = useState<Record<string, RecipeTemplate[]>>({});
   // Per-slot selected recipes preserved in user-pick order.
   const [selectionsBySlot, setSelectionsBySlot] = useState<Record<string, RecipeTemplate[]>>({});
+  // Lookup of every card generated/selected this session (both catalogue and
+  // AI/Describe cards), keyed by id. Used to resolve real nutrition for custom
+  // (`custom-`) cards in the preview totals and to persist them on activate,
+  // since PlanDayMeal only carries recipeId/recipeName, not nutrition.
+  const sessionCardById = useMemo<Map<string, RecipeTemplate>>(() => {
+    const map = new Map<string, RecipeTemplate>();
+    Object.values(mealsBySlot).forEach(list => list.forEach(r => map.set(r.id, r)));
+    Object.values(selectionsBySlot).forEach(list => list.forEach(r => map.set(r.id, r)));
+    // Include every AI shortlist card (shown or picked) so their real nutrition
+    // resolves in the preview totals and persists correctly on activation.
+    Object.values(shortlistByType).forEach(list => list?.forEach(r => map.set(r.id, r)));
+    Object.values(selectedByType).forEach(list => list?.forEach(r => map.set(r.id, r)));
+    return map;
+  }, [mealsBySlot, selectionsBySlot, shortlistByType, selectedByType]);
   // Per-slot active page index in the horizontal pager.
   const [pageIdxBySlot, setPageIdxBySlot] = useState<Record<string, number>>({});
   // Per-slot Suggest more click count. Used purely to trigger the
@@ -399,10 +564,58 @@ export default function BuildPlanScreen() {
     });
   }, [step, activeSlots, pageWidth, pageIdxBySlot]);
 
+  // ── All-slots-skipped guard ─────────────────────────────────────────────
+  // Checked before any wizard screen so the user can't fill in preferences
+  // only to find there's nothing to plan for.
+  if (activeSlots.length === 0) {
+    return (
+      <Screen edges={['top', 'bottom']}>
+        <Header title="Build My Plan" onBack={() => router.back()} />
+        <View style={styles.guardWrap}>
+          <Text style={styles.guardEmoji}>🍽️</Text>
+          <Text style={styles.guardTitle}>You&apos;ve skipped all meal slots</Text>
+          <Text style={styles.guardBody}>
+            Enable at least one slot in Personal Details to continue building a plan.
+          </Text>
+          <TouchableOpacity
+            style={styles.guardCta}
+            onPress={() => router.replace('/profile/personal-details')}
+          >
+            <Text style={styles.guardCtaText}>Open Personal Details</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.guardSecondary} onPress={() => router.back()}>
+            <Text style={styles.guardSecondaryText}>Close</Text>
+          </TouchableOpacity>
+        </View>
+      </Screen>
+    );
+  }
+
+  // ── Shortlist generation loading screen ─────────────────────────────────
+  // Covers both the initial build and a Regenerate re-run. A full screen (not
+  // just a button spinner) because the call can take 10-20s and the user has
+  // nothing else to do on the review page while it runs.
+  if (shortlistLoading) {
+    return (
+      <Screen edges={['top', 'bottom']}>
+        <Header title="Building your shortlist" />
+        <View style={styles.loadingWrap}>
+          <ActivityIndicator size="large" color={COLORS.green} />
+          <Text style={styles.loadingText}>Putting together your options…</Text>
+          <Text style={styles.loadingSub}>
+            We&apos;re building ideas for {activeCategories.length}{' '}
+            meal {activeCategories.length === 1 ? 'type' : 'types'} around the foods you picked.
+            This usually takes a few seconds.
+          </Text>
+        </View>
+      </Screen>
+    );
+  }
+
   // ── Guide preview (review step) ─────────────────────────────────────────
-  // Sits *after* the 4 onboarding questions so the user can review both
-  // their fresh answers and their saved profile before meal selection
-  // begins. Read-only — to change an onboarding answer, the user goes back.
+  // Sits *after* the preference steps so the user can review both their fresh
+  // answers and their saved profile before we spend an AI call. Read-only —
+  // to change an answer, the user goes back.
   if (step.kind === 'guide') {
     const dietary = profile.dietaryRestrictions ?? [];
     const allergies = profile.allergies ?? [];
@@ -419,7 +632,7 @@ export default function BuildPlanScreen() {
       <Screen edges={['top', 'bottom']}>
         <Header
           title="Review"
-          onBack={() => setStep({ kind: 'onboarding', questionIdx: 3 })}
+          onBack={() => setStep({ kind: 'secondaryPrefs', questionIdx: 3 })}
         />
 
         <ScrollView contentContainerStyle={styles.guideBody} showsVerticalScrollIndicator={false}>
@@ -470,7 +683,53 @@ export default function BuildPlanScreen() {
             </View>
           </View>
 
-          {/* Onboarding answers — fresh-this-session */}
+          {/* Primary signal — the protein/carb/fat picks that drive the shortlist. */}
+          <View style={styles.guideCard}>
+            <View style={styles.guideRow}>
+              <Text style={styles.guideRowLabel}>Proteins</Text>
+              <View style={styles.guidePillGroup}>
+                {prefs.proteins.length === 0 ? (
+                  <Text style={styles.guideMuted}>Any</Text>
+                ) : (
+                  prefs.proteins.map(p => (
+                    <View key={p} style={styles.guidePill}><Text style={styles.guidePillText}>{p}</Text></View>
+                  ))
+                )}
+              </View>
+            </View>
+
+            <View style={styles.guideDivider} />
+
+            <View style={styles.guideRow}>
+              <Text style={styles.guideRowLabel}>Carbs</Text>
+              <View style={styles.guidePillGroup}>
+                {prefs.carbs.length === 0 ? (
+                  <Text style={styles.guideMuted}>Any</Text>
+                ) : (
+                  prefs.carbs.map(c => (
+                    <View key={c} style={styles.guidePill}><Text style={styles.guidePillText}>{c}</Text></View>
+                  ))
+                )}
+              </View>
+            </View>
+
+            <View style={styles.guideDivider} />
+
+            <View style={styles.guideRow}>
+              <Text style={styles.guideRowLabel}>Fats</Text>
+              <View style={styles.guidePillGroup}>
+                {prefs.fats.length === 0 ? (
+                  <Text style={styles.guideMuted}>Any</Text>
+                ) : (
+                  prefs.fats.map(f => (
+                    <View key={f} style={styles.guidePill}><Text style={styles.guidePillText}>{f}</Text></View>
+                  ))
+                )}
+              </View>
+            </View>
+          </View>
+
+          {/* Secondary preferences — fresh-this-session, all optional */}
           <View style={styles.guideCard}>
             <View style={styles.guideRow}>
               <Text style={styles.guideRowLabel}>Cuisines</Text>
@@ -540,19 +799,20 @@ export default function BuildPlanScreen() {
             <View style={styles.guideStepRow}>
               <View style={styles.guideStepBullet}><Text style={styles.guideStepBulletText}>1</Text></View>
               <Text style={styles.guideStepText}>
-                We&apos;ll walk you through your {slotCount} meal {slotCount === 1 ? 'slot' : 'slots'} for the day.
+                We&apos;ll build a shortlist of ideas for each of your {slotCount} meal{' '}
+                {slotCount === 1 ? 'type' : 'types'}.
               </Text>
             </View>
             <View style={styles.guideStepRow}>
               <View style={styles.guideStepBullet}><Text style={styles.guideStepBulletText}>2</Text></View>
               <Text style={styles.guideStepText}>
-                Pick your favourites — Suggest more or describe what you want any time.
+                Pick your favourites — ask for more options any time.
               </Text>
             </View>
             <View style={styles.guideStepRow}>
               <View style={styles.guideStepBullet}><Text style={styles.guideStepBulletText}>3</Text></View>
               <Text style={styles.guideStepText}>
-                We&apos;ll rotate them through the week into a balanced plan.
+                We&apos;ll rotate them through the week into a balanced plan you can still swap.
               </Text>
             </View>
           </View>
@@ -560,35 +820,264 @@ export default function BuildPlanScreen() {
 
         <View style={[styles.footer, { paddingBottom: footerBottomPad }]}>
           <TouchableOpacity
-            style={[styles.primaryBtn, styles.guideCta]}
-            onPress={() => setStep({ kind: 'pick', slotIdx: 0 })}
+            style={[styles.primaryBtn, styles.guideCta, shortlistLoading && styles.disabledBtn]}
+            onPress={() => runShortlistGeneration()}
+            disabled={shortlistLoading}
             activeOpacity={0.85}
           >
-            <Text style={styles.primaryBtnText}>Let&apos;s go</Text>
+            <Text style={styles.primaryBtnText}>
+              {shortlistLoading ? 'Building…' : 'Build my shortlist'}
+            </Text>
           </TouchableOpacity>
         </View>
       </Screen>
     );
   }
 
-  // ── Render: ONBOARDING (4 quick questions) ─────────────────────────────
-  if (step.kind === 'onboarding') {
+  // ── Render: MACRO PICKER (primary, required) ────────────────────────────
+  // The protein/carb/fat picks are the dominant personalisation signal for the
+  // AI shortlist, so this is the one step the user can't skip. Options are a
+  // searchable checklist loaded from Supabase (USDA-sourced); the de-emphasised
+  // free-text box below covers anything genuinely missing.
+  if (step.kind === 'macroPicker') {
+    // One group per screen (Proteins → Carbs → Fats), matching the app's
+    // one-question-per-screen pattern. Metadata is keyed by group so the same
+    // render handles all three.
+    const MACRO_META: Record<
+      MacroGroup,
+      { title: string; question: string; value: string; setValue: (v: string) => void; placeholder: string }
+    > = {
+      proteins: {
+        title: 'Proteins',
+        question: 'What proteins do you like?',
+        value: proteinInput,
+        setValue: setProteinInput,
+        placeholder: 'e.g. lamb, cottage cheese',
+      },
+      carbs: {
+        title: 'Carbs',
+        question: 'What carbs do you like?',
+        value: carbInput,
+        setValue: setCarbInput,
+        placeholder: 'e.g. plantain, barley',
+      },
+      fats: {
+        title: 'Fats',
+        question: 'What fats do you like?',
+        value: fatInput,
+        setValue: setFatInput,
+        placeholder: 'e.g. tahini, sesame oil',
+      },
+    };
+
+    const group = step.group;
+    const g = MACRO_META[group];
+    const groupIdx = MACRO_GROUPS.indexOf(group);
+    const isFirst = groupIdx === 0;
+    const isLastGroup = groupIdx === MACRO_GROUPS.length - 1;
+    // Per-screen gate: each group needs at least one pick before advancing, so
+    // the AI shortlist always has a protein, a carb, and a fat to build around.
+    const groupHasPick = prefs[group].length > 0;
+
+    const options = macroOptions?.[group] ?? [];
+    // Free-text picks that aren't in the loaded checklist — shown as their own
+    // removable rows so they don't get lost when the list is filtered/scrolled.
+    const customTokens = prefs[group].filter(
+      t => !options.some(o => o.toLowerCase() === t.toLowerCase()),
+    );
+    const query = macroSearch.trim().toLowerCase();
+    // `options` arrives already ordered by familiarity (see fetchMacroFoodOptions).
+    // While searching, keep substring matches anywhere in the name but float the
+    // ones that *start with* the query above ones that merely *contain* it — a
+    // stable sort preserves familiarity order within each bucket, so e.g. "beef"
+    // surfaces "Beef" before "Ground Beef", both near the top.
+    const filteredOptions = query
+      ? options
+          .filter(o => o.toLowerCase().includes(query))
+          .sort(
+            (a, b) =>
+              Number(!a.toLowerCase().startsWith(query)) -
+              Number(!b.toLowerCase().startsWith(query)),
+          )
+      : options;
+
+    const goBack = () => {
+      setMacroSearch('');
+      if (isFirst) router.back();
+      else setStep({ kind: 'macroPicker', group: MACRO_GROUPS[groupIdx - 1] });
+    };
+    const goNext = () => {
+      setMacroSearch('');
+      if (isLastGroup) setStep({ kind: 'secondaryPrefs', questionIdx: 0 });
+      else setStep({ kind: 'macroPicker', group: MACRO_GROUPS[groupIdx + 1] });
+    };
+
+    const renderChecklistRow = (opt: string, idx: number, checked: boolean) => (
+      <TouchableOpacity
+        key={opt}
+        style={[styles.macroPickRow, idx > 0 && styles.macroPickRowDivider]}
+        onPress={() => toggleMacroOption(group, opt)}
+        activeOpacity={0.7}
+      >
+        <Ionicons
+          name={checked ? 'checkmark-circle' : 'ellipse-outline'}
+          size={24}
+          color={checked ? COLORS.green : COLORS.textMuted}
+        />
+        <Text style={[styles.macroPickRowName, !checked && styles.macroPickRowNameOff]}>{opt}</Text>
+      </TouchableOpacity>
+    );
+
+    return (
+      <Screen edges={['top', 'bottom']}>
+        <StepProgressBar
+          step={1}
+          total={2}
+          label={`Your foods · ${g.title} (${groupIdx + 1} of ${MACRO_GROUPS.length})`}
+        />
+        <Header title={g.question} onBack={goBack} />
+
+        <KeyboardAvoidingView
+          style={{ flex: 1 }}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        >
+          {macroOptions === null && !macroOptionsError ? (
+            <View style={styles.macroLoading}>
+              <ActivityIndicator size="large" color={COLORS.green} />
+              <Text style={styles.macroLoadingText}>Loading foods…</Text>
+            </View>
+          ) : (
+            <>
+              <Text style={[styles.onbHint, styles.macroHint]}>
+                We&apos;ll build most of your meal ideas around these. Pick as many or as
+                few as you like — or add your own below.
+              </Text>
+
+              {/* Search bar (hidden if the list failed to load — free-text is
+                  the fallback in that case). */}
+              {!macroOptionsError && (
+                <View style={styles.macroSearchWrap}>
+                  <Ionicons name="search" size={18} color={COLORS.textMuted} />
+                  <TextInput
+                    style={styles.macroSearchInput}
+                    value={macroSearch}
+                    onChangeText={setMacroSearch}
+                    placeholder={`Search ${g.title.toLowerCase()}`}
+                    placeholderTextColor={COLORS.textMuted}
+                    returnKeyType="search"
+                    autoCorrect={false}
+                  />
+                  {macroSearch.length > 0 && (
+                    <TouchableOpacity onPress={() => setMacroSearch('')} hitSlop={8}>
+                      <Ionicons name="close-circle" size={18} color={COLORS.textMuted} />
+                    </TouchableOpacity>
+                  )}
+                </View>
+              )}
+
+              <ScrollView
+                style={{ flex: 1 }}
+                contentContainerStyle={styles.macroListBody}
+                showsVerticalScrollIndicator={false}
+                keyboardShouldPersistTaps="handled"
+              >
+                {macroOptionsError ? (
+                  <View style={styles.macroError}>
+                    <Text style={styles.macroErrorText}>
+                      Couldn&apos;t load the food list. You can still add your own below, or retry.
+                    </Text>
+                    <TouchableOpacity
+                      style={styles.macroRetryBtn}
+                      onPress={() => setMacroReloadKey(k => k + 1)}
+                      activeOpacity={0.85}
+                    >
+                      <Text style={styles.macroRetryText}>Retry</Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : (
+                  <>
+                    {/* Selected free-text additions first, so they're always
+                        visible regardless of the current search filter. */}
+                    {customTokens.map((t, i) => renderChecklistRow(t, i, true))}
+                    {filteredOptions.map((opt, i) =>
+                      renderChecklistRow(opt, customTokens.length + i, prefs[group].some(x => x.toLowerCase() === opt.toLowerCase())),
+                    )}
+                    {filteredOptions.length === 0 && customTokens.length === 0 && (
+                      <Text style={styles.macroEmpty}>
+                        {query ? 'No matches — add it as your own below.' : 'No options available.'}
+                      </Text>
+                    )}
+                  </>
+                )}
+
+                {/* De-emphasised free-text fallback for genuine gaps. */}
+                <View style={styles.macroFallback}>
+                  <Text style={styles.macroFallbackLabel}>Don&apos;t see it? Add your own</Text>
+                  <View style={styles.tokenInputRow}>
+                    <TextInput
+                      style={styles.tokenInput}
+                      value={g.value}
+                      onChangeText={g.setValue}
+                      placeholder={g.placeholder}
+                      placeholderTextColor={COLORS.textMuted}
+                      onSubmitEditing={() => { addMacroToken(group, g.value); g.setValue(''); }}
+                      returnKeyType="done"
+                    />
+                    <TouchableOpacity
+                      style={[styles.tokenAddBtn, !g.value.trim() && styles.disabledBtn]}
+                      disabled={!g.value.trim()}
+                      onPress={() => { addMacroToken(group, g.value); g.setValue(''); }}
+                    >
+                      <Text style={styles.tokenAddBtnText}>Add</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              </ScrollView>
+            </>
+          )}
+
+          <View style={[styles.footer, { paddingBottom: footerBottomPad }]}>
+            <TouchableOpacity
+              style={[styles.primaryBtn, styles.guideCta, !groupHasPick && styles.disabledBtn]}
+              disabled={!groupHasPick}
+              onPress={goNext}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.primaryBtnText}>
+                {groupHasPick
+                  ? 'Next'
+                  : `Pick at least one ${g.title.toLowerCase().replace(/s$/, '')}`}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </KeyboardAvoidingView>
+      </Screen>
+    );
+  }
+
+  // ── Render: SECONDARY PREFS (optional depth, skippable) ─────────────────
+  // The four questions carried over from the old wizard. Skippable as a whole:
+  // cuisines/loves are light style cues and cook time is a soft preference, so
+  // none of them are needed for a good shortlist — but avoid is a hard
+  // constraint, which is why it's still offered here rather than dropped.
+  if (step.kind === 'secondaryPrefs') {
     const qIdx = step.questionIdx;
-    const isLast = qIdx === 3;
+    const isLast = qIdx === SECONDARY_TOTAL - 1;
 
     const goNext = () => {
       if (isLast) {
-        // After Q4, route to the guide review page so the user can see all
-        // their answers + profile data before committing.
+        // After the last question, route to the guide review page so the user
+        // sees every answer before we spend an AI call.
         setStep({ kind: 'guide' });
       } else {
-        setStep({ kind: 'onboarding', questionIdx: (qIdx + 1) as 0 | 1 | 2 | 3 });
+        setStep({ kind: 'secondaryPrefs', questionIdx: (qIdx + 1) as 0 | 1 | 2 | 3 });
       }
     };
     const goBack = () => {
-      // Q1 back returns to the modal; subsequent questions step backwards.
-      if (qIdx === 0) router.back();
-      else setStep({ kind: 'onboarding', questionIdx: (qIdx - 1) as 0 | 1 | 2 | 3 });
+      // Q1 back returns to the last macro picker screen (Fats); later questions
+      // step back.
+      if (qIdx === 0) setStep({ kind: 'macroPicker', group: 'fats' });
+      else setStep({ kind: 'secondaryPrefs', questionIdx: (qIdx - 1) as 0 | 1 | 2 | 3 });
     };
     const skipAll = () => setStep({ kind: 'guide' });
 
@@ -629,6 +1118,19 @@ export default function BuildPlanScreen() {
         );
         return;
       }
+      // Avoid is a hard constraint, so it can't contradict a primary pick —
+      // otherwise the prompt would tell the model to both build around a food
+      // and never use it.
+      const macroGroup = MACRO_GROUPS.find(g =>
+        prefs[g].some(x => x.toLowerCase() === v.toLowerCase()),
+      );
+      if (macroGroup) {
+        Alert.alert(
+          `${v} is one of your picked foods`,
+          'Remove it from your foods first if you\u2019d rather avoid it.',
+        );
+        return;
+      }
       setPrefs(p => p.avoid.some(l => l.toLowerCase() === v.toLowerCase()) ? p : { ...p, avoid: [...p.avoid, v] });
     };
     const removeAvoidToken = (token: string) =>
@@ -637,12 +1139,12 @@ export default function BuildPlanScreen() {
     return (
       <Screen edges={['top', 'bottom']}>
         <StepProgressBar
-          step={qIdx + 1}
-          total={ONBOARDING_TOTAL}
-          label="Quick setup"
+          step={2}
+          total={2}
+          label={`Extra preferences · ${qIdx + 1} of ${SECONDARY_TOTAL}`}
         />
         <Header
-          title="A few quick questions"
+          title="Optional — a few extras"
           onBack={goBack}
           rightAction={
             <TouchableOpacity onPress={skipAll} hitSlop={10}>
@@ -771,64 +1273,116 @@ export default function BuildPlanScreen() {
               </>
             )}
 
-            {qIdx === 3 && (
-              <>
-                <Text style={styles.onbQuestion}>Any foods to avoid?</Text>
-                <Text style={styles.onbHint}>
-                  This is for foods you don&apos;t enjoy — your allergies are already saved in your profile.
-                </Text>
-                <View style={styles.tokenInputRow}>
-                  <TextInput
-                    style={styles.tokenInput}
-                    value={avoidInput}
-                    onChangeText={setAvoidInput}
-                    placeholder="e.g. cilantro, liver"
-                    placeholderTextColor={COLORS.textMuted}
-                    onSubmitEditing={() => { addAvoidToken(avoidInput); setAvoidInput(''); }}
-                    returnKeyType="done"
-                  />
-                  <TouchableOpacity
-                    style={[styles.tokenAddBtn, !avoidInput.trim() && styles.disabledBtn]}
-                    disabled={!avoidInput.trim()}
-                    onPress={() => { addAvoidToken(avoidInput); setAvoidInput(''); }}
-                  >
-                    <Text style={styles.tokenAddBtnText}>Add</Text>
-                  </TouchableOpacity>
-                </View>
-                <View style={styles.chipGrid}>
-                  {AVOID_SUGGESTIONS.map(s => {
-                    const active = prefs.avoid.some(l => l.toLowerCase() === s.toLowerCase());
-                    return (
-                      <TouchableOpacity
-                        key={s}
-                        style={[styles.chip, active && styles.chipActive]}
-                        onPress={() => active ? removeAvoidToken(prefs.avoid.find(l => l.toLowerCase() === s.toLowerCase())!) : addAvoidToken(s)}
-                        activeOpacity={0.85}
-                      >
-                        <Text style={[styles.chipText, active && styles.chipTextActive]}>{s}</Text>
+            {qIdx === 3 && (() => {
+              const avoidQuery = avoidInput.trim().toLowerCase();
+              const avoidPool = allFoodOptions ?? [];
+              const filteredAvoid = avoidQuery
+                ? avoidPool
+                    .filter(o => o.toLowerCase().includes(avoidQuery))
+                    .sort(
+                      (a, b) =>
+                        Number(!a.toLowerCase().startsWith(avoidQuery)) -
+                        Number(!b.toLowerCase().startsWith(avoidQuery)),
+                    )
+                : avoidPool;
+              const customAvoidTokens = prefs.avoid.filter(
+                t => !avoidPool.some(o => o.toLowerCase() === t.toLowerCase()),
+              );
+              const queryExactMatch = avoidQuery && avoidPool.some(
+                o => o.toLowerCase() === avoidQuery,
+              );
+              const queryAlreadyAdded = avoidQuery && prefs.avoid.some(
+                a => a.toLowerCase() === avoidQuery,
+              );
+              const showAddCustom = avoidQuery && !queryExactMatch && !queryAlreadyAdded;
+
+              const toggleAvoid = (item: string) => {
+                if (prefs.avoid.some(a => a.toLowerCase() === item.toLowerCase())) {
+                  removeAvoidToken(prefs.avoid.find(a => a.toLowerCase() === item.toLowerCase())!);
+                } else {
+                  addAvoidToken(item);
+                }
+              };
+
+              return (
+                <>
+                  <Text style={styles.onbQuestion}>Any foods to avoid?</Text>
+                  <Text style={styles.onbHint}>
+                    This is for foods you don&apos;t enjoy — your allergies are already saved in your profile.
+                  </Text>
+
+                  <View style={styles.macroSearchWrap}>
+                    <Ionicons name="search" size={18} color={COLORS.textMuted} />
+                    <TextInput
+                      style={styles.macroSearchInput}
+                      value={avoidInput}
+                      onChangeText={setAvoidInput}
+                      placeholder="Search foods or type your own"
+                      placeholderTextColor={COLORS.textMuted}
+                      returnKeyType="search"
+                      autoCorrect={false}
+                    />
+                    {avoidInput.length > 0 && (
+                      <TouchableOpacity onPress={() => setAvoidInput('')} hitSlop={8}>
+                        <Ionicons name="close-circle" size={18} color={COLORS.textMuted} />
                       </TouchableOpacity>
-                    );
-                  })}
-                </View>
-                {prefs.avoid.length > 0 && (
-                  <View style={styles.tokenList}>
-                    <Text style={styles.tokenListLabel}>Added</Text>
-                    <View style={styles.chipGrid}>
-                      {prefs.avoid.map(t => (
+                    )}
+                  </View>
+
+                  <ScrollView
+                    style={{ flex: 1 }}
+                    contentContainerStyle={styles.macroListBody}
+                    showsVerticalScrollIndicator={false}
+                    keyboardShouldPersistTaps="handled"
+                  >
+                    {showAddCustom && (
+                      <TouchableOpacity
+                        style={styles.macroPickRow}
+                        onPress={() => { addAvoidToken(avoidInput.trim()); setAvoidInput(''); }}
+                        activeOpacity={0.7}
+                      >
+                        <Ionicons name="add-circle" size={24} color={COLORS.green} />
+                        <Text style={styles.macroPickRowName}>Add &ldquo;{avoidInput.trim()}&rdquo;</Text>
+                      </TouchableOpacity>
+                    )}
+                    {customAvoidTokens.map((t, i) => (
+                      <TouchableOpacity
+                        key={t}
+                        style={[styles.macroPickRow, (i > 0 || showAddCustom) && styles.macroPickRowDivider]}
+                        onPress={() => toggleAvoid(t)}
+                        activeOpacity={0.7}
+                      >
+                        <Ionicons name="checkmark-circle" size={24} color={COLORS.green} />
+                        <Text style={styles.macroPickRowName}>{t}</Text>
+                      </TouchableOpacity>
+                    ))}
+                    {filteredAvoid.map((opt, i) => {
+                      const checked = prefs.avoid.some(a => a.toLowerCase() === opt.toLowerCase());
+                      return (
                         <TouchableOpacity
-                          key={t}
-                          style={[styles.chip, styles.chipActive]}
-                          onPress={() => removeAvoidToken(t)}
+                          key={opt}
+                          style={[styles.macroPickRow, (i > 0 || customAvoidTokens.length > 0 || showAddCustom) && styles.macroPickRowDivider]}
+                          onPress={() => toggleAvoid(opt)}
                           activeOpacity={0.7}
                         >
-                          <Text style={[styles.chipText, styles.chipTextActive]}>{t}  ✕</Text>
+                          <Ionicons
+                            name={checked ? 'checkmark-circle' : 'ellipse-outline'}
+                            size={24}
+                            color={checked ? COLORS.green : COLORS.textMuted}
+                          />
+                          <Text style={[styles.macroPickRowName, !checked && styles.macroPickRowNameOff]}>{opt}</Text>
                         </TouchableOpacity>
-                      ))}
-                    </View>
-                  </View>
-                )}
-              </>
-            )}
+                      );
+                    })}
+                    {filteredAvoid.length === 0 && customAvoidTokens.length === 0 && !showAddCustom && (
+                      <Text style={styles.macroEmpty}>
+                        {avoidQuery ? 'No matches.' : 'Loading foods…'}
+                      </Text>
+                    )}
+                  </ScrollView>
+                </>
+              );
+            })()}
           </ScrollView>
 
           <View style={[styles.footer, { paddingBottom: footerBottomPad }]}>
@@ -837,35 +1391,10 @@ export default function BuildPlanScreen() {
               onPress={goNext}
               activeOpacity={0.85}
             >
-              <Text style={styles.primaryBtnText}>{isLast ? 'Start picking meals' : 'Next'}</Text>
+              <Text style={styles.primaryBtnText}>{isLast ? 'Review' : 'Next'}</Text>
             </TouchableOpacity>
           </View>
         </KeyboardAvoidingView>
-      </Screen>
-    );
-  }
-
-  // ── All-slots-skipped guard ─────────────────────────────────────────────
-  if (activeSlots.length === 0) {
-    return (
-      <Screen edges={['top', 'bottom']}>
-        <Header title="Build My Plan" onBack={() => router.back()} />
-        <View style={styles.guardWrap}>
-          <Text style={styles.guardEmoji}>🍽️</Text>
-          <Text style={styles.guardTitle}>You&apos;ve skipped all meal slots</Text>
-          <Text style={styles.guardBody}>
-            Enable at least one slot in Personal Details to continue building a plan.
-          </Text>
-          <TouchableOpacity
-            style={styles.guardCta}
-            onPress={() => router.replace('/profile/personal-details')}
-          >
-            <Text style={styles.guardCtaText}>Open Personal Details</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.guardSecondary} onPress={() => router.back()}>
-            <Text style={styles.guardSecondaryText}>Close</Text>
-          </TouchableOpacity>
-        </View>
       </Screen>
     );
   }
@@ -883,19 +1412,150 @@ export default function BuildPlanScreen() {
     return selectionsBySlot[slot.id] ?? [];
   }
 
-  function isSelected(slot: MealSlot, recipeId: string): boolean {
-    return selectionsForSlot(slot).some(r => r.id === recipeId);
+  // ── Macro picker helpers ────────────────────────────────────────────────
+  // A food can be a preference or on the avoid list, never both — the same
+  // rule the loves/avoid questions already enforce between themselves.
+  function addMacroToken(group: MacroGroup, raw: string) {
+    const v = raw.trim();
+    if (!v) return;
+    if (prefs.avoid.some(a => a.toLowerCase() === v.toLowerCase())) {
+      Alert.alert(
+        `${v} is in foods to avoid`,
+        'A food can only be a preference or avoided. Pick one.',
+      );
+      return;
+    }
+    setPrefs(p =>
+      p[group].some(x => x.toLowerCase() === v.toLowerCase())
+        ? p
+        : { ...p, [group]: [...p[group], v] },
+    );
   }
 
-  function toggleSelection(slot: MealSlot, recipe: RecipeTemplate) {
-    setSelectionsBySlot(prev => {
-      const list = prev[slot.id] ?? [];
-      const exists = list.some(r => r.id === recipe.id);
-      const next = exists
-        ? list.filter(r => r.id !== recipe.id)
-        : [...list, recipe];
-      return { ...prev, [slot.id]: next };
+  function removeMacroToken(group: MacroGroup, token: string) {
+    setPrefs(p => ({ ...p, [group]: p[group].filter(t => t !== token) }));
+  }
+
+  function toggleMacroOption(group: MacroGroup, value: string) {
+    const existing = prefs[group].find(x => x.toLowerCase() === value.toLowerCase());
+    if (existing) removeMacroToken(group, existing);
+    else addMacroToken(group, value);
+  }
+
+  // ── AI shortlist helpers ────────────────────────────────────────────────
+  // Shared request payload for both the full build and a per-type top-up, so
+  // the two calls can never drift on which preferences they send.
+  function shortlistPrefsPayload() {
+    return {
+      proteins: prefs.proteins,
+      carbs: prefs.carbs,
+      fats: prefs.fats,
+      cuisines: prefs.cuisines,
+      cookTime: prefs.cookTime,
+      loves: prefs.loves,
+      avoid: prefs.avoid,
+    };
+  }
+
+  // Convert AI concepts into cards, dropping anything that trips the local
+  // dietary filter. The server treats allergies/diet as hard constraints, but
+  // this is a cheap second line of defence before a card reaches the user.
+  function conceptsToSafeCards(concepts: RecipeConcept[], category: RecipeCategory): RecipeTemplate[] {
+    return concepts
+      .map(c => conceptToTemplate(c, category))
+      .filter(card => applyDietaryFilter([card], profile).length > 0);
+  }
+
+  // The one AI call that powers the whole flow: one shortlist per active meal
+  // type, one scan. Called from the guide CTA and after a Regenerate.
+  async function runShortlistGeneration() {
+    if (shortlistLoading || activeCategories.length === 0) return;
+    setShortlistLoading(true);
+    try {
+      const result = await generatePlanShortlist({
+        mealTypes: activeCategories,
+        ...shortlistPrefsPayload(),
+      });
+      const next: Partial<Record<RecipeCategory, RecipeTemplate[]>> = {};
+      let total = 0;
+      activeCategories.forEach(cat => {
+        const cards = conceptsToSafeCards(result[cat] ?? [], cat);
+        next[cat] = cards;
+        total += cards.length;
+      });
+      if (total === 0) {
+        showToast("Couldn't build a shortlist that fits your profile — try adjusting your picks.");
+        return;
+      }
+      setShortlistByType(next);
+      setSelectedByType({});
+      setStep({ kind: 'shortlist' });
+    } catch (e) {
+      handleAIError(e, () => void runShortlistGeneration());
+    } finally {
+      setShortlistLoading(false);
+    }
+  }
+
+  // "More options" for a single meal type: appends a small fresh batch to that
+  // section only. One scan per tap, so it stays an explicit user action.
+  async function generateMoreForType(category: RecipeCategory) {
+    if (generateMoreLoadingByType[category]) return;
+    setGenerateMoreLoadingByType(prev => ({ ...prev, [category]: true }));
+    try {
+      const result = await generatePlanShortlist({
+        mealTypes: [category],
+        ...shortlistPrefsPayload(),
+        countPerType: { [category]: GENERATE_MORE_COUNT },
+      });
+      // Drop repeats of what's already on screen — the model doesn't see the
+      // existing shortlist, so near-duplicates are expected.
+      const seen = new Set((shortlistByType[category] ?? []).map(c => c.name.toLowerCase()));
+      const fresh = conceptsToSafeCards(result[category] ?? [], category)
+        .filter(card => !seen.has(card.name.toLowerCase()));
+      if (fresh.length === 0) {
+        showToast('No new options this time — try again or tweak your preferences.');
+        return;
+      }
+      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+      setShortlistByType(prev => ({ ...prev, [category]: [...(prev[category] ?? []), ...fresh] }));
+    } catch (e) {
+      handleAIError(e, () => void generateMoreForType(category));
+    } finally {
+      setGenerateMoreLoadingByType(prev => ({ ...prev, [category]: false }));
+    }
+  }
+
+  function toggleShortlistPick(category: RecipeCategory, card: RecipeTemplate) {
+    setSelectedByType(prev => {
+      const list = prev[category] ?? [];
+      const exists = list.some(r => r.id === card.id);
+      return {
+        ...prev,
+        [category]: exists ? list.filter(r => r.id !== card.id) : [...list, card],
+      };
     });
+  }
+
+  // Regenerate: back to the required picker so the user can change the inputs
+  // that matter, then re-run the full call from the review page. Resetting
+  // costs nothing — the scan is only spent when they tap Build again.
+  function handleRegenerate() {
+    Alert.alert(
+      'Start over?',
+      'This clears your current options and picks so you can change what you asked for.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Start over',
+          onPress: () => {
+            setShortlistByType({});
+            setSelectedByType({});
+            setStep({ kind: 'macroPicker', group: 'proteins' });
+          },
+        },
+      ],
+    );
   }
 
   // Lands the user on the current last page after meals are added, then
@@ -924,147 +1584,222 @@ export default function BuildPlanScreen() {
     }
   }
 
-  // "Suggest more": fetch a fresh batch of unseen meals and append. Suggest
-  // more is always available; tracking is purely for the popup nudge.
-  function addAutoPage(slot: MealSlot) {
+  // Shared AI failure handler for the free-scan-pool AI seams in this wizard
+  // (shortlist build, per-type top-up, Describe). Premium gate opens the
+  // shared paywall (matching What Can I Make / ScanTab) and retries the exact
+  // same call on a successful purchase; everything else is a lightweight
+  // toast. Suggest-more's own AI top-up is deliberately excluded — it already
+  // degrades silently to a toast on any failure (see addAutoPage below).
+  function handleAIError(e: unknown, retry?: () => void) {
+    console.warn('Meal suggestion failed:', e);
+    if (e instanceof AIError && e.code === 'not_premium') {
+      openPaywall({ reason: 'scan_limit', onSuccess: retry });
+      return;
+    }
+    if (
+      e instanceof AIError &&
+      (e.code === 'rate_limited' || e.code === 'ai_failed' || e.code === 'unauthorized')
+    ) {
+      showToast(e.message || 'Could not generate a suggestion right now. Please try again.');
+      return;
+    }
+    showToast('Could not generate a suggestion. Try again.');
+  }
+
+  // "Suggest more": append a fresh batch of unseen catalogue meals. Suggest
+  // more is always available; tracking is purely for the popup nudge. When the
+  // static pool is exhausted, fall back to an AI-generated batch before giving
+  // up — this is one of the two bounded seams where Build My Plan spends AI.
+  async function addAutoPage(slot: MealSlot) {
     const pool = byCategory[categoryForSlot(slot.name)] ?? [];
     const shown = new Set<string>();
     mealsForSlot(slot).forEach(c => shown.add(c.id));
     const cards = buildAutoPage(pool, shown, SUGGEST_BATCH);
-    if (cards.length === 0) {
-      // Pool exhausted — silently fall back to nudging Describe.
-      showToast('No more options — try Describe for custom ideas');
+    if (cards.length > 0) {
+      appendMealsForSlot(slot, cards, /* isSuggestMore */ true);
       return;
     }
-    appendMealsForSlot(slot, cards, /* isSuggestMore */ true);
+
+    // Pool exhausted — try an AI top-up. On any failure or empty result we
+    // degrade gracefully to the original Describe nudge rather than blocking
+    // the flow mid-scroll.
+    if (suggestMoreLoadingBySlot[slot.id]) return;
+    setSuggestMoreLoadingBySlot(prev => ({ ...prev, [slot.id]: true }));
+    try {
+      const concepts = await generateMealSuggestions({
+        mealType: categoryForSlot(slot.name),
+        count: SUGGEST_BATCH,
+        cuisines: prefs.cuisines,
+        cookTime: prefs.cookTime,
+        loves: prefs.loves,
+        avoid: prefs.avoid,
+      });
+      const category = categoryForSlot(slot.name);
+      const safe = concepts
+        .map(c => conceptToTemplate(c, category))
+        .filter(card => applyDietaryFilter([card], profile).length > 0);
+      if (safe.length === 0) {
+        showToast('No more options — try Describe for custom ideas');
+        return;
+      }
+      appendMealsForSlot(slot, safe, /* isSuggestMore */ true);
+    } catch (e) {
+      console.warn('Suggest-more AI top-up failed:', e);
+      showToast('No more options — try Describe for custom ideas');
+    } finally {
+      setSuggestMoreLoadingBySlot(prev => ({ ...prev, [slot.id]: false }));
+    }
   }
 
-  // Describe: generate a single custom card from the user's prompt and append.
-  function addDescribePage(slot: MealSlot, rawText: string) {
+  // Describe: generate a single custom meal from the user's prompt via AI and
+  // append it. The modal stays open until this resolves so we can surface
+  // errors and let the user retry without retyping.
+  async function addDescribePage(slot: MealSlot, rawText: string) {
     const text = rawText.trim();
-    if (!text) return;
-    const card = generateCustomCard(text, categoryForSlot(slot.name));
-    appendMealsForSlot(slot, [card], /* isSuggestMore */ false);
-    showToast('Generated new option');
+    if (!text || describeLoading) return;
+    const category = categoryForSlot(slot.name);
+    setDescribeLoading(true);
+    try {
+      const concepts = await generateMealSuggestions({
+        mealType: category,
+        count: 1,
+        cuisines: prefs.cuisines,
+        cookTime: prefs.cookTime,
+        loves: prefs.loves,
+        avoid: prefs.avoid,
+        description: text,
+      });
+      const card = concepts[0] ? conceptToTemplate(concepts[0], category) : null;
+      if (!card || applyDietaryFilter([card], profile).length === 0) {
+        showToast("Couldn't generate a suggestion that fits your profile — try describing it differently.");
+        return;
+      }
+      appendMealsForSlot(slot, [card], /* isSuggestMore */ false);
+      showToast('Generated new option');
+      setDescribeModalVisible(false);
+      setDescribeModalText('');
+    } catch (e) {
+      handleAIError(e, () => void addDescribePage(slot, rawText));
+    } finally {
+      setDescribeLoading(false);
+    }
+  }
+
+  // Resolve a recipe id to a card for calorie maths. Catalogue first, then any
+  // card generated this session, then an explicit extra (a just-swapped card
+  // whose state update hasn't landed yet).
+  function resolveCard(id: string, extra?: RecipeTemplate): RecipeTemplate | undefined {
+    if (extra && extra.id === id) return extra;
+    return recipesById.get(id) ?? sessionCardById.get(id);
+  }
+
+  // Gentle nudge after a swap: recompute the day's calories and flag a big
+  // miss against the daily target. Purely informational — the swap has already
+  // been applied and is never blocked or reverted.
+  function nudgeIfOffTarget(day: PlanDayMeal[], dayIdx: number, swappedIn: RecipeTemplate) {
+    const target = goals.dailyCalories;
+    if (!target || target <= 0) return;
+    const total = day.reduce((sum, m) => sum + (resolveCard(m.recipeId, swappedIn)?.calories ?? 0), 0);
+    if (total <= 0) return;
+    const delta = (total - target) / target;
+    if (Math.abs(delta) < SWAP_NUDGE_THRESHOLD) return;
+    const pct = Math.round(Math.abs(delta) * 100);
+    showToast(
+      `Heads up — this swap puts ${WEEKDAY_LABELS[dayIdx]} about ${pct}% ` +
+        `${delta > 0 ? 'over' : 'under'} your calorie target.`,
+    );
+  }
+
+  // Apply a swap to one preview meal, then nudge if the day drifts far from
+  // target. Shared by the browse-swap flow and the quick-swap sheet so both
+  // paths behave identically.
+  function applyPreviewSwap(dayIdx: number, mealIdx: number, recipe: RecipeTemplate) {
+    const nextDay = (previewDays[dayIdx] ?? []).map((m, mi) =>
+      mi === mealIdx ? { ...m, recipeId: recipe.id, recipeName: recipe.name } : m,
+    );
+    setPreviewDays(prev => prev.map((d, di) => (di === dayIdx ? nextDay : d)));
+    nudgeIfOffTarget(nextDay, dayIdx, recipe);
   }
 
   function handleCardPress(slot: MealSlot, recipe: RecipeTemplate) {
-    // In normal mode, tap toggles selection.
-    if (mode.kind === 'normal') {
-      toggleSelection(slot, recipe);
-      return;
-    }
-    // In preview-swap mode, swap the chosen recipe into the targeted preview meal.
-    if (mode.kind === 'preview-swap') {
-      const { dayIdx, mealIdx } = mode;
-      setPreviewDays(prev => prev.map((day, di) =>
-        di === dayIdx
-          ? day.map((m, mi) => mi === mealIdx ? { ...m, recipeId: recipe.id, recipeName: recipe.name } : m)
-          : day,
-      ));
-      setMode({ kind: 'normal' });
-      setStep({ kind: 'preview' });
-      return;
-    }
-    // In summary-swap mode, replace the targeted recipe in selections for that slot.
-    if (mode.kind === 'summary-swap') {
-      const targetSlot = activeSlots[mode.slotIdx];
-      if (!targetSlot) return;
-      setSelectionsBySlot(prev => {
-        const list = prev[targetSlot.id] ?? [];
-        const next = list.map(r => r.id === mode.oldRecipeId ? recipe : r);
-        return { ...prev, [targetSlot.id]: next };
-      });
-      setMode({ kind: 'normal' });
-      setStep({ kind: 'summary', slotIdx: mode.slotIdx });
-    }
+    // Browsing only ever happens in swap mode now — the initial picks come from
+    // the AI shortlist, so there's no selection toggling left on this screen.
+    if (mode.kind !== 'preview-swap') return;
+    const { dayIdx, mealIdx } = mode;
+    applyPreviewSwap(dayIdx, mealIdx, recipe);
+    // Keep the swapped-in card available as a future quick-swap candidate for
+    // this slot (and in "Meals in this plan") instead of it vanishing from
+    // everywhere but the one day it replaced.
+    setSelectionsBySlot(prev => {
+      const list = prev[slot.id] ?? [];
+      return list.some(r => r.id === recipe.id)
+        ? prev
+        : { ...prev, [slot.id]: [...list, recipe] };
+    });
+    setMode({ kind: 'normal' });
+    setStep({ kind: 'preview' });
   }
 
-  function handleContinueFromPick(slot: MealSlot, slotIdx: number) {
-    const sel = selectionsForSlot(slot);
-    if (sel.length === 0) {
+  // ── Build the week from the shortlist picks ──────────────────────────────
+  // Plain logic, no AI: every slot inherits its meal type's picked favourites,
+  // then buildPreviewDays' rotation spreads them across the 7 days. One
+  // favourite repeats daily; several rotate — the emergent meal-prep-vs-variety
+  // behaviour we want without asking the user another question.
+  function handleBuildWeek() {
+    const typesWithPicks = activeCategories.filter(c => (selectedByType[c] ?? []).length > 0);
+    if (typesWithPicks.length === 0) {
       Alert.alert(
         'Pick at least one meal',
-        `Select at least one ${slot.name.toLowerCase()} or skip this slot.`,
+        'Choose at least one favourite from any meal type to build your week.',
       );
       return;
     }
-    if (sel.length === 1) {
+
+    const proceed = () => {
+      const bySlot: Record<string, RecipeTemplate[]> = {};
+      activeSlots.forEach(slot => {
+        bySlot[slot.id] = selectedByType[categoryForSlot(slot.name)] ?? [];
+      });
+      setSelectionsBySlot(bySlot);
+      setPreviewDays(buildPreviewDays(activeSlots, bySlot));
+      setExpandedDays(new Set([0]));
+      setStep({ kind: 'preview' });
+    };
+
+    // A meal type with no picks is treated as skipped, matching the old
+    // per-slot skip semantics — but confirm first so it's never a surprise.
+    const skipped = activeCategories.filter(c => (selectedByType[c] ?? []).length === 0);
+    if (skipped.length > 0) {
       Alert.alert(
-        `You've selected 1 ${slot.name.toLowerCase()}`,
-        `Your plan will have the same ${slot.name.toLowerCase()} every day.`,
+        `Skip ${skipped.join(' and ')}?`,
+        `You haven't picked anything for ${skipped.join(' or ')}, so ${
+          skipped.length === 1 ? 'it' : 'they'
+        } won't appear in your plan.`,
         [
-          { text: 'Select more', style: 'cancel' },
-          { text: 'Continue anyway', onPress: () => setStep({ kind: 'summary', slotIdx }) },
+          { text: 'Go back', style: 'cancel' },
+          { text: 'Build anyway', onPress: proceed },
         ],
       );
       return;
     }
-    setStep({ kind: 'summary', slotIdx });
-  }
-
-  function handleSkipSlot(slot: MealSlot, slotIdx: number) {
-    Alert.alert(
-      `No ${slot.name}?`,
-      `${slot.name} will be removed from your plan entirely.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Skip',
-          style: 'destructive',
-          onPress: () => {
-            // Clear selections for this slot, then advance.
-            setSelectionsBySlot(prev => ({ ...prev, [slot.id]: [] }));
-            advanceFromSlot(slotIdx, /* skipped */ true);
-          },
-        },
-      ],
-    );
-  }
-
-  function advanceFromSlot(slotIdx: number, _skipped: boolean) {
-    if (slotIdx >= activeSlots.length - 1) {
-      // Build the preview and head there.
-      const days = buildPreviewDays(activeSlots, selectionsBySlot);
-      setPreviewDays(days);
-      setExpandedDays(new Set([0]));
-      setStep({ kind: 'preview' });
-      return;
-    }
-    // Forward navigation: if the next slot is already completed (has selections),
-    // show its summary instead of forcing the user back through the pick page.
-    // Otherwise show the pick page so the user can choose meals for that slot.
-    const nextIdx = slotIdx + 1;
-    const nextSlot = activeSlots[nextIdx];
-    const nextHasSelections = (selectionsBySlot[nextSlot.id] ?? []).length > 0;
-    setStep(
-      nextHasSelections
-        ? { kind: 'summary', slotIdx: nextIdx }
-        : { kind: 'pick', slotIdx: nextIdx },
-    );
-  }
-
-  function handleBackFromPick(slotIdx: number) {
-    if (slotIdx === 0) {
-      // First slot's pick → return to the guide page.
-      setStep({ kind: 'guide' });
-      return;
-    }
-    // Go back to the previous slot's summary.
-    setStep({ kind: 'summary', slotIdx: slotIdx - 1 });
-  }
-
-  function handleBackFromSummary(slotIdx: number) {
-    // Per spec: from first slot's summary, back returns to that slot's pick step.
-    if (slotIdx === 0) {
-      setStep({ kind: 'pick', slotIdx: 0 });
-      return;
-    }
-    setStep({ kind: 'summary', slotIdx: slotIdx - 1 });
+    proceed();
   }
 
   // ── Activate flow ──────────────────────────────────────────────────────
   function handleActivate() {
+    // Client-only Pro gate: activating a built plan has no edge function of
+    // its own to return a not_premium error, so this is checked directly
+    // against the live RevenueCat entitlement. A successful purchase resumes
+    // straight into activation rather than requiring a second tap.
+    if (!isPro) {
+      openPaywall({
+        reason: 'premium_feature',
+        headline: 'Activate your plan with Pro',
+        onSuccess: handleActivate,
+      });
+      return;
+    }
+
     const planName = autoPlanName();
     const plan: MealPlan = {
       // UUID so the local id doubles as the server plans.id primary key.
@@ -1080,6 +1815,34 @@ export default function BuildPlanScreen() {
     };
 
     const finalize = () => {
+      // Persist any AI/Describe-generated ("custom-") cards referenced by the
+      // plan into savedRecipes (source 'ai') so buildTemplatesFromPlan can
+      // resolve their real nutrition — both now and after restart via
+      // hydrateActivePlanIfNeeded — instead of falling back to fabricated
+      // values. Catalogue picks already resolve by id, so only custom cards
+      // need saving. Keyed on recipeId = card.id so re-saves dedupe.
+      const savedCustomIds = new Set<string>();
+      previewDays.forEach(day =>
+        day.forEach(meal => {
+          if (!meal.recipeId.startsWith('custom-') || savedCustomIds.has(meal.recipeId)) return;
+          const card = sessionCardById.get(meal.recipeId);
+          if (!card) return;
+          savedCustomIds.add(meal.recipeId);
+          ensureRecipeSaved({
+            recipeId: card.id,
+            name: card.name,
+            category: card.category,
+            calories: card.calories,
+            cookTimeMin: card.cookTimeMin,
+            macros: card.macros,
+            ingredients: card.ingredients,
+            steps: card.steps,
+            difficulty: card.difficulty,
+            source: 'ai',
+          });
+        }),
+      );
+
       // Auto-save to Saved Plans (matches spec: every Build My Plan run saves).
       useMealStore.setState(state => ({ savedPlans: [plan, ...state.savedPlans] }));
       activatePlan(plan);
@@ -1114,49 +1877,42 @@ export default function BuildPlanScreen() {
     );
   }
 
-  // ── Render: PICK step ───────────────────────────────────────────────────
+  // ── Render: PICK step (swap browsing only) ──────────────────────────────
+  // Reached only from a preview swap. It's the catalogue-browse + Describe UI,
+  // reused unchanged: tap any card to drop it into the meal being replaced.
   if (step.kind === 'pick') {
     const slot = activeSlots[step.slotIdx];
-    const slotPages = pagesForSlot(slot);
-    const sel = selectionsForSlot(slot);
-    const currentPageIdx = pageIdxBySlot[slot.id] ?? 0;
 
-    const headerTitle = slot.name;
-    const headerSubtitle = mode.kind === 'preview-swap'
-      ? `Swap meal · ${slot.name}`
-      : mode.kind === 'summary-swap'
-      ? `Swap meal · ${slot.name}`
-      : undefined;
+    // Defensive: pick has no meaning outside a swap, so offer a way back
+    // rather than letting a tap silently do nothing.
+    if (!slot || mode.kind !== 'preview-swap') {
+      return (
+        <Screen edges={['top', 'bottom']}>
+          <Header title="Nothing to swap" onBack={() => setStep({ kind: 'preview' })} />
+          <View style={styles.guardWrap}>
+            <Text style={styles.guardBody}>
+              Head back to your plan and tap Swap on the meal you want to change.
+            </Text>
+            <TouchableOpacity style={styles.guardCta} onPress={() => setStep({ kind: 'preview' })}>
+              <Text style={styles.guardCtaText}>Back to plan</Text>
+            </TouchableOpacity>
+          </View>
+        </Screen>
+      );
+    }
+
+    const slotPages = pagesForSlot(slot);
+    const currentPageIdx = pageIdxBySlot[slot.id] ?? 0;
 
     return (
       <Screen edges={['top', 'bottom']}>
-        {/* Progress bar — only in normal flow. Suppressed in swap modes. */}
-        {mode.kind === 'normal' && (
-          <StepProgressBar
-            step={step.slotIdx + 1}
-            total={activeSlots.length}
-            label={slot.name}
-          />
-        )}
-
         <Header
-          title={headerTitle}
-          subtitle={headerSubtitle}
+          title={slot.name}
+          subtitle={`Swap meal · ${slot.name}`}
           onBack={() => {
-            if (mode.kind !== 'normal') {
-              setMode({ kind: 'normal' });
-              setStep(mode.kind === 'preview-swap' ? { kind: 'preview' } : { kind: 'summary', slotIdx: mode.slotIdx });
-              return;
-            }
-            handleBackFromPick(step.slotIdx);
+            setMode({ kind: 'normal' });
+            setStep({ kind: 'preview' });
           }}
-          rightAction={
-            mode.kind === 'normal' ? (
-              <TouchableOpacity onPress={() => handleContinueFromPick(slot, step.slotIdx)} hitSlop={10}>
-                <Text style={styles.headerRightText}>Continue</Text>
-              </TouchableOpacity>
-            ) : null
-          }
         />
 
         {/* Elevated card wraps everything below the header. The card's
@@ -1170,13 +1926,8 @@ export default function BuildPlanScreen() {
             {/* Intro */}
             <View style={styles.cardIntro}>
               <Text style={styles.pickIntroText}>
-                {mode.kind === 'normal'
-                  ? `Pick your favourites. We'll rotate them through the week.`
-                  : `Tap a card to swap.`}
+                Tap a card to swap it into your plan.
               </Text>
-              {mode.kind === 'normal' && (
-                <Text style={styles.pickCounter}>{sel.length} selected</Text>
-              )}
             </View>
 
             {/* Horizontal pager — fills available card height. */}
@@ -1207,8 +1958,8 @@ export default function BuildPlanScreen() {
                         <PickCard
                           key={r.id}
                           recipe={r}
-                          selected={isSelected(slot, r.id)}
-                          showCheck={mode.kind === 'normal'}
+                          selected={false}
+                          showCheck={false}
                           onPress={() => handleCardPress(slot, r)}
                         />
                       ))}
@@ -1217,12 +1968,18 @@ export default function BuildPlanScreen() {
                           Describe-suggestion popup once per slot. */}
                       {page.isLast && (
                         <TouchableOpacity
-                          style={styles.findMoreCard}
+                          style={[
+                            styles.findMoreCard,
+                            suggestMoreLoadingBySlot[slot.id] && styles.disabledBtn,
+                          ]}
                           onPress={() => addAutoPage(slot)}
+                          disabled={!!suggestMoreLoadingBySlot[slot.id]}
                           activeOpacity={0.85}
                         >
                           <Text style={styles.findMoreEmoji}>✨</Text>
-                          <Text style={styles.findMoreText}>Suggest more</Text>
+                          <Text style={styles.findMoreText}>
+                            {suggestMoreLoadingBySlot[slot.id] ? 'Finding more…' : 'Suggest more'}
+                          </Text>
                         </TouchableOpacity>
                       )}
                     </ScrollView>
@@ -1257,14 +2014,6 @@ export default function BuildPlanScreen() {
                 <Text style={styles.describeOpenIcon}>✎</Text>
                 <Text style={styles.describeOpenBtnText}>Describe what you want</Text>
               </TouchableOpacity>
-              {mode.kind === 'normal' && (
-                <TouchableOpacity
-                  style={styles.skipRow}
-                  onPress={() => handleSkipSlot(slot, step.slotIdx)}
-                >
-                  <Text style={styles.skipText}>No {slot.name}</Text>
-                </TouchableOpacity>
-              )}
             </View>
           </View>
         </KeyboardAvoidingView>
@@ -1306,17 +2055,20 @@ export default function BuildPlanScreen() {
                   autoFocus
                 />
                 <TouchableOpacity
-                  style={[styles.describeGenBtn, !describeModalText.trim() && styles.disabledBtn]}
-                  disabled={!describeModalText.trim()}
+                  style={[
+                    styles.describeGenBtn,
+                    (!describeModalText.trim() || describeLoading) && styles.disabledBtn,
+                  ]}
+                  disabled={!describeModalText.trim() || describeLoading}
                   onPress={() => {
                     const text = describeModalText.trim();
                     if (!text) return;
                     addDescribePage(slot, text);
-                    setDescribeModalVisible(false);
-                    setDescribeModalText('');
                   }}
                 >
-                  <Text style={styles.describeGenBtnText}>Generate</Text>
+                  <Text style={styles.describeGenBtnText}>
+                    {describeLoading ? 'Generating…' : 'Generate'}
+                  </Text>
                 </TouchableOpacity>
               </Pressable>
             </Pressable>
@@ -1382,70 +2134,89 @@ export default function BuildPlanScreen() {
     );
   }
 
-  // ── Render: SUMMARY step ───────────────────────────────────────────────
-  if (step.kind === 'summary') {
-    const slot = activeSlots[step.slotIdx];
-    const sel = selectionsForSlot(slot);
-    const avgCalories = sel.length === 0 ? 0 : Math.round(sel.reduce((s, r) => s + r.calories, 0) / sel.length);
-    const avgProtein = sel.length === 0 ? 0 : Math.round(sel.reduce((s, r) => s + r.macros.protein, 0) / sel.length);
+  // ── Render: SHORTLIST step ─────────────────────────────────────────────
+  // One scrollable screen with a section per active meal type. Each section is
+  // only a handful of cards, so there's no pagination — a deliberate
+  // simplification over the old per-slot paginated catalogue walk.
+  if (step.kind === 'shortlist') {
+    const totalPicked = activeCategories.reduce(
+      (sum, c) => sum + (selectedByType[c] ?? []).length,
+      0,
+    );
 
     return (
       <Screen edges={['top', 'bottom']}>
-        {/* Progress bar — same step number as the corresponding pick page,
-            since the summary belongs to that meal type. */}
-        <StepProgressBar
-          step={step.slotIdx + 1}
-          total={activeSlots.length}
-          label={`${slot.name} · Summary`}
-        />
-
         <Header
-          title={slot.name}
-          subtitle="Summary"
-          onBack={() => handleBackFromSummary(step.slotIdx)}
+          title="Pick your favourites"
+          subtitle={`${totalPicked} selected`}
+          onBack={() => setStep({ kind: 'guide' })}
           rightAction={
-            <TouchableOpacity
-              onPress={() => advanceFromSlot(step.slotIdx, false)}
-              hitSlop={10}
-            >
-              <Text style={styles.headerRightText}>Continue</Text>
+            <TouchableOpacity onPress={handleRegenerate} hitSlop={10}>
+              <Text style={styles.headerRightMutedText}>Redo</Text>
             </TouchableOpacity>
           }
         />
 
         <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
-          <View style={styles.summaryHeader}>
-            <Text style={styles.summaryCount}>{sel.length} selected</Text>
-            <Text style={styles.summaryAvg}>
-              avg {avgCalories} cal · {avgProtein}g protein
-            </Text>
-          </View>
+          <Text style={styles.onbHint}>
+            Choose the ones you&apos;d actually eat. Pick one and it repeats daily; pick
+            several and we&apos;ll rotate them through the week.
+          </Text>
 
-          {sel.map(r => (
-            <View key={r.id} style={styles.summaryRow}>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.summaryName} numberOfLines={1}>{r.name}</Text>
-                <Text style={styles.summaryMeta}>{r.calories} cal · P {r.macros.protein}g</Text>
+          {activeCategories.map(category => {
+            const options = shortlistByType[category] ?? [];
+            const picked = selectedByType[category] ?? [];
+            const busy = !!generateMoreLoadingByType[category];
+            return (
+              <View key={category} style={styles.shortlistSection}>
+                <Text style={styles.shortlistSectionTitle}>{category}</Text>
+                <Text style={styles.shortlistSectionMeta}>
+                  {picked.length === 0
+                    ? 'Nothing picked yet — skip this meal by leaving it empty.'
+                    : `${picked.length} picked`}
+                </Text>
+
+                {options.length === 0 ? (
+                  <Text style={styles.shortlistEmpty}>No options for {category} this time.</Text>
+                ) : (
+                  options.map(card => (
+                    <PickCard
+                      key={card.id}
+                      recipe={card}
+                      selected={picked.some(r => r.id === card.id)}
+                      showCheck
+                      onPress={() => toggleShortlistPick(category, card)}
+                    />
+                  ))
+                )}
+
+                <TouchableOpacity
+                  style={[styles.shortlistGenMore, busy && styles.disabledBtn]}
+                  onPress={() => generateMoreForType(category)}
+                  disabled={busy}
+                  activeOpacity={0.85}
+                >
+                  <Text style={styles.shortlistGenMoreText}>
+                    {busy ? 'Finding more…' : `✨ More ${category.toLowerCase()} options`}
+                  </Text>
+                </TouchableOpacity>
               </View>
-              <TouchableOpacity
-                style={styles.swapBtn}
-                onPress={() => {
-                  setMode({ kind: 'summary-swap', slotIdx: step.slotIdx, oldRecipeId: r.id });
-                  setStep({ kind: 'pick', slotIdx: step.slotIdx });
-                }}
-              >
-                <Text style={styles.swapBtnText}>Swap</Text>
-              </TouchableOpacity>
-            </View>
-          ))}
-
-          <TouchableOpacity
-            style={styles.addMoreBtn}
-            onPress={() => setStep({ kind: 'pick', slotIdx: step.slotIdx })}
-          >
-            <Text style={styles.addMoreText}>+ Add more</Text>
-          </TouchableOpacity>
+            );
+          })}
         </ScrollView>
+
+        <View style={[styles.footer, { paddingBottom: footerBottomPad }]}>
+          <TouchableOpacity
+            style={[styles.primaryBtn, styles.primaryBtnFull, totalPicked === 0 && styles.disabledBtn]}
+            disabled={totalPicked === 0}
+            onPress={handleBuildWeek}
+            activeOpacity={0.85}
+          >
+            <Text style={styles.primaryBtnText}>
+              {totalPicked === 0 ? 'Pick at least one meal' : 'Build my week'}
+            </Text>
+          </TouchableOpacity>
+        </View>
       </Screen>
     );
   }
@@ -1453,11 +2224,16 @@ export default function BuildPlanScreen() {
   // ── Render: PREVIEW step ───────────────────────────────────────────────
 
   // Plan-wide totals + the unique meal list shown at the top of the preview.
-  // Recipes are looked up by id so we can render calorie/macro details for
-  // catalogue items; custom (Describe-generated) picks fall back to the
-  // PlanDayMeal name only.
+  // Recipes are looked up by id so we can render calorie/macro details.
+  // Catalogue items come from `recipes`; AI/Describe ("custom-") cards are
+  // pulled from this session's cards so their real nutrition shows in the
+  // preview totals (they aren't in the catalogue, and savedRecipes isn't
+  // populated until activation).
   const recipeById = new Map<string, RecipeTemplate>();
   recipes.forEach(r => recipeById.set(r.id, r));
+  sessionCardById.forEach((card, id) => {
+    if (!recipeById.has(id)) recipeById.set(id, card);
+  });
   // Walk every selection list — not previewDays — so meals the user picked
   // but happened to land on a non-rotation day still surface here.
   const distinctMeals: { recipe: RecipeTemplate | undefined; name: string; slotName: string }[] = [];
@@ -1502,7 +2278,7 @@ export default function BuildPlanScreen() {
       <Header
         title="Preview your plan"
         subtitle="Tap any meal to swap it"
-        onBack={() => setStep({ kind: 'summary', slotIdx: activeSlots.length - 1 })}
+        onBack={() => setStep({ kind: 'shortlist' })}
       />
 
       <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
@@ -1655,13 +2431,7 @@ export default function BuildPlanScreen() {
                           key={c.id}
                           style={styles.swapItem}
                           onPress={() => {
-                            setPreviewDays(prev => prev.map((d, di) =>
-                              di === quickSwap.dayIdx
-                                ? d.map((m, mi) => mi === quickSwap.mealIdx
-                                    ? { ...m, recipeId: c.id, recipeName: c.name }
-                                    : m)
-                                : d,
-                            ));
+                            applyPreviewSwap(quickSwap.dayIdx, quickSwap.mealIdx, c);
                             setQuickSwap(null);
                           }}
                         >
@@ -1965,7 +2735,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
   },
   describeCard: {
-    backgroundColor: COLORS.card,
+    backgroundColor: OPAQUE_SHEET_BG,
     borderRadius: 16,
     padding: 16,
     gap: 12,
@@ -2286,6 +3056,52 @@ const styles = StyleSheet.create({
   tokenList: { gap: 8, marginTop: 4 },
   tokenListLabel: { color: COLORS.textSecondary, fontSize: 11, letterSpacing: 1, fontWeight: '700' },
 
+  // Macro picker (searchable checklist loaded from Supabase)
+  macroLoading: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 },
+  macroLoadingText: { color: COLORS.textSecondary, fontSize: 14 },
+  macroHint: { paddingHorizontal: 16, marginTop: 8, marginBottom: 4 },
+  macroSearchWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginHorizontal: 16,
+    marginBottom: 4,
+    paddingHorizontal: 12,
+    paddingVertical: Platform.OS === 'ios' ? 10 : 4,
+    backgroundColor: COLORS.elevated,
+    borderRadius: 12,
+  },
+  macroSearchInput: { flex: 1, color: COLORS.text, fontSize: 15 },
+  macroListBody: { paddingHorizontal: 16, paddingTop: 4, paddingBottom: 24 },
+  macroPickRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 13,
+  },
+  macroPickRowDivider: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: COLORS.border },
+  macroPickRowName: { color: COLORS.text, fontSize: 16, fontWeight: '600', flexShrink: 1 },
+  macroPickRowNameOff: { color: COLORS.textSecondary, fontWeight: '500' },
+  macroEmpty: { color: COLORS.textMuted, fontSize: 14, paddingVertical: 20, textAlign: 'center' },
+  macroError: { gap: 12, paddingVertical: 16, alignItems: 'center' },
+  macroErrorText: { color: COLORS.textSecondary, fontSize: 14, textAlign: 'center', lineHeight: 20 },
+  macroRetryBtn: {
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: COLORS.green,
+  },
+  macroRetryText: { color: COLORS.green, fontSize: 14, fontWeight: '700' },
+  macroFallback: {
+    marginTop: 20,
+    paddingTop: 16,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: COLORS.border,
+    gap: 8,
+  },
+  macroFallbackLabel: { color: COLORS.textMuted, fontSize: 12, fontWeight: '600' },
+
   // Preview header cards
   planNameCard: {
     backgroundColor: COLORS.card,
@@ -2396,4 +3212,44 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   swapCancelText: { color: COLORS.text, fontSize: 13, fontWeight: '600' },
+
+  // Macro picker section headings
+  macroSectionTitle: { color: COLORS.text, fontSize: 15, fontWeight: '700', marginTop: 8 },
+
+  // Shortlist step
+  shortlistSection: { marginBottom: 20 },
+  shortlistSectionTitle: { color: COLORS.text, fontSize: 16, fontWeight: '700', marginBottom: 2 },
+  shortlistSectionMeta: { color: COLORS.textSecondary, fontSize: 12, marginBottom: 10 },
+  shortlistEmpty: {
+    color: COLORS.textMuted,
+    fontSize: 13,
+    fontStyle: 'italic',
+    paddingVertical: 8,
+  },
+  shortlistGenMore: {
+    borderWidth: 1.5,
+    borderStyle: 'dashed',
+    borderColor: COLORS.green,
+    borderRadius: 12,
+    paddingVertical: 12,
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  shortlistGenMoreText: { color: COLORS.green, fontSize: 13, fontWeight: '700' },
+
+  // Shortlist generation loading screen
+  loadingWrap: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+    gap: 12,
+  },
+  loadingText: { color: COLORS.text, fontSize: 16, fontWeight: '700' },
+  loadingSub: {
+    color: COLORS.textSecondary,
+    fontSize: 13,
+    textAlign: 'center',
+    lineHeight: 19,
+  },
 });

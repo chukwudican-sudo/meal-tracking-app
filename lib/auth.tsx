@@ -18,6 +18,7 @@ import type { Session, User } from '@supabase/supabase-js';
 
 import { supabase } from './supabase';
 import { useMealStore } from '@/store/useMealStore';
+import { syncPurchasesIdentity } from './purchases';
 import {
   clearPendingPassword,
   getPendingCredentials,
@@ -78,15 +79,20 @@ export async function signUpWithEmail(email: string, password: string): Promise<
     };
   }
 
+  // Capture the email locally unconditionally — not just in the
+  // needsVerification branch below. The very first sync push for this account
+  // (lib/sync/mappers.ts#profileToUsersRow) reads profile.email, and with
+  // "Confirm email" off there's a session immediately and no other point in
+  // this flow where the account's email gets mirrored into the store —
+  // leaving it unset here means that first push silently sends email: null.
+  useMealStore.getState().updateProfile({ email: email.trim() });
+
   // With "Confirm email" on, there's a user but no session until verification.
   const needsVerification = !data.session && !!data.user;
   if (needsVerification) {
     // Remember locally that an unverified account exists so the Home banner can
     // prompt the user to verify — there's no session yet to infer this from.
-    useMealStore.getState().updateProfile({
-      email: email.trim(),
-      pendingEmailVerification: true,
-    });
+    useMealStore.getState().updateProfile({ pendingEmailVerification: true });
     // Keep the password briefly + securely so we can silently re-authenticate
     // (and clear the banner) once the user taps the emailed confirmation link.
     void savePendingPassword(email.trim(), password);
@@ -98,6 +104,21 @@ export async function signInWithEmail(email: string, password: string): Promise<
   const { data, error } = await supabase.auth.signInWithPassword({
     email: email.trim(),
     password,
+  });
+  if (error) return { error: error.message };
+  return { error: null, userId: data.user?.id };
+}
+
+// Verify the 6-digit signup code from the confirmation email. On success this
+// creates a confirmed session (same as the old tap-the-link flow did via
+// exchangeCodeForSession) — the AuthProvider effect below then clears
+// pendingEmailVerification + the stored signup password, and SyncProvider
+// reconciles. The email template must render {{ .Token }} for this to work.
+export async function verifySignupOtp(email: string, token: string): Promise<AuthResult> {
+  const { data, error } = await supabase.auth.verifyOtp({
+    email: email.trim(),
+    token: token.trim(),
+    type: 'signup',
   });
   if (error) return { error: error.message };
   return { error: null, userId: data.user?.id };
@@ -163,10 +184,15 @@ function parseRetryAfterSeconds(message: string): number | null {
 // Deep links from email confirmation / password reset arrive as
 // `mealapp://auth/...?code=<pkce_code>`. Exchange that code for a session.
 export async function exchangeCodeFromUrl(url: string): Promise<AuthResult> {
+  console.info(`[exchangeCodeFromUrl] start ${new Date().toISOString()}`);
   const { queryParams } = Linking.parse(url);
   const code = typeof queryParams?.code === 'string' ? queryParams.code : null;
-  if (!code) return { error: 'This link is missing its auth code or has expired.' };
+  if (!code) {
+    console.info(`[exchangeCodeFromUrl] end ${new Date().toISOString()} — no code param`);
+    return { error: 'This link is missing its auth code or has expired.' };
+  }
   const { error } = await supabase.auth.exchangeCodeForSession(code);
+  console.info(`[exchangeCodeFromUrl] end ${new Date().toISOString()} — exchangeCodeForSession error=`, error?.message ?? null);
   return { error: error ? error.message : null };
 }
 
@@ -226,6 +252,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       sub.subscription.unsubscribe();
     };
   }, []);
+
+  // Keep RevenueCat's identity in lockstep with the Supabase session: log in
+  // with the Supabase user id on sign-in so the revenuecat-webhook function
+  // can resolve the right `users` row, and log out (back to an anonymous
+  // RevenueCat id) on sign-out. Guarded against re-firing on token refreshes
+  // (onAuthStateChange fires repeatedly for the same user) and against
+  // running before the initial getSession() resolves.
+  const lastSyncedUserIdRef = useRef<string | null | undefined>(undefined);
+  useEffect(() => {
+    if (initializing) return;
+    const userId = session?.user?.id ?? null;
+    if (lastSyncedUserIdRef.current === userId) return;
+    lastSyncedUserIdRef.current = userId;
+    void syncPurchasesIdentity(userId);
+  }, [session, initializing]);
 
   // Once we observe a confirmed session, the account is verified — clear the
   // pending flag permanently so the banner never returns, and drop the stored

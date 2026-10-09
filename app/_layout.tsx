@@ -10,10 +10,16 @@ import { ToastHost } from '@/components/ToastHost';
 import { UndoSnackbarHost } from '@/components/UndoSnackbarHost';
 import { AuthProvider } from '@/lib/auth';
 import { SyncProvider } from '@/lib/sync/SyncProvider';
+import { configurePurchases } from '@/lib/purchases';
 
 export const unstable_settings = {
   anchor: '(tabs)',
 };
+
+// Configure the RevenueCat SDK once, at module load — before AuthProvider's
+// first session lookup resolves, so identity sync (lib/auth.tsx) always finds
+// the SDK already configured.
+configurePurchases();
 
 // Shared options for full-screen pages: standard iOS push presentation so they
 // slide in from the right (and back out to the right). `card` is required for
@@ -44,6 +50,7 @@ export default function RootLayout() {
             <Stack.Screen name="auth/forgot-password"  options={fullScreenSlide} />
             <Stack.Screen name="auth/reset"            options={{ headerShown: false, animation: 'fade', gestureEnabled: false }} />
             <Stack.Screen name="auth/callback"         options={{ headerShown: false, animation: 'fade', gestureEnabled: false }} />
+            <Stack.Screen name="auth/verify-code"      options={{ presentation: 'modal', headerShown: false, animation: 'slide_from_bottom' }} />
             <Stack.Screen name="settings"      options={fullScreenSlide} />
             <Stack.Screen name="meal/[id]"     options={{ presentation: 'card', headerShown: false, animation: 'slide_from_right' }} />
             <Stack.Screen name="cart"          options={fullScreenSlide} />
@@ -85,6 +92,12 @@ export default function RootLayout() {
 
             {/* Generic fallback `modal` route stays as a card-sheet. */}
             <Stack.Screen name="modal"         options={{ presentation: 'modal', title: 'Modal' }} />
+
+            {/* Reusable Pro paywall — always opened via lib/paywall.ts#openPaywall. */}
+            <Stack.Screen
+              name="paywall"
+              options={{ presentation: 'modal', headerShown: false, animation: 'slide_from_bottom' }}
+            />
           </Stack>
           <UndoSnackbarHost />
           <ToastHost />

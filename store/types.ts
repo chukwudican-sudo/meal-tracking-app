@@ -222,6 +222,25 @@ export interface RecipeTemplate {
   ingredients: Ingredient[];
   steps: string[];            // numbered cooking steps in order
   difficulty?: RecipeDifficulty; // shown on the full recipe detail page
+  // True for the subset of the premade catalog available to every user,
+  // free tier included. Undefined/false means viewing the full recipe (and
+  // adding it to a plan) requires an active Pro subscription — see
+  // lib/entitlements.ts.
+  isFree?: boolean;
+}
+
+// Full recipe concept used by Custom Recipe / What Can I Make AI suggestions.
+// Same shape as a RecipeTemplate without a catalog id — ready to seed the
+// concept screen or pass to ensureRecipeSaved.
+export interface RecipeConcept {
+  name: string;
+  category: RecipeCategory;
+  calories: number;
+  cookTimeMin: number;
+  difficulty?: RecipeDifficulty;
+  macros: Macros;
+  ingredients: Ingredient[];
+  steps?: string[];
 }
 
 export type SavedRecipeSource = 'premade' | 'ai' | 'manual';
@@ -337,9 +356,16 @@ export interface AppStore {
   savedPlans: MealPlan[];             // user-snapshotted plans
   viewedRecipeIds: string[];          // saved recipe ids the user has opened (clears NEW tag)
 
+  // Persisted "foods to avoid" from Build My Plan — survives across sessions so
+  // the user doesn't have to re-enter custom items like "shellfish" each time.
+  planAvoidFoods: string[];
+
   // Ephemeral swap coordination (not persisted across launches in practice).
   pendingSwap: PendingSwap | null;
   customizeDraft: CustomizeDraft | null;
+  // Transient handoff from What Can I Make → Custom Recipe (AI suggestion).
+  // Not persisted / never synced — reset on every app launch.
+  pendingRecipeConcept: RecipeConcept | null;
   // In-progress single-meal edit (popup + edit routes). Not persisted.
   mealEditSession: MealEditSession | null;
 
@@ -375,6 +401,7 @@ export interface AppStore {
   toggleCartStrikethrough:       (key: string) => void;
   addManualCartItem:             (name: string) => void;
   addManualKitchenItem:          (name: string) => void;
+  addScannedKitchenItems:        (items: { name: string; category: IngredientCategory }[]) => number;
   removeGroceryItem:             (key: string) => void;
   doneShopping:                  () => void;
   resolveOldCartItems:           (decisions: Record<string, 'keep' | 'remove'>) => void;
@@ -414,11 +441,16 @@ export interface AppStore {
   /** Replace a saved plan in-place, e.g. after Customize Plan edits. */
   updateSavedPlan: (id: string, plan: MealPlan) => void;
 
+  // ─── Plan avoid foods ───────────────────────────────────────────────────
+  setPlanAvoidFoods: (foods: string[]) => void;
+
   // ─── Swap coordination actions ──────────────────────────────────────────
   setPendingSwap: (swap: PendingSwap | null) => void;
   clearPendingSwap: () => void;
   setCustomizeDraft: (draft: CustomizeDraft | null) => void;
   clearCustomizeDraft: () => void;
+  setPendingRecipeConcept: (concept: RecipeConcept | null) => void;
+  clearPendingRecipeConcept: () => void;
   // Replace (or fill) the meal in the given slot for one specific day's log.
   swapMealInDay: (
     date: string,

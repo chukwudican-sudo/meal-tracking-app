@@ -556,8 +556,10 @@ export const useMealStore = create<AppStore>()(
       plans:        PLAN_SEED,
       savedPlans:   [],
       viewedRecipeIds: [],
+      planAvoidFoods: [],
       pendingSwap:    null,
       customizeDraft: null,
+      pendingRecipeConcept: null,
       mealEditSession: null,
 
       // ── Toggle completion ──────────────────────────────────────────────────
@@ -1089,6 +1091,38 @@ export const useMealStore = create<AppStore>()(
         });
       },
 
+      // Bulk-add AI-scanned kitchen items. Unlike addManualKitchenItem, the
+      // category comes straight from the AI (already validated client-side)
+      // rather than classifyIngredient. Dedupes against items already in the
+      // kitchen and within the batch itself; returns how many were actually
+      // added so the caller can show an accurate confirmation.
+      addScannedKitchenItems: (items) => {
+        let added = 0;
+        set(state => {
+          const now = new Date().toISOString();
+          const nextItems = { ...state.grocery.items };
+          for (const item of items) {
+            const name = item.name.trim();
+            if (!name) continue;
+            const key = normalizeIngredientName(name);
+            if (!key) continue;
+            const existing = nextItems[key];
+            if (existing && existing.section === 'kitchen') continue;
+            nextItems[key] = {
+              key,
+              name,
+              category: item.category,
+              section: 'kitchen',
+              updatedAt: now,
+            };
+            added += 1;
+          }
+          if (added === 0) return state;
+          return { grocery: { ...state.grocery, items: nextItems } };
+        });
+        return added;
+      },
+
       removeGroceryItem: (key) => {
         set(state => {
           if (!state.grocery.items[key]) return state;
@@ -1599,11 +1633,16 @@ export const useMealStore = create<AppStore>()(
         }));
       },
 
+      // ─── Plan avoid foods ────────────────────────────────────────────────
+      setPlanAvoidFoods: (foods) => set({ planAvoidFoods: foods }),
+
       // ─── Swap coordination ──────────────────────────────────────────────
       setPendingSwap: (swap) => set({ pendingSwap: swap }),
       clearPendingSwap: () => set({ pendingSwap: null }),
       setCustomizeDraft: (draft) => set({ customizeDraft: draft }),
       clearCustomizeDraft: () => set({ customizeDraft: null }),
+      setPendingRecipeConcept: (concept) => set({ pendingRecipeConcept: concept }),
+      clearPendingRecipeConcept: () => set({ pendingRecipeConcept: null }),
 
       swapMealInDay: (date, slot, recipe) => {
         set(state => {
@@ -1904,10 +1943,12 @@ export const useMealStore = create<AppStore>()(
           plans:        p.plans        ?? current.plans,
           savedPlans:   p.savedPlans   ?? current.savedPlans ?? [],
           viewedRecipeIds: p.viewedRecipeIds ?? current.viewedRecipeIds ?? [],
+          planAvoidFoods: p.planAvoidFoods ?? current.planAvoidFoods ?? [],
           // Ephemeral swap coordination — always start clean on launch so a
           // stale persisted swap target can never fire on the wrong screen.
           pendingSwap:    null,
           customizeDraft: null,
+          pendingRecipeConcept: null,
           mealEditSession: null,
         } as AppStore;
       },

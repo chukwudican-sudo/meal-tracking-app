@@ -11,16 +11,35 @@ import { Screen } from '@/components/Screen';
 
 import { COLORS } from '@/constants/theme';
 import { GOAL_LABEL, kgToLbs, lbsToKg } from '@/constants/goalCalc';
+import { openPaywall } from '@/lib/paywall';
+import { showManageSubscriptions } from '@/lib/purchases';
+import { useEntitlementStore } from '@/store/useEntitlementStore';
 import { useMealStore } from '@/store/useMealStore';
 
 export default function ProfileScreen() {
   const profile      = useMealStore(s => s.profile);
   const updateProfile = useMealStore(s => s.updateProfile);
   const logWeight    = useMealStore(s => s.logWeight);
+  // profile.subscription is a legacy shell field that's never actually kept
+  // in sync (see store/types.ts) — the live RevenueCat entitlement is the
+  // real source of truth for what to show here.
+  const isPro = useEntitlementStore(s => s.isPro);
 
   const handleBack = () => {
     if (router.canGoBack()) router.back();
     else router.replace('/(tabs)');
+  };
+
+  // Hands off to the App Store / Play Store's native subscription management
+  // UI directly — no custom in-app screen for this.
+  const handleManageSubscription = async () => {
+    const ok = await showManageSubscriptions();
+    if (!ok) {
+      Alert.alert(
+        'Unable to open subscription settings',
+        'Please manage your subscription from your device\'s App Store settings.'
+      );
+    }
   };
 
   const unit = profile.weightUnit ?? 'lbs';
@@ -95,15 +114,9 @@ export default function ProfileScreen() {
           </View>
           <View style={styles.nameRow}>
             <Text style={styles.userName} numberOfLines={1}>{displayName}</Text>
-            <View style={[
-              styles.subPill,
-              profile.subscription === 'premium' ? styles.subPillPremium : styles.subPillFree,
-            ]}>
-              <Text style={[
-                styles.subPillText,
-                profile.subscription === 'premium' ? styles.subPillTextPremium : styles.subPillTextFree,
-              ]}>
-                {profile.subscription === 'premium' ? 'Premium' : 'Free'}
+            <View style={[styles.subPill, isPro ? styles.subPillPremium : styles.subPillFree]}>
+              <Text style={[styles.subPillText, isPro ? styles.subPillTextPremium : styles.subPillTextFree]}>
+                {isPro ? 'Pro' : 'Free'}
               </Text>
             </View>
           </View>
@@ -127,11 +140,15 @@ export default function ProfileScreen() {
 
           <TouchableOpacity
             style={styles.subscriptionBtn}
-            onPress={() => router.push({ pathname: '/settings/coming-soon', params: { title: 'Subscription' } })}
+            onPress={() =>
+              isPro
+                ? void handleManageSubscription()
+                : openPaywall({ reason: 'premium_feature', headline: 'Upgrade to Macrotri Pro' })
+            }
             activeOpacity={0.85}
           >
             <Text style={styles.subscriptionBtnText}>
-              {profile.subscription === 'premium' ? 'Manage Subscription' : 'Upgrade to Premium'}
+              {isPro ? 'Manage Subscription' : 'Upgrade to Pro'}
             </Text>
           </TouchableOpacity>
         </View>

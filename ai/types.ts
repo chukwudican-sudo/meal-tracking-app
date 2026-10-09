@@ -4,6 +4,10 @@
 
 import type { Macros, MealEntry, UserGoals, UserProfile } from '@/store/types';
 
+// Re-export so AI wrappers and screens can import the concept shape from one
+// place without reaching into the store types directly.
+export type { RecipeConcept } from '@/store/types';
+
 export type ChatRole = 'system' | 'user' | 'assistant';
 
 export interface ChatMessage {

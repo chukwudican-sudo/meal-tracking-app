@@ -9,16 +9,17 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
-      "bundleIdentifier": "com.mealapp.app",
+      "bundleIdentifier": "com.alex.mealapp",
       "supportsTablet": true,
       "infoPlist": {
         "NSCameraUsageDescription": "Used to scan meals and barcodes for adding to your day.",
         "NSPhotoLibraryUsageDescription": "Used to upload meal photos for AI identification.",
-        "NSMicrophoneUsageDescription": "Used for voice dictation when describing meals."
+        "NSMicrophoneUsageDescription": "Used for voice dictation when describing meals.",
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
-      "package": "com.mealapp.app",
+      "package": "com.alex.mealapp",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
@@ -26,7 +27,11 @@
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO"
+      ]
     },
     "web": {
       "output": "static",
@@ -65,6 +70,12 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "ce4ad983-d675-482b-83d6-9eccb1288a16"
+      }
     }
   }
 }

@@ -1,6 +1,8 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { useMemo, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
+  Alert,
   Animated,
   Dimensions,
   KeyboardAvoidingView,
@@ -17,17 +19,33 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Screen } from '@/components/Screen';
 
+import { AIError } from '@/ai/aiEdgeClient';
+import { recipeAssistant, type RecipeAssistantSource } from '@/ai/recipeAssistant';
 import { COLORS } from '@/constants/theme';
 import {
   toRecipeInputFromSaved,
   toRecipeInputFromTemplate,
   useRecipeActions,
 } from '@/hooks/useRecipeActions';
+import { recipeRequiresPro } from '@/lib/entitlements';
+import { openPaywall } from '@/lib/paywall';
 import type { Ingredient, Macros, RecipeDifficulty } from '@/store/types';
+import { useEntitlementStore } from '@/store/useEntitlementStore';
 import { useMealStore } from '@/store/useMealStore';
+import { useToastStore } from '@/store/useToastStore';
 
 interface ResolvedRecipe {
   source: 'premade' | 'saved';
+  // How the Recipe Assistant should gate this recipe: 'ai' triggers the
+  // steps-exist sequencing check; 'premade' skips it (a subscriber has full
+  // access to every premade recipe). Manual/premade saved recipes map to
+  // 'premade'.
+  chatSource: RecipeAssistantSource;
+  // Whether viewing the full ingredients/steps here requires an active Pro
+  // subscription — see lib/entitlements.ts#recipeRequiresPro. Always false
+  // for 'manual' saved recipes, always true for 'ai', and flag-dependent for
+  // premade (RecipeTemplate.isFree).
+  requiresPro: boolean;
   id: string;
   recipeId?: string;
   name: string;
@@ -58,6 +76,7 @@ export default function RecipeDetailScreen() {
   const savedRecipes = useMealStore(s => s.savedRecipes);
   const { favourite } = useRecipeActions();
   const insets = useSafeAreaInsets();
+  const isPro = useEntitlementStore(s => s.isPro);
 
   const resolved = useMemo<ResolvedRecipe | null>(() => {
     const premade = recipes.find(r => r.id === id);
@@ -65,6 +84,8 @@ export default function RecipeDetailScreen() {
       const saved = savedRecipes.find(s => s.recipeId === premade.id);
       return {
         source: 'premade',
+        chatSource: 'premade',
+        requiresPro: recipeRequiresPro({ source: 'premade', isFree: premade.isFree }),
         id: premade.id,
         recipeId: premade.id,
         name: premade.name,
@@ -80,8 +101,16 @@ export default function RecipeDetailScreen() {
     }
     const saved = savedRecipes.find(s => s.id === id);
     if (saved) {
+      // A saved copy of a premade recipe (source 'premade') defers to the
+      // linked catalog entry's isFree flag rather than being unconditionally
+      // free/paid itself.
+      const linkedPremade = saved.source === 'premade'
+        ? recipes.find(r => r.id === saved.recipeId)
+        : undefined;
       return {
         source: 'saved',
+        chatSource: saved.source === 'ai' ? 'ai' : 'premade',
+        requiresPro: recipeRequiresPro({ source: saved.source, isFree: linkedPremade?.isFree }),
         id: saved.id,
         recipeId: saved.recipeId,
         name: saved.name,
@@ -111,6 +140,18 @@ export default function RecipeDetailScreen() {
   const handleBack = () => {
     if (router.canGoBack()) router.back();
     else router.replace('/(tabs)/recipes');
+  };
+
+  // Client-only Pro gate: this screen has no edge function of its own to
+  // return a not_premium error for, so it's checked directly against the
+  // live RevenueCat entitlement. The screen itself stays reachable (calories/
+  // macros/preview data above are never hidden) — only the ingredients/steps
+  // are swapped for a locked card, and it unlocks automatically the moment
+  // isPro flips true (purchase completed right here, or restored elsewhere).
+  const locked = !!resolved?.requiresPro && !isPro;
+
+  const handleUnlock = () => {
+    openPaywall({ reason: 'premium_feature', headline: 'Unlock the full recipe with Pro' });
   };
 
   if (!resolved || !recipeInput) {
@@ -181,45 +222,93 @@ export default function RecipeDetailScreen() {
           <Stat label="Fats" value={`${resolved.macros.fats}g`} />
         </View>
 
-        <Text style={styles.sectionHeader}>Ingredients</Text>
-        {resolved.ingredients.length === 0 ? (
-          <Text style={styles.emptyText}>No ingredients listed.</Text>
+        {locked ? (
+          <LockedRecipeCard onUnlock={handleUnlock} />
         ) : (
-          resolved.ingredients.map((ing, idx) => (
-            <View key={ing.id || idx} style={styles.ingredientRow}>
-              <Text style={styles.ingredientDot}>•</Text>
-              <Text style={styles.ingredientName}>{ing.name}</Text>
-              <Text style={styles.ingredientQty}>{formatQty(ing)}</Text>
-            </View>
-          ))
-        )}
+          <>
+            <Text style={styles.sectionHeader}>Ingredients</Text>
+            {resolved.ingredients.length === 0 ? (
+              <Text style={styles.emptyText}>No ingredients listed.</Text>
+            ) : (
+              resolved.ingredients.map((ing, idx) => (
+                <View key={ing.id || idx} style={styles.ingredientRow}>
+                  <Text style={styles.ingredientDot}>•</Text>
+                  <Text style={styles.ingredientName}>{ing.name}</Text>
+                  <Text style={styles.ingredientQty}>{formatQty(ing)}</Text>
+                </View>
+              ))
+            )}
 
-        <Text style={styles.sectionHeader}>Steps</Text>
-        {resolved.steps && resolved.steps.length > 0 ? (
-          resolved.steps.map((s, idx) => (
-            <View key={idx} style={styles.stepRow}>
-              <View style={styles.stepNumber}><Text style={styles.stepNumberText}>{idx + 1}</Text></View>
-              <Text style={styles.stepText}>{s}</Text>
-            </View>
-          ))
-        ) : (
-          <Text style={styles.emptyText}>No steps included for this recipe.</Text>
+            <Text style={styles.sectionHeader}>Steps</Text>
+            {resolved.steps && resolved.steps.length > 0 ? (
+              resolved.steps.map((s, idx) => (
+                <View key={idx} style={styles.stepRow}>
+                  <View style={styles.stepNumber}><Text style={styles.stepNumberText}>{idx + 1}</Text></View>
+                  <Text style={styles.stepText}>{s}</Text>
+                </View>
+              ))
+            ) : (
+              <Text style={styles.emptyText}>No steps included for this recipe.</Text>
+            )}
+          </>
         )}
       </ScrollView>
 
-      <RecipeAiChat recipeName={resolved.name} bottomInset={insets.bottom} />
+      <RecipeAiChat
+        recipeName={resolved.name}
+        recipeSource={resolved.chatSource}
+        ingredients={resolved.ingredients}
+        steps={resolved.steps ?? []}
+        bottomInset={insets.bottom}
+      />
     </Screen>
+  );
+}
+
+// Replaces the Ingredients/Steps sections for any recipe that requires an
+// active Pro subscription when the viewer doesn't have one. Deliberately
+// keeps the hero/name/calories/macros above visible — the teaser is the
+// point, a fully blank screen wouldn't sell the upgrade.
+function LockedRecipeCard({ onUnlock }: { onUnlock: () => void }) {
+  return (
+    <View style={styles.lockedCard}>
+      <Ionicons name="lock-closed" size={22} color={COLORS.textSecondary} />
+      <Text style={styles.lockedTitle}>Full recipe locked</Text>
+      <Text style={styles.lockedBody}>
+        Upgrade to Pro to see the full ingredient list and step-by-step instructions.
+      </Text>
+      <TouchableOpacity style={styles.lockedBtn} onPress={onUnlock} activeOpacity={0.85}>
+        <Text style={styles.lockedBtnText}>Unlock with Pro</Text>
+      </TouchableOpacity>
+    </View>
   );
 }
 
 // ─── AI chat (shell) ─────────────────────────────────────────────────────────
 
-function RecipeAiChat({ recipeName, bottomInset }: { recipeName: string; bottomInset: number }) {
+function RecipeAiChat({
+  recipeName,
+  recipeSource,
+  ingredients,
+  steps,
+  bottomInset,
+}: {
+  recipeName: string;
+  recipeSource: RecipeAssistantSource;
+  ingredients: Ingredient[];
+  steps: string[];
+  bottomInset: number;
+}) {
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [input, setInput] = useState('');
+  const [sending, setSending] = useState(false);
   const translateY = useRef(new Animated.Value(PANEL_HEIGHT)).current;
   const scrollRef = useRef<ScrollView>(null);
+  const showToast = useToastStore(s => s.showToast);
+
+  const scrollToEnd = () =>
+    requestAnimationFrame(() => scrollRef.current?.scrollToEnd({ animated: true }));
 
   const openPanel = () => {
     if (messages.length === 0) {
@@ -227,7 +316,7 @@ function RecipeAiChat({ recipeName, bottomInset }: { recipeName: string; bottomI
         {
           id: 'intro',
           role: 'assistant',
-          text: `Ask me anything about ${recipeName} — swaps, substitutions, or tweaks. (AI answers are coming soon; this is a preview.)`,
+          text: `Ask me anything about ${recipeName} — swaps, substitutions, portions, or technique.`,
         },
       ]);
     }
@@ -248,19 +337,59 @@ function RecipeAiChat({ recipeName, bottomInset }: { recipeName: string; bottomI
     }).start(() => setOpen(false));
   };
 
-  const handleSend = () => {
+  // Split out so a successful paywall purchase can resend this exact turn
+  // without duplicating the user's message bubble.
+  const sendToAssistant = async (nextMessages: ChatMsg[]) => {
+    setSending(true);
+    try {
+      const reply = await recipeAssistant({
+        recipeName,
+        recipeSource,
+        ingredients,
+        steps,
+        // Drop the local-only intro greeting; send the real conversation turns
+        // ending with the user's new message.
+        messages: nextMessages
+          .filter(m => m.id !== 'intro')
+          .map(m => ({ role: m.role, text: m.text })),
+      });
+      setMessages(prev => [...prev, { id: `a-${Date.now()}`, role: 'assistant', text: reply }]);
+      scrollToEnd();
+    } catch (e) {
+      // not_premium (subscription gate or steps-not-generated gate) → paywall
+      // and close the panel rather than leaving a dangling fake reply. On a
+      // successful purchase, reopen the panel and resend this same turn.
+      if (e instanceof AIError && e.code === 'not_premium') {
+        closePanel();
+        openPaywall({
+          reason: 'premium_feature',
+          headline: 'Unlock the Recipe Assistant with Pro',
+          onSuccess: () => { openPanel(); void sendToAssistant(nextMessages); },
+        });
+        return;
+      }
+      const message =
+        e instanceof AIError && e.message
+          ? e.message
+          : 'Could not get a reply right now. Please try again.';
+      showToast(message);
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const handleSend = async () => {
     const text = input.trim();
-    if (!text) return;
+    if (!text || sending) return;
     setInput('');
     const userMsg: ChatMsg = { id: `u-${Date.now()}`, role: 'user', text };
-    const reply: ChatMsg = {
-      id: `a-${Date.now()}`,
-      role: 'assistant',
-      text: `Good question about ${recipeName}! Smart AI cooking help is on the way — for now, trust your taste and adjust to preference.`,
-    };
-    setMessages(prev => [...prev, userMsg, reply]);
-    requestAnimationFrame(() => scrollRef.current?.scrollToEnd({ animated: true }));
+    const nextMessages = [...messages, userMsg];
+    setMessages(nextMessages);
+    scrollToEnd();
+    await sendToAssistant(nextMessages);
   };
+
+  const canSend = !!input.trim() && !sending;
 
   return (
     <>
@@ -309,6 +438,12 @@ function RecipeAiChat({ recipeName, bottomInset }: { recipeName: string; bottomI
                 <Text style={m.role === 'user' ? styles.userText : styles.assistantText}>{m.text}</Text>
               </View>
             ))}
+            {sending ? (
+              <View style={styles.typingBubble}>
+                <ActivityIndicator size="small" color={COLORS.textSecondary} />
+                <Text style={styles.typingText}>Thinking…</Text>
+              </View>
+            ) : null}
           </ScrollView>
 
           <View style={[styles.inputRow, { paddingBottom: Math.max(bottomInset, 10) }]}>
@@ -320,12 +455,13 @@ function RecipeAiChat({ recipeName, bottomInset }: { recipeName: string; bottomI
               style={styles.input}
               returnKeyType="send"
               onSubmitEditing={handleSend}
+              editable={!sending}
               multiline
             />
             <TouchableOpacity
               onPress={handleSend}
-              disabled={!input.trim()}
-              style={[styles.sendBtn, !input.trim() && styles.sendBtnDisabled]}
+              disabled={!canSend}
+              style={[styles.sendBtn, !canSend && styles.sendBtnDisabled]}
               activeOpacity={0.8}
             >
               <Text style={styles.sendBtnText}>↑</Text>
@@ -468,6 +604,34 @@ const styles = StyleSheet.create({
   empty: { flex: 1, padding: 32, alignItems: 'center', justifyContent: 'center' },
   emptyText: { color: COLORS.textSecondary, fontSize: 14, textAlign: 'center' },
 
+  lockedCard: {
+    backgroundColor: COLORS.card,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 16,
+    paddingVertical: 28,
+    paddingHorizontal: 20,
+    alignItems: 'center',
+    marginTop: 8,
+  },
+  lockedTitle: { color: COLORS.text, fontSize: 16, fontWeight: '700', marginTop: 10 },
+  lockedBody: {
+    color: COLORS.textSecondary,
+    fontSize: 13,
+    textAlign: 'center',
+    marginTop: 6,
+    lineHeight: 18,
+    maxWidth: 280,
+  },
+  lockedBtn: {
+    backgroundColor: COLORS.green,
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    marginTop: 16,
+  },
+  lockedBtnText: { color: '#0E1A12', fontWeight: '700', fontSize: 14 },
+
   // ── FAB ──
   fab: {
     position: 'absolute',
@@ -533,6 +697,20 @@ const styles = StyleSheet.create({
     maxWidth: '88%',
   },
   userText: { color: '#0E1A12', fontSize: 14, lineHeight: 20 },
+
+  typingBubble: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: COLORS.card,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 14,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    alignSelf: 'flex-start',
+  },
+  typingText: { color: COLORS.textSecondary, fontSize: 13 },
 
   inputRow: {
     flexDirection: 'row',

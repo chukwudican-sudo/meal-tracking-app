@@ -1,7 +1,7 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import * as ImagePicker from 'expo-image-picker';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -19,8 +19,15 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { AIError } from '@/ai/aiEdgeClient';
+import { generateRecipeConcept } from '@/ai/generateRecipeConcept';
+import { generateRecipeSteps } from '@/ai/generateRecipeSteps';
+import type { RecipeConcept as Concept } from '@/ai/types';
+import { ProgressiveLoader } from '@/components/ProgressiveLoader';
 import { Screen } from '@/components/Screen';
 import { COLORS } from '@/constants/theme';
+import { openPaywall } from '@/lib/paywall';
+import type { PaywallReason } from '@/store/usePaywallStore';
 import type {
   Ingredient,
   Macros,
@@ -35,16 +42,10 @@ import { useToastStore } from '@/store/useToastStore';
 
 type Stage = 'mealType' | 'describe' | 'creating' | 'overview' | 'building';
 
-interface Concept {
-  name: string;
-  category: RecipeCategory;
-  calories: number;
-  cookTimeMin: number;
-  difficulty?: RecipeDifficulty;
-  macros: Macros;
-  ingredients: Ingredient[];
-  steps?: string[];
-}
+// The working concept carries the model's short description (from
+// generate-recipe-concept) alongside the RecipeConcept shape, so we can feed it
+// back into the Fix/refine call and the later generate-recipe-steps call.
+type WorkingConcept = Concept & { description?: string };
 
 const MEAL_TYPES: { label: string; value: RecipeCategory; hint: string }[] = [
   { label: 'Breakfast', value: 'Breakfast', hint: 'Start the day right' },
@@ -56,10 +57,16 @@ const MEAL_TYPES: { label: string; value: RecipeCategory; hint: string }[] = [
 // ─── Screen ──────────────────────────────────────────────────────────────────
 
 export default function CustomRecipeScreen() {
-  const params = useLocalSearchParams<{ swap?: string; seed?: string; recipeId?: string }>();
+  const params = useLocalSearchParams<{
+    swap?: string;
+    seed?: string;
+    recipeId?: string;
+    fromKitchenAI?: string;
+  }>();
   const swapFlow = params.swap === 'true';
   const seed = (params.seed ?? '').toString();
   const seedRecipeId = (params.recipeId ?? '').toString();
+  const fromKitchenAI = params.fromKitchenAI === 'true';
 
   const recipes = useMealStore(s => s.recipes);
   const savedRecipes = useMealStore(s => s.savedRecipes);
@@ -68,14 +75,18 @@ export default function CustomRecipeScreen() {
   const swapMealInDay = useMealStore(s => s.swapMealInDay);
   const setCustomizeDraft = useMealStore(s => s.setCustomizeDraft);
   const clearPendingSwap = useMealStore(s => s.clearPendingSwap);
+  const clearPendingRecipeConcept = useMealStore(s => s.clearPendingRecipeConcept);
   const ensureRecipeSaved = useMealStore(s => s.ensureRecipeSaved);
   const showToast = useToastStore(s => s.showToast);
 
   const insets = useSafeAreaInsets();
 
-  // When launched with a recipeId (e.g. from What Can I Make), jump straight to
-  // the Stage 1 concept for that recipe.
+  // When launched from What Can I Make (AI suggestion) or with a recipeId,
+  // jump straight to the Stage 1 concept for that recipe.
   const seededConcept = useMemo<Concept | null>(() => {
+    if (fromKitchenAI) {
+      return useMealStore.getState().pendingRecipeConcept;
+    }
     if (!seedRecipeId) return null;
     const src =
       recipes.find(r => r.id === seedRecipeId) ??
@@ -84,10 +95,16 @@ export default function CustomRecipeScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Clear the transient handoff after we've read it so it can't leak into a
+  // later unrelated session.
+  useEffect(() => {
+    if (fromKitchenAI) clearPendingRecipeConcept();
+  }, [fromKitchenAI, clearPendingRecipeConcept]);
+
   const [stage, setStage] = useState<Stage>(seededConcept ? 'overview' : 'mealType');
   const [mealType, setMealType] = useState<RecipeCategory | null>(seededConcept?.category ?? null);
   const [describeText, setDescribeText] = useState(seed);
-  const [concept, setConcept] = useState<Concept | null>(seededConcept);
+  const [concept, setConcept] = useState<WorkingConcept | null>(seededConcept);
   const [refining, setRefining] = useState(false);
   const [fixOpen, setFixOpen] = useState(false);
   const [photoUri, setPhotoUri] = useState<string | undefined>(undefined);
@@ -124,50 +141,125 @@ export default function CustomRecipeScreen() {
     exit();
   };
 
-  // ── Concept generation (shell) ────────────────────────────────────────────
-  const submitDescribe = () => {
+  // ── AI error handling (paywall / toast) ───────────────────────────────────
+  // not_premium opens the shared Pro paywall (scan_limit for the free-scan-pool
+  // concept call, premium_feature for the subscription-only steps call below);
+  // everything else is a lightweight toast. `onRetry` re-runs the exact same
+  // request automatically once the purchase completes, so a successful
+  // purchase resumes the flow instead of requiring a second tap.
+  const handleAIError = (
+    e: unknown,
+    fallback: string,
+    paywall: { reason: PaywallReason; headline?: string; onRetry?: () => void },
+  ) => {
+    console.warn('[custom recipe] AI call failed:', e);
+    if (e instanceof AIError && e.code === 'not_premium') {
+      openPaywall({ reason: paywall.reason, headline: paywall.headline, onSuccess: paywall.onRetry });
+      return;
+    }
+    const message = e instanceof AIError && e.message ? e.message : fallback;
+    showToast(message);
+  };
+
+  // ── Concept generation ─────────────────────────────────────────────────────
+  const submitDescribe = async () => {
     const text = describeText.trim();
     if (!text || !mealType) return;
     setStage('creating');
-    setTimeout(() => {
-      setConcept(buildConcept(recipes, text, mealType));
+    try {
+      const next = await generateRecipeConcept({ description: text, mealType });
+      setConcept(next);
       setStage('overview');
-    }, 900);
+    } catch (e) {
+      handleAIError(e, 'Could not create this recipe right now. Please try again.', {
+        reason: 'scan_limit',
+        onRetry: () => void submitDescribe(),
+      });
+      setStage('describe');
+    }
   };
 
-  const submitFix = (text: string) => {
-    if (!text.trim() || !concept) return;
+  const submitFix = async (text: string) => {
+    const fix = text.trim();
+    if (!fix || !concept) return;
     setFixOpen(false);
     setRefining(true);
-    setTimeout(() => {
-      setConcept(prev => (prev ? refineConcept(prev, text) : prev));
+    // Fold the refinement into a fresh description and re-run the concept call —
+    // no separate endpoint; the same generate-recipe-concept produces the
+    // updated preview.
+    const prior = [
+      concept.name,
+      concept.description,
+      `Please adjust it: ${fix}`,
+    ]
+      .filter(Boolean)
+      .join('. ');
+    try {
+      const next = await generateRecipeConcept({ description: prior, mealType: concept.category });
+      setConcept(next);
+    } catch (e) {
+      handleAIError(e, 'Could not update this recipe right now. Please try again.', {
+        reason: 'scan_limit',
+        onRetry: () => void submitFix(text),
+      });
+    } finally {
       setRefining(false);
-    }, 800);
+    }
   };
 
-  const handleGenerate = () => {
+  const saveAndContinue = (final: WorkingConcept) => {
+    const saved = ensureRecipeSaved({
+      recipeId: undefined,
+      name: final.name,
+      category: final.category,
+      calories: final.calories,
+      cookTimeMin: final.cookTimeMin,
+      macros: final.macros,
+      ingredients: final.ingredients,
+      steps: final.steps,
+      difficulty: final.difficulty,
+      source: 'ai',
+      favourited: false,
+    });
+    if (swapFlow && pendingSwap) {
+      performSwapAndExit(saved);
+      return;
+    }
+    router.replace({ pathname: '/recipe/[id]', params: { id: saved.id } });
+  };
+
+  const handleGenerate = async () => {
     if (!concept) return;
+
+    // Seeded concepts (from What Can I Make) already carry a full ingredient
+    // list + steps, so there's nothing to unlock — save straight through and
+    // don't spend a subscription-gated steps call on already-complete content.
+    if (concept.steps && concept.steps.length > 0 && concept.ingredients.length > 0) {
+      setStage('building');
+      saveAndContinue(concept);
+      return;
+    }
+
     setStage('building');
-    setTimeout(() => {
-      const saved = ensureRecipeSaved({
-        recipeId: undefined,
+    try {
+      const full = await generateRecipeSteps({
         name: concept.name,
-        category: concept.category,
+        description: concept.description,
         calories: concept.calories,
-        cookTimeMin: concept.cookTimeMin,
-        macros: concept.macros,
-        ingredients: concept.ingredients,
-        steps: concept.steps,
-        difficulty: concept.difficulty,
-        source: 'ai',
-        favourited: false,
+        protein: concept.macros.protein,
+        carbs: concept.macros.carbs,
+        fats: concept.macros.fats,
+        mealType: concept.category,
       });
-      if (swapFlow && pendingSwap) {
-        performSwapAndExit(saved);
-        return;
-      }
-      router.replace({ pathname: '/recipe/[id]', params: { id: saved.id } });
-    }, 1000);
+      saveAndContinue({ ...concept, ingredients: full.ingredients, steps: full.steps });
+    } catch (e) {
+      handleAIError(e, 'Could not generate the full recipe right now. Please try again.', {
+        reason: 'premium_feature',
+        headline: 'Unlock the full recipe with Pro',
+        onRetry: () => void handleGenerate(),
+      });
+      setStage('overview');
+    }
   };
 
   const performSwapAndExit = (saved: SavedRecipe) => {
@@ -298,8 +390,26 @@ export default function CustomRecipeScreen() {
         />
       ) : null}
 
-      {stage === 'creating' ? <LoadingScreen message="Creating your recipe…" /> : null}
-      {stage === 'building' ? <LoadingScreen message="Building your recipe…" /> : null}
+      {stage === 'creating' ? (
+        <ProgressiveLoader
+          messages={[
+            'Reading your description…',
+            'Designing your recipe…',
+            'Matching it to your preferences…',
+            'Almost ready…',
+          ]}
+        />
+      ) : null}
+      {stage === 'building' ? (
+        <ProgressiveLoader
+          messages={[
+            'Gathering ingredients…',
+            'Writing step-by-step instructions…',
+            'Balancing the macros…',
+            'Finalizing your recipe…',
+          ]}
+        />
+      ) : null}
 
       {stage === 'overview' && concept ? (
         <OverviewScreen
@@ -496,17 +606,6 @@ function DescribeScreen({
   );
 }
 
-// ─── Loading ──────────────────────────────────────────────────────────────────
-
-function LoadingScreen({ message }: { message: string }) {
-  return (
-    <View style={styles.loadingWrap}>
-      <ActivityIndicator size="large" color={COLORS.green} />
-      <Text style={styles.loadingText}>{message}</Text>
-    </View>
-  );
-}
-
 // ─── Stage 1: nutrition concept (meal-detail-popup style) ─────────────────────
 
 function OverviewScreen({
@@ -556,19 +655,31 @@ function OverviewScreen({
           ))}
         </View>
 
-        {/* Ingredients */}
-        <Text style={styles.sectionLabel}>Ingredients</Text>
-        <View style={styles.ingList}>
-          {concept.ingredients.map((ing, idx) => (
-            <View
-              key={ing.id}
-              style={[styles.ingRow, idx > 0 && styles.ingRowDivider]}
-            >
-              <Text style={styles.ingName} numberOfLines={1}>{ing.name}</Text>
-              <Text style={styles.ingQty}>{formatQty(ing)}</Text>
+        {/* Ingredients — a concept preview has none yet; the full ingredient
+            list + steps are unlocked when the user taps Generate. */}
+        {concept.ingredients.length > 0 ? (
+          <>
+            <Text style={styles.sectionLabel}>Ingredients</Text>
+            <View style={styles.ingList}>
+              {concept.ingredients.map((ing, idx) => (
+                <View
+                  key={ing.id}
+                  style={[styles.ingRow, idx > 0 && styles.ingRowDivider]}
+                >
+                  <Text style={styles.ingName} numberOfLines={1}>{ing.name}</Text>
+                  <Text style={styles.ingQty}>{formatQty(ing)}</Text>
+                </View>
+              ))}
             </View>
-          ))}
-        </View>
+          </>
+        ) : (
+          <View style={styles.unlockCard}>
+            <Ionicons name="lock-closed-outline" size={18} color={COLORS.textSecondary} />
+            <Text style={styles.unlockText}>
+              Tap Generate to unlock the full ingredient list and step-by-step method.
+            </Text>
+          </View>
+        )}
 
         {refining ? (
           <View style={styles.refiningRow}>
@@ -664,47 +775,6 @@ function FixConceptModal({
 
 // ─── Concept builders (shell — replaced by real AI later) ─────────────────────
 
-function buildConcept(
-  recipes: ReturnType<typeof useMealStore.getState>['recipes'],
-  description: string,
-  category: RecipeCategory,
-): Concept {
-  const lower = description.toLowerCase();
-  const scored = recipes
-    .map(r => {
-      let score = r.category === category ? 1 : 0;
-      const hay = `${r.name} ${r.category} ${r.ingredients.map(i => i.name).join(' ')}`.toLowerCase();
-      lower.split(/\s+/).filter(Boolean).forEach(tok => { if (hay.includes(tok)) score++; });
-      return { r, score };
-    })
-    .sort((a, b) => b.score - a.score);
-
-  const base =
-    (scored[0]?.score ?? 0) > 0
-      ? scored[0].r
-      : recipes.find(r => r.category === category) ?? recipes[Math.floor(Math.random() * recipes.length)];
-
-  const ingredients: Ingredient[] = base.ingredients.map((i, idx) => ({
-    ...i,
-    id: `ci-${Date.now()}-${idx}`,
-  }));
-
-  const calTarget = parseCalories(lower);
-  const calories = calTarget ?? base.calories;
-  const macros = calTarget ? scaleMacros(base.macros, calTarget / base.calories) : { ...base.macros };
-
-  return {
-    name: base.name,
-    category,
-    calories,
-    cookTimeMin: base.cookTimeMin,
-    difficulty: base.difficulty,
-    macros,
-    ingredients,
-    steps: base.steps ? [...base.steps] : undefined,
-  };
-}
-
 function conceptFromRecipe(r: {
   name: string;
   category?: RecipeCategory;
@@ -725,56 +795,6 @@ function conceptFromRecipe(r: {
     ingredients: r.ingredients.map((i, idx) => ({ ...i, id: `ci-${idx}` })),
     steps: r.steps ? [...r.steps] : undefined,
   };
-}
-
-function refineConcept(prev: Concept, fix: string): Concept {
-  const lower = fix.toLowerCase();
-  let macros = { ...prev.macros };
-  let calories = prev.calories;
-
-  const calTarget = parseCalories(lower);
-  if (calTarget) {
-    const ratio = prev.calories > 0 ? calTarget / prev.calories : 1;
-    macros = scaleMacros(prev.macros, ratio);
-    calories = calTarget;
-  } else {
-    const down = /(lower|less|fewer|reduce|cut)/.test(lower);
-    const up = /(more|higher|increase|add|boost)/.test(lower);
-    if (/carb/.test(lower)) macros.carbs = Math.round(macros.carbs * (down ? 0.8 : up ? 1.2 : 1));
-    if (/protein/.test(lower)) macros.protein = Math.round(macros.protein * (up ? 1.2 : down ? 0.8 : 1));
-    if (/fat/.test(lower)) macros.fats = Math.round(macros.fats * (down ? 0.8 : up ? 1.2 : 1));
-    calories = macros.protein * 4 + macros.carbs * 4 + macros.fats * 9;
-  }
-
-  let ingredients = prev.ingredients;
-  const swap = lower.match(/(?:swap|replace)\s+([a-z]+)\s+(?:for|with)\s+([a-z]+)/);
-  if (swap) {
-    const [, from, to] = swap;
-    ingredients = prev.ingredients.map(i =>
-      i.name.toLowerCase().includes(from) ? { ...i, name: capitalize(to) } : i
-    );
-  }
-
-  return { ...prev, calories, macros, ingredients };
-}
-
-function parseCalories(text: string): number | null {
-  const m = text.match(/(\d{2,4})\s*(k?cal|calorie)/);
-  if (m) return Number(m[1]);
-  const plain = text.match(/\bto\s+(\d{3,4})\b/);
-  return plain ? Number(plain[1]) : null;
-}
-
-function scaleMacros(m: Macros, ratio: number): Macros {
-  return {
-    protein: Math.round(m.protein * ratio),
-    carbs: Math.round(m.carbs * ratio),
-    fats: Math.round(m.fats * ratio),
-  };
-}
-
-function capitalize(s: string): string {
-  return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
 function formatQty(ing: Ingredient): string {
@@ -860,9 +880,6 @@ const styles = StyleSheet.create({
   exampleText: { color: COLORS.textSecondary, fontSize: 14, lineHeight: 20 },
   exampleBold: { color: COLORS.text, fontWeight: '700' },
 
-  loadingWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 16 },
-  loadingText: { color: COLORS.textSecondary, fontSize: 15, fontWeight: '600' },
-
   // Concept (meal-detail-popup style)
   conceptImage: {
     width: '100%',
@@ -905,6 +922,20 @@ const styles = StyleSheet.create({
 
   refiningRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, marginTop: 20 },
   refiningText: { color: COLORS.textSecondary, fontSize: 14 },
+
+  unlockCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginTop: 22,
+    padding: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderStyle: 'dashed',
+    backgroundColor: COLORS.card,
+  },
+  unlockText: { flex: 1, color: COLORS.textSecondary, fontSize: 13, lineHeight: 18 },
 
   footer: {
     paddingHorizontal: 16,

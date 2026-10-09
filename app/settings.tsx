@@ -12,16 +12,32 @@ import { Screen } from '@/components/Screen';
 import { COLORS } from '@/constants/theme';
 import { signOut, useAuth } from '@/lib/auth';
 import { clearPendingPassword } from '@/lib/pendingCredentials';
+import { openPaywall } from '@/lib/paywall';
+import { showManageSubscriptions } from '@/lib/purchases';
 import { engine } from '@/lib/sync/engine';
+import { useEntitlementStore } from '@/store/useEntitlementStore';
 import { useMealStore } from '@/store/useMealStore';
 
 export default function SettingsScreen() {
   const resetUserData = useMealStore(s => s.resetUserData);
   const { session } = useAuth();
+  const isPro = useEntitlementStore(s => s.isPro);
 
   const handleBack = () => {
     if (router.canGoBack()) router.back();
     else router.replace('/profile');
+  };
+
+  // Hands off to the App Store / Play Store's native subscription management
+  // UI directly — no custom in-app screen for this.
+  const handleManageSubscription = async () => {
+    const ok = await showManageSubscriptions();
+    if (!ok) {
+      Alert.alert(
+        'Unable to open subscription settings',
+        'Please manage your subscription from your device\'s App Store settings.'
+      );
+    }
   };
 
   // Safe ordering: the projector was already stopped in prepareSignOut(), so
@@ -115,6 +131,20 @@ export default function SettingsScreen() {
       </View>
 
       <ScrollView contentContainerStyle={styles.scroll}>
+        <Text style={styles.sectionLabel}>MEMBERSHIP</Text>
+        <View style={styles.section}>
+          <NavRow
+            label={isPro ? 'Manage Subscription' : 'Upgrade to Pro'}
+            onPress={() =>
+              isPro
+                ? void handleManageSubscription()
+                // Plain browsing entry point, not tied to any blocked action —
+                // general framing rather than a specific-feature headline.
+                : openPaywall({ reason: 'premium_feature', headline: 'Upgrade to Macrotri Pro' })
+            }
+          />
+        </View>
+
         <Text style={styles.sectionLabel}>ACCOUNT</Text>
         <View style={styles.section}>
           <NavRow label="Account Settings" onPress={() => router.push('/settings/account')} />

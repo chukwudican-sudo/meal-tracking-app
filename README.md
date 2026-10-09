@@ -25,6 +25,29 @@ In the output, you'll find options to open the app in a
 
 You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
 
+## Testing in-app purchases (RevenueCat)
+
+`react-native-purchases` is a native module — **Expo Go cannot load it**. To
+test the paywall/purchase flow you need an actual dev build, which is a manual
+step you run once (not something the agent can trigger from inside the
+codebase, since it needs your Apple/EAS credentials):
+
+- Fastest if you already have Xcode installed locally:
+  ```bash
+  npx expo run:ios
+  ```
+  This builds a real dev-client binary and installs it on a simulator/device.
+  After that, `npx expo start` reconnects to it like normal.
+- Or, without Xcode, via an EAS cloud dev build (needs an Expo account):
+  ```bash
+  npx eas build --profile development --platform ios
+  ```
+
+Set `EXPO_PUBLIC_REVENUECAT_API_KEY` in `.env` first (see `.env.example`) — a
+RevenueCat **Test Store** key lets you exercise the full purchase/restore flow
+without waiting on App Store review. Swap it for the production key later by
+changing only that one line.
+
 ## Get a fresh project
 
 When you're ready, run:

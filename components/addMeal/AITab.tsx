@@ -12,7 +12,6 @@ import {
   View,
 } from 'react-native';
 import { Audio } from 'expo-av';
-import { router } from 'expo-router';
 
 import { COLORS } from '@/constants/theme';
 import { aiClient } from '@/ai/aiClient';
@@ -20,6 +19,7 @@ import { AIError } from '@/ai/aiEdgeClient';
 import { estimateNutrition } from '@/ai/estimateNutrition';
 import { fixMeal } from '@/ai/fixMeal';
 import type { DayContext, MealDraft } from '@/ai/types';
+import { openPaywall } from '@/lib/paywall';
 import { newId } from '@/lib/sync/uuid';
 import type { Ingredient, MealEntry, RecipeCategory } from '@/store/types';
 import { useMealStore } from '@/store/useMealStore';
@@ -57,22 +57,14 @@ export function AITab({ date, onLogged }: Props) {
 
   // Shared handler for both the initial estimate (EstimateError) and the
   // correction (FixError) — both subclass AIError with the same code set.
+  // Both go through the free-scan pool, so not_premium here always means
+  // "used up the 5 free scans" — retrying `estimate()` on a successful
+  // purchase resumes with whatever text/correction was already typed.
   function handleAIError(e: unknown) {
     console.warn('AI request failed:', e);
     if (e instanceof AIError && e.code === 'not_premium') {
-      setNote('AI Describe is a Premium feature.');
-      Alert.alert(
-        'Premium feature',
-        'AI Describe uses AI to estimate nutrition from a description. Upgrade to Premium to use it.',
-        [
-          { text: 'Not now', style: 'cancel' },
-          {
-            text: 'Upgrade',
-            onPress: () =>
-              router.push({ pathname: '/settings/coming-soon', params: { title: 'Subscription' } }),
-          },
-        ],
-      );
+      setNote('');
+      openPaywall({ reason: 'scan_limit', onSuccess: () => void estimate() });
       return;
     }
     if (e instanceof AIError && e.code === 'rate_limited') {

@@ -1,4 +1,30 @@
+import { COLORS } from '@/constants/theme';
 import type { IngredientCategory } from '@/store/types';
+
+// Shared display order + dot color for ingredient categories. Single source of
+// truth so the My Kitchen list, the "What can I make?" grouping, and the
+// scan-kitchen review checklist all render categories identically.
+export const CATEGORY_ORDER: IngredientCategory[] = [
+  'Proteins',
+  'Carbs & Grains',
+  'Fruits & Vegetables',
+  'Dairy',
+  'Oils & Fats',
+  'Spices & Seasonings',
+  'Condiments',
+  'Other',
+];
+
+export const CATEGORY_DOT: Record<IngredientCategory, string> = {
+  'Proteins': COLORS.red,
+  'Carbs & Grains': '#FFD60A',
+  'Fruits & Vegetables': COLORS.green,
+  'Dairy': COLORS.blue,
+  'Oils & Fats': COLORS.orange,
+  'Spices & Seasonings': COLORS.purple,
+  'Condiments': '#5AC8FA',
+  'Other': COLORS.textSecondary,
+};
 
 // Keyword-based categorizer. Will be replaced by AI categorization once
 // the AI client is wired up; this map covers the common cases for MVP.

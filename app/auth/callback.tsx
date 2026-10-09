@@ -1,7 +1,7 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import * as Linking from 'expo-linking';
 import { router } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 import { Screen } from '@/components/Screen';
@@ -14,23 +14,48 @@ import { exchangeCodeFromUrl } from '@/lib/auth';
 export default function AuthCallbackScreen() {
   const url = Linking.useURL();
   const [error, setError] = useState<string | null>(null);
+  // A confirmation link can reach us two ways: the live useURL() listener
+  // (app already running) or getInitialURL() (link launched/woke the app, or
+  // arrived before the listener was ready — e.g. during a foreground
+  // transition back from the mail app). Guard so whichever wins, the other
+  // can't re-process the same link. cancelledRef stops any setState after
+  // unmount.
+  const handledRef = useRef(false);
+  const cancelledRef = useRef(false);
 
+  const handleUrl = useCallback(async (incoming: string, source: string) => {
+    if (handledRef.current) return;
+    handledRef.current = true;
+    console.info(`[auth/callback] handling url from ${source} at ${new Date().toISOString()}:`, incoming);
+    const { error: err } = await exchangeCodeFromUrl(incoming);
+    if (cancelledRef.current) return;
+    if (err) {
+      setError(err);
+    } else {
+      router.replace('/(tabs)');
+    }
+  }, []);
+
+  // Live listener path: fires whenever the OS hands the running app a deep link.
   useEffect(() => {
+    console.info(`[auth/callback] effect fired at ${new Date().toISOString()}, url=`, url);
     if (!url) return;
-    let cancelled = false;
+    void handleUrl(url, 'useURL');
+  }, [url, handleUrl]);
+
+  // Fallback path: if the link arrived before the useURL() listener caught it
+  // (cold launch, or a foreground transition race), getInitialURL() still has
+  // it. Runs once on mount.
+  useEffect(() => {
     (async () => {
-      const { error: err } = await exchangeCodeFromUrl(url);
-      if (cancelled) return;
-      if (err) {
-        setError(err);
-      } else {
-        router.replace('/(tabs)');
-      }
+      const initial = await Linking.getInitialURL();
+      console.info(`[auth/callback] getInitialURL at ${new Date().toISOString()}:`, initial);
+      if (initial) void handleUrl(initial, 'getInitialURL');
     })();
     return () => {
-      cancelled = true;
+      cancelledRef.current = true;
     };
-  }, [url]);
+  }, [handleUrl]);
 
   return (
     <Screen edges={['top', 'bottom']}>

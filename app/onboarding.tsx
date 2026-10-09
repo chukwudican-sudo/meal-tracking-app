@@ -15,6 +15,7 @@ import {
 } from 'react-native';
 import Svg, { Line, Polyline, Circle as SvgCircle } from 'react-native-svg';
 
+import { EmailCodeVerification } from '@/components/auth/EmailCodeVerification';
 import { HeightPicker, type HeightUnit } from '@/components/onboarding/HeightPicker';
 import { Slider } from '@/components/onboarding/Slider';
 import { WeightPicker, type WeightUnitChoice } from '@/components/onboarding/WeightPicker';
@@ -807,14 +808,13 @@ function AccountStep({
 
   if (verificationSent) {
     return (
-      <View style={[styles.body, styles.centered]}>
-        <Ionicons name="mail-unread-outline" size={56} color={COLORS.green} />
-        <Text style={[styles.bigTitle, { marginTop: 20 }]}>Check your email</Text>
-        <Text style={styles.bodyText}>
-          We sent a verification link to {email}. Tap it to activate your account. You can keep going in the meantime.
-        </Text>
-        <View style={{ flex: 1 }} />
-        <PrimaryButton label="Continue" onPress={onContinue} />
+      <View style={[styles.body, styles.formContent]}>
+        <EmailCodeVerification
+          email={email}
+          onVerified={onContinue}
+          onSkip={onContinue}
+          skipLabel="I'll verify later"
+        />
       </View>
     );
   }
