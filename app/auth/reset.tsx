@@ -8,6 +8,8 @@ import { Screen } from '@/components/Screen';
 import { COLORS } from '@/constants/theme';
 import { exchangeCodeFromUrl, updatePassword } from '@/lib/auth';
 
+const LINK_TIMEOUT_MS = 15_000;
+
 // Landing screen for the password-reset deep link. The email link opens the app
 // at mealapp://auth/reset?code=..., which we exchange for a temporary session,
 // then let the user choose a new password.
@@ -22,11 +24,32 @@ export default function ResetPasswordScreen() {
   const [saveError, setSaveError] = useState<string | null>(null);
   const valid = pw.length >= 6 && pw === pw2;
 
+  // Legacy path: new reset emails carry a 6-digit code (/auth/forgot-password).
+  // This screen only serves old link-style emails. useURL() can miss the link
+  // during the foreground transition (same race auth/callback hit), so fall back
+  // to getInitialURL(), and never spin forever if neither yields a usable URL.
+  const [url, setUrl] = useState<string | null>(null);
   useEffect(() => {
-    if (!initialUrl) return;
+    if (initialUrl) setUrl(initialUrl);
+  }, [initialUrl]);
+  useEffect(() => {
+    void Linking.getInitialURL().then(initial => {
+      if (initial) setUrl(prev => prev ?? initial);
+    });
+    const timer = setTimeout(() => {
+      // linkError is only shown in the 'error' state, so setting it is harmless
+      // if the exchange already finished.
+      setLinkError(prev => prev ?? 'This reset link couldn\'t be opened. Request a new code instead.');
+      setStatus(s => (s === 'exchanging' ? 'error' : s));
+    }, LINK_TIMEOUT_MS);
+    return () => clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    if (!url) return;
     let cancelled = false;
     (async () => {
-      const { error } = await exchangeCodeFromUrl(initialUrl);
+      const { error } = await exchangeCodeFromUrl(url);
       if (cancelled) return;
       if (error) {
         setLinkError(error);
@@ -38,7 +61,7 @@ export default function ResetPasswordScreen() {
     return () => {
       cancelled = true;
     };
-  }, [initialUrl]);
+  }, [url]);
 
   const handleSave = async () => {
     if (!valid || saving) return;
@@ -70,7 +93,7 @@ export default function ResetPasswordScreen() {
             <Text style={styles.bodyText}>{linkError ?? 'Please request a new password reset link.'}</Text>
             <View style={{ flex: 1 }} />
             <TouchableOpacity style={styles.primaryBtn} onPress={() => router.replace('/auth/forgot-password')}>
-              <Text style={styles.primaryBtnText}>Request a new link</Text>
+              <Text style={styles.primaryBtnText}>Request a new code</Text>
             </TouchableOpacity>
           </View>
         )}

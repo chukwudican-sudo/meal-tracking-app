@@ -14,7 +14,7 @@ import {
 } from 'react';
 import { AppState } from 'react-native';
 import * as Linking from 'expo-linking';
-import type { Session, User } from '@supabase/supabase-js';
+import type { AuthError, Session, User } from '@supabase/supabase-js';
 
 import { supabase } from './supabase';
 import { useMealStore } from '@/store/useMealStore';
@@ -129,11 +129,30 @@ export async function signOut(): Promise<AuthResult> {
   return { error: error ? error.message : null };
 }
 
+// Sends the password-reset email. The *Reset password* email template must
+// render {{ .Token }} (6-digit code, verified by verifyRecoveryOtp) — a tapped
+// link breaks when opened on another device (PKCE verifier lives on this phone)
+// or gets burned by email-scanner prefetch, the same failures that moved signup
+// to a code. redirectTo only matters for old link-style emails (/auth/reset).
 export async function sendPasswordReset(email: string): Promise<AuthResult> {
   const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
     redirectTo: PASSWORD_RESET_REDIRECT,
   });
-  return { error: error ? error.message : null };
+  return toEmailSendResult(error, 'Could not send the reset email. Please try again.');
+}
+
+// Verify the 6-digit code from the reset email. On success this creates a
+// short-lived recovery session that updatePassword() runs under. SyncProvider
+// treats it like any login (same reconcile as the login screen), so callers must
+// end it with the safe sign-out ordering once the password is saved.
+export async function verifyRecoveryOtp(email: string, token: string): Promise<AuthResult> {
+  const { data, error } = await supabase.auth.verifyOtp({
+    email: email.trim(),
+    token: token.trim(),
+    type: 'recovery',
+  });
+  if (error) return { error: error.message };
+  return { error: null, userId: data.user?.id };
 }
 
 export async function updatePassword(newPassword: string): Promise<AuthResult> {
@@ -151,6 +170,12 @@ export async function resendVerificationEmail(email: string): Promise<AuthResult
     email: email.trim(),
     options: { emailRedirectTo: EMAIL_CONFIRM_REDIRECT },
   });
+  return toEmailSendResult(error, 'Could not resend the email. Please try again.');
+}
+
+// Shared by every call that sends an auth email, so signup resends and reset
+// emails report Supabase's send throttle identically.
+function toEmailSendResult(error: AuthError | null, fallback: string): AuthResult {
   if (!error) return { error: null };
 
   const status = (error as { status?: number }).status;
@@ -171,7 +196,7 @@ export async function resendVerificationEmail(email: string): Promise<AuthResult
       retryAfterSeconds: seconds ?? 60,
     };
   }
-  return { error: message || 'Could not resend the email. Please try again.' };
+  return { error: message || fallback };
 }
 
 // Supabase's throttle message looks like "... you can only request this after

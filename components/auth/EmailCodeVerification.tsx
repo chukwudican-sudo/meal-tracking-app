@@ -10,17 +10,51 @@ import {
 } from 'react-native';
 
 import { COLORS } from '@/constants/theme';
-import { resendVerificationEmail, verifySignupOtp } from '@/lib/auth';
+import {
+  resendVerificationEmail,
+  sendPasswordReset,
+  verifyRecoveryOtp,
+  verifySignupOtp,
+  type AuthResult,
+} from '@/lib/auth';
 
 const CODE_LENGTH = 6;
 // Local fallback cooldown after a successful resend, matching Supabase's typical
 // per-email throttle so we don't invite an immediate server rejection.
 const RESEND_COOLDOWN_SECONDS = 60;
 
+type Purpose = 'signup' | 'recovery';
+
+// Each purpose verifies a different Supabase OTP type and resends a different
+// email; everything else (input, autofill, cooldown, errors) is shared.
+const PURPOSES: Record<Purpose, {
+  verify: (email: string, code: string) => Promise<AuthResult>;
+  resend: (email: string) => Promise<AuthResult>;
+  subtitle: (email: string) => string;
+  cta: string;
+}> = {
+  signup: {
+    verify: verifySignupOtp,
+    resend: resendVerificationEmail,
+    subtitle: email => `We sent a ${CODE_LENGTH}-digit verification code to ${email}. Enter it below to verify your account.`,
+    cta: 'Verify',
+  },
+  recovery: {
+    verify: verifyRecoveryOtp,
+    resend: sendPasswordReset,
+    subtitle: email => `We sent a ${CODE_LENGTH}-digit code to ${email}. Enter it below to reset your password.`,
+    cta: 'Continue',
+  },
+};
+
 interface Props {
   email: string;
-  // Called after the code is accepted and a confirmed session exists.
-  onVerified: () => void;
+  // 'signup' (default) confirms a new account; 'recovery' verifies a password
+  // reset code and leaves a recovery session for updatePassword().
+  purpose?: Purpose;
+  // Called after the code is accepted and a session exists (confirmed account
+  // for signup, recovery session for a reset) with that session's user id.
+  onVerified: (userId?: string) => void;
   // When provided, renders a secondary "skip for now" action (e.g. to preserve
   // the deferred/offline-first flow during onboarding).
   onSkip?: () => void;
@@ -29,8 +63,15 @@ interface Props {
 
 // Reusable 6-digit email verification. Used both inline during onboarding
 // (right after signup) and from the standalone /auth/verify-code route the
-// Home banner opens. Verifying calls supabase.auth.verifyOtp(type:'signup').
-export function EmailCodeVerification({ email, onVerified, onSkip, skipLabel = "I'll verify later" }: Props) {
+// Home banner opens, and with purpose='recovery' by /auth/forgot-password.
+export function EmailCodeVerification({
+  email,
+  purpose = 'signup',
+  onVerified,
+  onSkip,
+  skipLabel = "I'll verify later",
+}: Props) {
+  const config = PURPOSES[purpose];
   const [code, setCode] = useState('');
   const [verifying, setVerifying] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -58,14 +99,14 @@ export function EmailCodeVerification({ email, onVerified, onSkip, skipLabel = "
     if (!canSubmit) return;
     setVerifying(true);
     setError(null);
-    const { error: err } = await verifySignupOtp(email, code);
+    const { error: err, userId } = await config.verify(email, code);
     setVerifying(false);
     if (err) {
-      // Stay on the screen and let them retry — never bounce back to signup.
+      // Stay on the screen and let them retry — never bounce back a step.
       setError('That code didn\'t work. Check it and try again, or resend a new one.');
       return;
     }
-    onVerified();
+    onVerified(userId);
   };
 
   const handleResend = async () => {
@@ -80,7 +121,7 @@ export function EmailCodeVerification({ email, onVerified, onSkip, skipLabel = "
     }
     setResending(true);
     setResendNote(null);
-    const { error: err, rateLimited, retryAfterSeconds } = await resendVerificationEmail(email);
+    const { error: err, rateLimited, retryAfterSeconds } = await config.resend(email);
     setResending(false);
     if (err) {
       setResendNote(err);
@@ -102,8 +143,7 @@ export function EmailCodeVerification({ email, onVerified, onSkip, skipLabel = "
       <Ionicons name="mail-unread-outline" size={52} color={COLORS.green} />
       <Text style={styles.title}>Enter your code</Text>
       <Text style={styles.subtitle}>
-        We sent a {CODE_LENGTH}-digit verification code to {email || 'your email'}. Enter it below to
-        verify your account.
+        {config.subtitle(email || 'your email')}
       </Text>
 
       <TextInput
@@ -133,7 +173,7 @@ export function EmailCodeVerification({ email, onVerified, onSkip, skipLabel = "
         {verifying ? (
           <ActivityIndicator color="#04110A" />
         ) : (
-          <Text style={styles.primaryBtnText}>Verify</Text>
+          <Text style={styles.primaryBtnText}>{config.cta}</Text>
         )}
       </TouchableOpacity>
 

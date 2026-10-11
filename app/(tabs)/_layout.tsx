@@ -44,14 +44,17 @@ export default function TabLayout() {
   // trip the redirect below and remount /onboarding to its first step — a
   // visible Welcome-screen flash. Skip the redirect while onboarding is already
   // the active route so we never redundantly replace it onto itself.
+  // /auth/* (forgot-password, reset, verify-code, callback) are reached while
+  // logged out, so the gate must not bounce them back to /onboarding either —
+  // it did, which made password reset unreachable.
   const segments = useSegments();
-  const onOnboarding = segments[0] === 'onboarding';
+  const inAuthFlow = segments[0] === 'onboarding' || segments[0] === 'auth';
 
   useEffect(() => {
-    if (ready && (!onboardingComplete || !authed) && !onOnboarding) {
+    if (ready && (!onboardingComplete || !authed) && !inAuthFlow) {
       router.replace('/onboarding');
     }
-  }, [ready, onboardingComplete, authed, onOnboarding]);
+  }, [ready, onboardingComplete, authed, inAuthFlow]);
 
   if (!canEnter) {
     return <View style={{ flex: 1, backgroundColor: COLORS.bg }} />;
