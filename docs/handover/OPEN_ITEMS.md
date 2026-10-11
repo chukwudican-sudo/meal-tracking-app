@@ -1,31 +1,43 @@
-# Open items — everything known to be unfinished (as of Oct 9, 2026)
+# Open items — everything known to be unfinished (as of Oct 11, 2026)
 
 Grouped by urgency. "Manual" = Alex must do it in a dashboard/device; Claude can only give exact steps.
 Nothing here is approved for building yet — per the working rules, discuss and agree first.
 
 ## A. Do first (risk of losing work / blocking tests)
 
-1. **Commit + push.** Last commit `08add76` (Jul 24, "Add AI features (estimate-nutrition, fix-meal, scan-meal) via
-   Edge Functions"; before it `27a74ea` Jul 18 and `15a0ccb` Jul 17).
-   Everything after — paywall, RevenueCat, 9 edge functions, migrations 7–9, Build My Plan redesign, delete account,
-   OTP verification, macro-food scripts, this handover — exists only on this laptop. `.env` is gitignored (good).
-   Before pushing, decide whether `docs/handover/chat-history/` should be committed (contains his personal email and
-   5 months of raw messages; keys are redacted). Run `git status` first and review untracked files.
-2. **Manual — Supabase Auth email template.** Dashboard → Authentication → Email Templates → **Confirm signup** must
-   contain `{{ .Token }}` (the 6-digit code). Without it the code screen can never succeed. Note the OTP expiry
-   (Authentication → Providers → Email; default 3600s) — Alex asked for the value on Aug 23 and it was never confirmed
-   from the dashboard. Local `config.toml` (`enable_confirmations=false`, `otp_expiry=3600`) is NOT the live setting.
-3. **Manual — end-to-end test of the 6-digit signup** on the iPhone with a fresh email: sign up → code arrives →
-   enter → session + sync → onboarding continues. Also "I'll verify later" → Home banner → `/auth/verify-code`.
-   Resend cooldown is 60s client-side (`RESEND_COOLDOWN_SECONDS`), server limit is the dashboard rate limit.
-4. **Manual — delete-account test** (Alex's 6-step script, Aug 23 #440 in chat-history; never completed because Metro
-   was down). Wrong password rejected → correct password → warning → deleted → back to onboarding start → row gone from
-   both `auth.users` and `public.users`.
-5. **Signup 500 (`unexpected_failure` from `/auth/v1/signup`, Aug 18)** —    root cause never confirmed. Already ruled out:
-   the `handle_new_user` trigger (tested in a rolled-back transaction; every NOT NULL column has a default). Leading
-   suspect: `redirect_to=mealapp://auth/callback` missing from Authentication → URL Configuration → Redirect URLs.
-   Other candidate: the built-in mailer failing to send. The OTP switch still sends `emailRedirectTo`, so this matters. Check Supabase Auth logs for request id `01a01610-cb6a-7667-ba93-cf02db634d11` if still
-   retained; otherwise reproduce and read the logs. Confirm signup now works before anything else auth-related.
+**Done Oct 9–11, 2026** (kept short for the record):
+- ~~Commit + push~~ — pushed as `bdf879c` (backend), `dafd090` (app), `6f4ec0c` (handover docs). The repo is
+  **public** (Alex chose to keep it public for his resume), so scan for secrets before every commit.
+  `docs/handover/chat-history/` is gitignored and exists only on this laptop.
+- ~~Confirm signup template~~ — contains `{{ .Token }}` (checked in the dashboard).
+- ~~6-digit signup test~~ — passed on the iPhone with `chukwudi.can+test1@gmail.com`. "I'll verify later" path not
+  re-tested.
+- ~~Delete-account test~~ — passed. The account was removed from both Authentication → Users and `public.users`.
+- **Signup 500 (Aug 18): not reproduced.** Signup works now, and Redirect URLs contains `mealapp://auth/callback`
+  and `mealapp://auth/reset`. Most likely the redirect URL was added after Aug 18. Site URL is still
+  `http://localhost:3000` (harmless for the code flows; set a real value before launch).
+- **Password reset rebuilt as a 6-digit code** (`/auth/forgot-password`: email → code → new password → safe sign-out →
+  log in). Two bugs found on the way: (1) the tabs login gate bounced every `/auth/*` route back to `/onboarding`, so
+  Forgot password was unreachable while logged out (fixed in `app/(tabs)/_layout.tsx`); (2) the old reset link spun
+  forever (it can't be opened on another device because of PKCE, and `useURL()` misses it) — `/auth/reset` is kept
+  only for old link emails, now with a `getInitialURL` fallback and a 15s timeout. Tested end-to-end.
+  **Dashboard requirement:** the *Reset password* email template must contain `{{ .Token }}` (done for the dev project).
+
+Still open:
+1. **OTP expiry value** (Authentication → Providers → Email; default 3600s) — never read from the dashboard.
+   Local `config.toml` is NOT the live setting.
+2. **Custom SMTP appears to be configured** — the reset email came from `Macrotri <hello@macrotri.com>`, not
+   Supabase's default sender. Confirm in Authentication → Emails → SMTP Settings, then close item 15 below.
+3. **The recipe list saved on the phone always overrides `RECIPE_SEED`** (`store/useMealStore.ts` merge:
+   `recipes: p.recipes ?? current.recipes`). Effects: seed updates (20 → 60 recipes, `isFree` flags) never reach
+   existing installs, and Alex's phone shows a duplicate-key warning for `rcp-dn-beef-tacos` (the seed itself has no
+   duplicates in any commit, so the stored list came from an older dev build). The fix touches persisted-store
+   loading — plan it with Alex first.
+4. **Delete `/auth/reset` before launch** (old link emails only; its "done" state routes to `/(tabs)`, which the gate
+   bounces to onboarding while logged out).
+5. Worth checking: the sync engine's `claim` mode (device with no `sync:lastUserId`) uploads local profile/goals over
+   the server copy. A normal login on a fresh install hits this too — confirm a fresh-install login can't overwrite a
+   real profile with defaults.
 
 ## B. Paywall / RevenueCat
 

@@ -166,7 +166,7 @@ These come straight from months of his feedback. Violating them is the #1 thing 
   `revenuecat-webhook` via relative path — keep it dependency-free and redeploy the webhook if it changes.
 - Comments: match the surrounding density; the codebase explains *why* (constraints, past bugs), not *what*.
 
-## 7. Current state (as of Oct 9, 2026 — last active work Aug 23)
+## 7. Current state (as of Oct 11, 2026)
 
 **Built and working (dev):** onboarding + email/password auth (6-digit code verification, "verify later" allowed),
 offline-first sync of profile/meals/weight/recipes/grocery/plans, Home (rings, tick-off, Added tags, sync icon, verify
@@ -180,17 +180,17 @@ Pro paywall + RevenueCat Test Store purchases + webhook, 5-free-scan funnel.
 estimate-nutrition, fix-meal, scan-meal, scan-kitchen, suggest-kitchen-recipes, generate-meal-suggestions,
 generate-plan-shortlist, generate-recipe-concept, generate-recipe-steps, recipe-assistant, revenuecat-webhook, delete-account.
 
-**⚠ Biggest risk right now: almost everything since Jul 24 is UNCOMMITTED.** Last commit is `08add76` ("Add AI features
-(estimate-nutrition, fix-meal, scan-meal)"). Paywall, RevenueCat, 9 edge functions, 3 migrations, Build My Plan redesign,
-delete account, OTP verification, macro-food scripts… are only on this laptop. Remote: `origin` =
-`github.com/chukwudican-sudo/meal-tracking-app`, branch `main`. Suggest a commit+push early (with his approval).
+**Git:** everything is committed and pushed (Oct 9–11). Remote: `origin` = `github.com/chukwudican-sudo/meal-tracking-app`,
+branch `main`. **The repo is PUBLIC** (Alex keeps it public for his resume): scan for secrets before every commit, and
+never commit `.env` or `docs/handover/chat-history/` (gitignored, local only).
+
+**Verified on device Oct 10–11:** 6-digit signup, password reset (now code-based, see OPEN_ITEMS §A), delete account.
 
 **Top open items** (full list in `docs/handover/OPEN_ITEMS.md`):
-1. Commit + push the uncommitted work.
-2. Supabase dashboard: confirm the **Confirm signup** email template contains `{{ .Token }}` (the 6-digit code flow
-   depends on it) and note the OTP expiry (default 3600s).
-3. Confirm the RevenueCat → Supabase webhook is configured in the RevenueCat dashboard and test it end-to-end.
-4. Run the on-device delete-account test (never done).
+1. Confirm the RevenueCat → Supabase webhook is configured in the RevenueCat dashboard and test it end-to-end.
+2. Read the OTP expiry from the dashboard (default 3600s); confirm custom SMTP (emails come from `hello@macrotri.com`).
+3. Stored recipe list overrides `RECIPE_SEED` (seed updates never reach existing installs) — plan a fix with Alex.
+4. Both *Confirm signup* and *Reset password* email templates must contain `{{ .Token }}` (dev: done; prod: TODO).
 5. Deferred by Alex: widen `hasProfile()` login gate from `!!profile.firstName` to "users row exists" (Apple/Google
    sign-in won't always give a name). He said "separate pass" — ask before doing it.
 6. Pick a real app name (currently `AppName` in `constants/app.ts`, `NutriTrack` in onboarding, "Macrotri Pro" on the
