@@ -184,19 +184,18 @@ generate-plan-shortlist, generate-recipe-concept, generate-recipe-steps, recipe-
 branch `main`. **The repo is PUBLIC** (Alex keeps it public for his resume): scan for secrets before every commit, and
 never commit `.env` or `docs/handover/chat-history/` (gitignored, local only).
 
-**Verified on device Oct 10–11:** 6-digit signup, password reset (now code-based, see OPEN_ITEMS §A), delete account.
+**Verified on device Oct 10–11:** 6-digit signup, password reset (now code-based, see OPEN_ITEMS §A), delete account,
+RevenueCat webhook full lifecycle (purchase → `active`, renewals, expiry → `expired`). OTP expiry 3600s; custom SMTP on.
 
 **Top open items** (full list in `docs/handover/OPEN_ITEMS.md`):
-1. Confirm the RevenueCat → Supabase webhook is configured in the RevenueCat dashboard and test it end-to-end.
-2. Read the OTP expiry from the dashboard (default 3600s); confirm custom SMTP (emails come from `hello@macrotri.com`).
-3. Stored recipe list overrides `RECIPE_SEED` (seed updates never reach existing installs) — plan a fix with Alex.
-4. Both *Confirm signup* and *Reset password* email templates must contain `{{ .Token }}` (dev: done; prod: TODO).
-5. Deferred by Alex: widen `hasProfile()` login gate from `!!profile.firstName` to "users row exists" (Apple/Google
+1. Stored recipe list overrides `RECIPE_SEED` (seed updates never reach existing installs) — plan a fix with Alex.
+2. Both *Confirm signup* and *Reset password* email templates must contain `{{ .Token }}` (dev: done; prod: TODO).
+3. Deferred by Alex: widen `hasProfile()` login gate from `!!profile.firstName` to "users row exists" (Apple/Google
    sign-in won't always give a name). He said "separate pass" — ask before doing it.
-6. Pick a real app name (currently `AppName` in `constants/app.ts`, `NutriTrack` in onboarding, "Macrotri Pro" on the
+4. Pick a real app name (currently `AppName` in `constants/app.ts`, `NutriTrack` in onboarding, "Macrotri Pro" on the
    paywall, `meal-app` in app.json).
-7. Launch blockers: real Terms/Privacy URLs (placeholders `example.com`), production RevenueCat key + App Store Connect
-   products under `com.alex.mealapp`, production Supabase project, custom SMTP, Apple Sign-In (required by App Store
+5. Launch blockers: real Terms/Privacy URLs (placeholders `example.com`), production RevenueCat key + App Store Connect
+   products under `com.alex.mealapp`, production Supabase project (+ its SMTP), Apple Sign-In (required by App Store
    when offering other social logins), remove debug `console.info` logs (paywall, purchases, auth/callback, auth).
 
 ## 8. Claude Code quick reference (for Alex)

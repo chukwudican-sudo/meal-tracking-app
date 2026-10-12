@@ -22,20 +22,18 @@ Nothing here is approved for building yet — per the working rules, discuss and
   forever (it can't be opened on another device because of PKCE, and `useURL()` misses it) — `/auth/reset` is kept
   only for old link emails, now with a `getInitialURL` fallback and a 15s timeout. Tested end-to-end.
   **Dashboard requirement:** the *Reset password* email template must contain `{{ .Token }}` (done for the dev project).
+- ~~OTP expiry~~ — 3600s (1 hour), read from the dashboard Oct 11. Local `config.toml` is NOT the live setting.
+- ~~Custom SMTP (dev)~~ — on; emails are sent as `Macrotri <hello@macrotri.com>`. The production project needs the same.
 
 Still open:
-1. **OTP expiry value** (Authentication → Providers → Email; default 3600s) — never read from the dashboard.
-   Local `config.toml` is NOT the live setting.
-2. **Custom SMTP appears to be configured** — the reset email came from `Macrotri <hello@macrotri.com>`, not
-   Supabase's default sender. Confirm in Authentication → Emails → SMTP Settings, then close item 15 below.
-3. **The recipe list saved on the phone always overrides `RECIPE_SEED`** (`store/useMealStore.ts` merge:
+1. **The recipe list saved on the phone always overrides `RECIPE_SEED`** (`store/useMealStore.ts` merge:
    `recipes: p.recipes ?? current.recipes`). Effects: seed updates (20 → 60 recipes, `isFree` flags) never reach
    existing installs, and Alex's phone shows a duplicate-key warning for `rcp-dn-beef-tacos` (the seed itself has no
    duplicates in any commit, so the stored list came from an older dev build). The fix touches persisted-store
    loading — plan it with Alex first.
-4. **Delete `/auth/reset` before launch** (old link emails only; its "done" state routes to `/(tabs)`, which the gate
+2. **Delete `/auth/reset` before launch** (old link emails only; its "done" state routes to `/(tabs)`, which the gate
    bounces to onboarding while logged out).
-5. Worth checking: the sync engine's `claim` mode (device with no `sync:lastUserId`) uploads local profile/goals over
+3. Worth checking: the sync engine's `claim` mode (device with no `sync:lastUserId`) uploads local profile/goals over
    the server copy. A normal login on a fresh install hits this too — confirm a fresh-install login can't overwrite a
    real profile with defaults.
 
@@ -44,7 +42,10 @@ Still open:
 6. **Manual — RevenueCat webhook** configured in RevenueCat dashboard → Integrations → Webhooks pointing at
    `https://kpmxjufzggcapljhxutv.supabase.co/functions/v1/revenuecat-webhook` with the Authorization header matching the
    `REVENUECAT_WEBHOOK_SECRET` Supabase secret. Then test: purchase in Test Store → `public.users.subscription_status`
-   flips to `active`; cancel/expire → `expired`. Never verified end-to-end.
+   flips to `active`; cancel/expire → `expired`. **Verified end-to-end Oct 11** with `+test2`: the RevenueCat test
+   event returned 200 (Authorization matches), the purchase flipped the row to `active`, renewals advanced
+   `subscription_expiry_date`, and the final expiry flipped it to `expired` about a minute later. Test Store
+   subscriptions renew every 5 min (monthly) up to 5 times, then expire on their own — there is no way to cancel early.
 7. Restore Purchases flow test; re-signup after delete gets a new user id → old subscription needs Restore (understood
    and accepted by Alex, no code change).
 8. Remove debug `console.info/log` before release: `app/paywall.tsx` (10), `lib/purchases.ts` (6),
@@ -65,7 +66,7 @@ Still open:
 14. **Production Supabase project** (separate from dev `kpmxjufzggcapljhxutv`): run the 9 migrations, set secrets
     (Gemini, RevenueCat webhook, USDA if scripts run there), deploy 12 functions, seed `macro_*` tables, copy Auth
     settings (template with `{{ .Token }}`, redirect URLs, rate limits).
-15. **Custom SMTP** (Supabase's built-in mailer is rate-limited and lands in spam).
+15. **Custom SMTP** — done on dev (`hello@macrotri.com`); set it up again on the production project.
 16. **Sign in with Apple** (required if Google sign-in ships) + Google sign-in (onboarding buttons say "coming soon").
     Before this, do item 17.
 17. **`hasProfile()` widening** (deferred by Alex Aug 18: "Hold … for a separate pass, not tonight"). Currently the
