@@ -147,6 +147,8 @@ These come straight from months of his feedback. Violating them is the #1 thing 
   `[]`/`{}` from a selector (infinite render loop) — return `undefined` and fall back to a module-level constant.
 - **Persisted store changes:** every new field needs a default in `persist.merge` (deep-merge pattern already there);
   structural changes need a `version` bump + `migrate`. Old persisted profiles crashing on missing fields is a real past bug.
+  Read-only app content (`recipes`, `plans` catalogs) is excluded via `partialize` and always comes from the seed files —
+  never persist bundled content, or installs freeze on their first-launch copy (a real past bug, fixed Oct 12).
 - **IDs:** anything that syncs uses `newId()` (UUID, `lib/sync/uuid.ts`). Non-UUID ids like `meal-123` or
   `${date}-scan-${ts}` broke sync before (Postgres `invalid input syntax for type uuid`).
 - **Dates** `YYYY-MM-DD` local (parse with `'T00:00:00'`), times `HH:mm` 24h. Plan days are **Mon=0**; JS `getDay()`
@@ -188,13 +190,12 @@ never commit `.env` or `docs/handover/chat-history/` (gitignored, local only).
 RevenueCat webhook full lifecycle (purchase → `active`, renewals, expiry → `expired`). OTP expiry 3600s; custom SMTP on.
 
 **Top open items** (full list in `docs/handover/OPEN_ITEMS.md`):
-1. Stored recipe list overrides `RECIPE_SEED` (seed updates never reach existing installs) — plan a fix with Alex.
-2. Both *Confirm signup* and *Reset password* email templates must contain `{{ .Token }}` (dev: done; prod: TODO).
-3. Deferred by Alex: widen `hasProfile()` login gate from `!!profile.firstName` to "users row exists" (Apple/Google
+1. Both *Confirm signup* and *Reset password* email templates must contain `{{ .Token }}` (dev: done; prod: TODO).
+2. Deferred by Alex: widen `hasProfile()` login gate from `!!profile.firstName` to "users row exists" (Apple/Google
    sign-in won't always give a name). He said "separate pass" — ask before doing it.
-4. Pick a real app name (currently `AppName` in `constants/app.ts`, `NutriTrack` in onboarding, "Macrotri Pro" on the
+3. Pick a real app name (currently `AppName` in `constants/app.ts`, `NutriTrack` in onboarding, "Macrotri Pro" on the
    paywall, `meal-app` in app.json).
-5. Launch blockers: real Terms/Privacy URLs (placeholders `example.com`), production RevenueCat key + App Store Connect
+4. Launch blockers: real Terms/Privacy URLs (placeholders `example.com`), production RevenueCat key + App Store Connect
    products under `com.alex.mealapp`, production Supabase project (+ its SMTP), Apple Sign-In (required by App Store
    when offering other social logins), remove debug `console.info` logs (paywall, purchases, auth/callback, auth).
 

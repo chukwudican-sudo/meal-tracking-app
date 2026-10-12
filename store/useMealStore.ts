@@ -1885,6 +1885,15 @@ export const useMealStore = create<AppStore>()(
         return p as AppStore;
       },
       storage: createJSONStorage(() => appStorage),
+      // The premade catalogs (recipes, plans) are read-only app content, not user
+      // data — never persist them. Persisting froze each install on whatever
+      // RECIPE_SEED / PLAN_SEED looked like at its first launch: new recipes and
+      // isFree flags never arrived, and a duplicate id fixed in the seed on Aug 19
+      // lived on in phones that had saved it on Aug 17.
+      partialize: state =>
+        Object.fromEntries(
+          Object.entries(state).filter(([key]) => key !== 'recipes' && key !== 'plans'),
+        ) as Partial<AppStore>,
       // Shallow merge by default discards any new top-level/profile fields
       // we add in later releases (e.g. dietaryRestrictions/allergies, recipes,
       // savedRecipes). Provide an explicit merge that fills in defaults for
@@ -1936,11 +1945,13 @@ export const useMealStore = create<AppStore>()(
             waterTargetCups: p.goals?.waterTargetCups ?? DEFAULT_GOALS.waterTargetCups,
             secondaryTargets: p.goals?.secondaryTargets ?? {},
           },
-          recipes:      p.recipes      ?? current.recipes,
+          // Always the bundled seed — ignores any catalog older installs saved
+          // before partialize excluded it (see partialize above).
+          recipes:      current.recipes,
           savedRecipes,
           grocery:      p.grocery      ?? current.grocery,
           weightLog:    p.weightLog    ?? current.weightLog ?? [],
-          plans:        p.plans        ?? current.plans,
+          plans:        current.plans,
           savedPlans:   p.savedPlans   ?? current.savedPlans ?? [],
           viewedRecipeIds: p.viewedRecipeIds ?? current.viewedRecipeIds ?? [],
           planAvoidFoods: p.planAvoidFoods ?? current.planAvoidFoods ?? [],

@@ -23,17 +23,17 @@ Nothing here is approved for building yet — per the working rules, discuss and
   only for old link emails, now with a `getInitialURL` fallback and a 15s timeout. Tested end-to-end.
   **Dashboard requirement:** the *Reset password* email template must contain `{{ .Token }}` (done for the dev project).
 - ~~OTP expiry~~ — 3600s (1 hour), read from the dashboard Oct 11. Local `config.toml` is NOT the live setting.
+- ~~Stored catalogs overrode the seed~~ — fixed Oct 12: `recipes`/`plans` are excluded from persistence
+  (`partialize`) and always loaded from `RECIPE_SEED`/`PLAN_SEED`. Root cause of the `rcp-dn-beef-tacos`
+  duplicate-key warning: the Aug 17 bundle-id change gave a fresh install whose first launch saved the seed while it
+  still had the duplicate (fixed in the seed Aug 19, but the saved copy always won). Verified on the iPhone: warning
+  gone, 15 recipes per category.
 - ~~Custom SMTP (dev)~~ — on; emails are sent as `Macrotri <hello@macrotri.com>`. The production project needs the same.
 
 Still open:
-1. **The recipe list saved on the phone always overrides `RECIPE_SEED`** (`store/useMealStore.ts` merge:
-   `recipes: p.recipes ?? current.recipes`). Effects: seed updates (20 → 60 recipes, `isFree` flags) never reach
-   existing installs, and Alex's phone shows a duplicate-key warning for `rcp-dn-beef-tacos` (the seed itself has no
-   duplicates in any commit, so the stored list came from an older dev build). The fix touches persisted-store
-   loading — plan it with Alex first.
-2. **Delete `/auth/reset` before launch** (old link emails only; its "done" state routes to `/(tabs)`, which the gate
+1. **Delete `/auth/reset` before launch** (old link emails only; its "done" state routes to `/(tabs)`, which the gate
    bounces to onboarding while logged out).
-3. Worth checking: the sync engine's `claim` mode (device with no `sync:lastUserId`) uploads local profile/goals over
+2. Worth checking: the sync engine's `claim` mode (device with no `sync:lastUserId`) uploads local profile/goals over
    the server copy. A normal login on a fresh install hits this too — confirm a fresh-install login can't overwrite a
    real profile with defaults.
 
@@ -51,7 +51,8 @@ Still open:
 8. Remove debug `console.info/log` before release: `app/paywall.tsx` (10), `lib/purchases.ts` (6),
    `app/auth/callback.tsx` (3), `lib/auth.tsx` (3), `lib/sync/engine.ts` (2), `ai/aiEdgeClient.ts` (1),
    `lib/sync/repository.ts` (1). Some were added on purpose for the purchase-chain and deep-link debugging.
-9. Choose the 8 free premade recipes (`isFree` on 8 of 60 in `constants/recipeSeed.ts` — current picks were the agent's).
+9. Choose the free premade recipes — currently 12 of 60 (3 per category) have `isFree` in `constants/recipeSeed.ts`; the
+   picks were the agent's, not Alex's.
 10. Android: no Play Console yet; `Purchases.showManageSubscriptions()` is iOS-only (Android needs the Play URL).
 
 ## C. Launch blockers (App Store)
