@@ -80,7 +80,7 @@ app/                     expo-router routes
   meal-edit/             macro/[key] · ingredient/[id]   (push routes on top of MealDetailModal, driven by mealEditSession)
   profile.tsx, profile/  edit-goal · personal-details · dietary · nutrition-goals
   settings.tsx, settings/ account · account-delete-confirm · notifications · help · feedback · coming-soon
-  paywall.tsx            the one reusable Pro paywall (open ONLY via lib/paywall.ts#openPaywall)
+  paywall.tsx            thin route for the one reusable Pro paywall (UI in components/paywall/; open ONLY via lib/paywall.ts#openPaywall)
   cart.tsx, kitchen.tsx, grocery/planned-ingredients.tsx, notifications.tsx
   meal/[id].tsx, modal.tsx   legacy (meal/[id] orphaned add/edit form)
 components/              MealDetailModal, MealForm, MealCard, CustomTabBar, Screen, ProgressRing, ProgressiveLoader,
@@ -159,6 +159,11 @@ These come straight from months of his feedback. Violating them is the #1 thing 
   `usePaywallStore.pendingResume` — all reset on launch, never synced).
 - **Undo/toasts:** destructive actions → `useUndoStore.showUndo` (5s, latest only, global). Plain info → `useToastStore`.
   Standard copy: "Added to Today", "Added to Saved Recipes" / "Removed from Saved Recipes", "Added to Cart", "Moved to Kitchen".
+- **Paywall from inside an RN `Modal`:** mount `<PaywallModalHost active={visible} />` inside the modal (done for AddMealScreen,
+  KitchenScanModal). While a host is active, `openPaywall` shows the paywall on top of the modal instead of pushing
+  `/paywall`, which would land behind it (a real past bug: the scan-limit paywall was invisible).
+- **`CameraView` must stay childless** — render overlays as absolutely-positioned siblings. Children inside it crashed the
+  app on iOS (New Architecture) when the camera unmounted after a scan; expo-camera itself warns about it.
 - **AI calls from the client:** always via an `ai/<function>.ts` wrapper on `invokeAIFunction` (35s client timeout).
   Error handling everywhere: `not_premium` → `openPaywall({ reason:'scan_limit' | 'premium_feature', onSuccess: retry })`;
   `rate_limited` / `ai_failed` / `unauthorized` → toast with the server message. Long waits → `ProgressiveLoader`.

@@ -28,6 +28,14 @@ Nothing here is approved for building yet — per the working rules, discuss and
   duplicate-key warning: the Aug 17 bundle-id change gave a fresh install whose first launch saved the seed while it
   still had the duplicate (fixed in the seed Aug 19, but the saved copy always won). Verified on the iPhone: warning
   gone, 15 recipes per category.
+- ~~Scan screen rebuilt (Oct 12)~~ — full-bleed camera per Alex's reference: X / ? (tips sheet), Scan Food · Barcode ·
+  Food label tiles, .5x/1x (iOS ultra-wide lens when present), flash, shutter, photo-library button (Upload mode and
+  flip-camera removed). Freezes on the tapped frame (`pausePreview`) and shows the still photo while analysing.
+  Fixed a native crash after every successful scan (children inside `CameraView`).
+- ~~Food label~~ — `scan-meal` accepts `mode: 'label'` (reads per-serving label values; no readable label → clear
+  `invalid_input` message, no free scan charged). **Deployed to dev Oct 12** (`npx supabase functions deploy scan-meal`).
+- ~~Paywall hidden behind modals~~ — scan-limit paywall from Scan / AI describe / Kitchen scan opened behind the RN
+  Modal. Fixed with `PaywallModalHost`; after purchase the scan retries on the same photo. Verified on the iPhone.
 - ~~Custom SMTP (dev)~~ — on; emails are sent as `Macrotri <hello@macrotri.com>`. The production project needs the same.
 
 Still open:
@@ -82,8 +90,10 @@ Still open:
 
 22. **Legacy OpenAI client** (`ai/aiClient.ts`, no key, effectively broken) still backs:
     `components/addMeal/ScanTab.tsx` re-evaluate (also has a `file://` URI bug — must send base64 like `scan-meal`),
-    barcode lookup, voice/Whisper transcription (`AITab.tsx`), `components/MealDetailModal.tsx` Fix,
+    voice/Whisper transcription (`AITab.tsx`), `components/MealDetailModal.tsx` Fix,
     `components/addMeal/FixResultScreen.tsx`. Migrate each to an edge function (`fix-meal` already exists for text fixes).
+22b. Barcode lookup calls Open Food Facts directly (works, no key) but logs **per-100g** values as if they were one
+    serving — needs a serving-size step or OFF's per-serving fields.
 23. `scan-meal` returns no ingredients list; scanned photo is stored only as a local URI (no Supabase Storage).
 24. AI Describe tab spinner is tiny/barely visible.
 25. Cold start feels slow (never profiled).
