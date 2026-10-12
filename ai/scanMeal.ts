@@ -27,10 +27,18 @@ function stripDataUriPrefix(input: string): string {
   return comma >= 0 ? input.slice(comma + 'base64,'.length) : input;
 }
 
-export async function scanMeal(imageBase64: string, mimeType = 'image/jpeg'): Promise<MealDraft> {
+// 'meal' estimates a plated meal; 'label' reads a packaged food's Nutrition
+// Facts label (per serving). Both return the same draft shape and share quota.
+export type ScanMode = 'meal' | 'label';
+
+export async function scanMeal(
+  imageBase64: string,
+  mimeType = 'image/jpeg',
+  mode: ScanMode = 'meal',
+): Promise<MealDraft> {
   const data = await invokeAIFunction(
     'scan-meal',
-    { imageBase64: stripDataUriPrefix(imageBase64), mimeType },
+    { imageBase64: stripDataUriPrefix(imageBase64), mimeType, mode },
     {
       logPrefix: '[scanMeal]',
       makeError: (code, message) => new ScanError(code, message),

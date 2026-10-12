@@ -1,7 +1,9 @@
 // scan-meal — AI photo scan backend (Phase 3, feature 3, vision).
 //
 // Takes a meal photo (inline base64) and returns a minimal nutrition estimate
-// (name + calories + macros). Same auth + premium gate + rate limit + Gemini
+// (name + calories + macros). With `mode: 'label'` it instead reads a packaged
+// food's Nutrition Facts label (per-serving values as printed) — same response
+// shape, same quota/rate-limit bucket. No `mode` = the original meal scan. Same auth + premium gate + rate limit + Gemini
 // plumbing as estimate-nutrition/fix-meal, composed from ../_shared/. The photo
 // is sent inline to Gemini per request — no Supabase Storage involved.
 //
@@ -53,9 +55,35 @@ const RESPONSE_SCHEMA = {
   required: ['meal_name', 'calories', 'protein', 'carbs', 'fats'],
 };
 
+// Label mode adds found_label so a photo with no readable label becomes a clear
+// error (and costs no free scan) instead of an invented estimate.
+const LABEL_RESPONSE_SCHEMA = {
+  type: 'object',
+  properties: {
+    found_label: { type: 'boolean' },
+    ...RESPONSE_SCHEMA.properties,
+  },
+  required: ['found_label', ...RESPONSE_SCHEMA.required],
+};
+
+type ScanMode = 'meal' | 'label';
+
 interface ProfileContext {
   dietary_preferences: string[];
   allergies: string[];
+}
+
+function buildLabelPrompt(): { system: string; userText: string } {
+  const system =
+    'You read Nutrition Facts / nutrition information labels from photos of ' +
+    'packaged food. Report the values printed for ONE serving exactly as shown ' +
+    '(calories in kcal; protein, carbs, fats in grams). If the label only lists ' +
+    'per-100g values, use those. Set meal_name to the product name if it is ' +
+    'visible, otherwise a short generic name like "Packaged snack". Never ' +
+    'estimate or invent numbers: if no nutrition label is clearly readable, set ' +
+    'found_label to false and every number to 0. Respond with JSON only, ' +
+    'matching the provided schema.';
+  return { system, userText: 'Read the nutrition label in this photo.' };
 }
 
 function buildPrompt(p: ProfileContext): { system: string; userText: string } {
@@ -98,8 +126,10 @@ Deno.serve(async (req: Request) => {
 
   let imageBase64 = '';
   let mimeType = 'image/jpeg';
+  let mode: ScanMode = 'meal';
   try {
     const body = await req.json();
+    if (body?.mode === 'label') mode = 'label';
     imageBase64 = typeof body?.imageBase64 === 'string' ? body.imageBase64 : '';
     if (typeof body?.mimeType === 'string' && ALLOWED_MIME_TYPES.has(body.mimeType)) {
       mimeType = body.mimeType;
@@ -157,7 +187,7 @@ Deno.serve(async (req: Request) => {
     allergies: profileRow.allergies ?? [],
   };
 
-  const { system, userText } = buildPrompt(profile);
+  const { system, userText } = mode === 'label' ? buildLabelPrompt() : buildPrompt(profile);
 
   let estimate: unknown;
   try {
@@ -166,7 +196,7 @@ Deno.serve(async (req: Request) => {
       model: GEMINI_MODEL,
       systemInstruction: system,
       userText,
-      responseSchema: RESPONSE_SCHEMA,
+      responseSchema: mode === 'label' ? LABEL_RESPONSE_SCHEMA : RESPONSE_SCHEMA,
       logPrefix: LOG_PREFIX,
       timeoutMs: GEMINI_TIMEOUT_MS,
       images: [{ base64: imageBase64, mimeType }],
@@ -176,8 +206,19 @@ Deno.serve(async (req: Request) => {
     const message =
       e instanceof GeminiTimeoutError
         ? 'The AI scanner took too long to respond. Please try again.'
-        : 'Could not identify this meal. Please try again.';
+        : mode === 'label'
+          ? 'Could not read this label. Please try again.'
+          : 'Could not identify this meal. Please try again.';
     return errorResponse('ai_failed', message, 502);
+  }
+
+  // No readable label: tell the user plainly, before charging anything.
+  if (mode === 'label' && (estimate as { found_label?: boolean } | null)?.found_label !== true) {
+    return errorResponse(
+      'invalid_input',
+      "We couldn't find a nutrition label in this photo. Hold the label flat, fill the frame, and try again.",
+      422,
+    );
   }
 
   // Only charge the call (rate-limit log + free scan) once it succeeded, so our

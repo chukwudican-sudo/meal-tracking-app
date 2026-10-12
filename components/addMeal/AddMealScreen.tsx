@@ -8,6 +8,7 @@ import {
   Pressable,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Ionicons from '@expo/vector-icons/Ionicons';
 
 import { COLORS } from '@/constants/theme';
 import { APP_LOGO, APP_NAME } from '@/constants/app';
@@ -22,6 +23,7 @@ import { SearchTab } from './SearchTab';
 import { MealDraftCard } from './MealDraftCard';
 import { FixResultScreen } from './FixResultScreen';
 import { DisclaimerScreen } from './DisclaimerScreen';
+import { PaywallModalHost } from '@/components/paywall/PaywallModalHost';
 import type { MealEntry } from '@/store/types';
 
 // Stable empty-array reference; see DayDetailModal for the same pattern.
@@ -93,26 +95,31 @@ export function AddMealScreen({ visible, date, onClose }: Props) {
 
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="fullScreen" onRequestClose={handleClose}>
-      <View style={[styles.full, { paddingTop: insets.top }]}>
+      {/* The Scan tab is a full-bleed camera with its own close/help buttons,
+          so it skips the safe-area padding and this header. */}
+      <View style={[styles.full, { paddingTop: activeTab === 'scan' ? 0 : insets.top }]}>
         {/* Top header */}
-        <View style={styles.header}>
-          <TouchableOpacity onPress={handleClose} hitSlop={12}>
-            <Text style={styles.headerBack}>←</Text>
-          </TouchableOpacity>
-          <View style={styles.headerCenter}>
-            <Text style={styles.headerLogo}>{APP_LOGO}</Text>
-            <Text style={styles.headerTitle}>{APP_NAME}</Text>
+        {activeTab !== 'scan' && (
+          <View style={styles.header}>
+            <TouchableOpacity onPress={handleClose} hitSlop={12}>
+              <Text style={styles.headerBack}>←</Text>
+            </TouchableOpacity>
+            <View style={styles.headerCenter}>
+              <Text style={styles.headerLogo}>{APP_LOGO}</Text>
+              <Text style={styles.headerTitle}>{APP_NAME}</Text>
+            </View>
+            <TouchableOpacity onPress={() => setShowDisclaimer(true)} hitSlop={12}>
+              <Text style={styles.headerMore}>•••</Text>
+            </TouchableOpacity>
           </View>
-          <TouchableOpacity onPress={() => setShowDisclaimer(true)} hitSlop={12}>
-            <Text style={styles.headerMore}>•••</Text>
-          </TouchableOpacity>
-        </View>
+        )}
 
         {/* Active tab content */}
         <View style={styles.tabContent}>
           {activeTab === 'scan' && (
             <ScanTab
               context={context}
+              onClose={handleClose}
               onDraftReady={(draft, src) => {
                 // ScanTab's "Log" path bypasses the draft card entirely:
                 // it logs the meal directly to today and closes the screen.
@@ -149,11 +156,11 @@ export function AddMealScreen({ visible, date, onClose }: Props) {
         </View>
 
         {/* Bottom tab bar */}
-        <View style={styles.tabBar}>
-          <TabButton id="scan"   active={activeTab === 'scan'}   onPress={setActiveTab} icon="⌖" label="Scan" />
-          <TabButton id="ai"     active={activeTab === 'ai'}     onPress={setActiveTab} icon="✦" label="AI" />
-          <TabButton id="manual" active={activeTab === 'manual'} onPress={setActiveTab} icon="＋" label="Manual" />
-          <TabButton id="search" active={activeTab === 'search'} onPress={setActiveTab} icon="⌕" label="Search" />
+        <View style={[styles.tabBar, { paddingBottom: Math.max(insets.bottom, 14) }]}>
+          <TabButton id="scan"   active={activeTab === 'scan'}   onPress={setActiveTab} icon="scan-outline"     label="Scan" />
+          <TabButton id="ai"     active={activeTab === 'ai'}     onPress={setActiveTab} icon="sparkles-outline" label="AI" />
+          <TabButton id="manual" active={activeTab === 'manual'} onPress={setActiveTab} icon="add"              label="Manual" />
+          <TabButton id="search" active={activeTab === 'search'} onPress={setActiveTab} icon="search"           label="Search" />
         </View>
 
         {/* Draft card overlay */}
@@ -189,6 +196,7 @@ export function AddMealScreen({ visible, date, onClose }: Props) {
         />
 
         <DisclaimerScreen visible={showDisclaimer} onClose={() => setShowDisclaimer(false)} />
+        <PaywallModalHost active={visible} />
       </View>
     </Modal>
   );
@@ -204,12 +212,12 @@ function TabButton({
   id: TabId;
   active: boolean;
   onPress: (id: TabId) => void;
-  icon: string;
+  icon: React.ComponentProps<typeof Ionicons>['name'];
   label: string;
 }) {
   return (
     <TouchableOpacity style={styles.tabBtn} onPress={() => onPress(id)}>
-      <Text style={[styles.tabIcon, active && styles.tabIconActive]}>{icon}</Text>
+      <Ionicons name={icon} size={22} color={active ? COLORS.green : COLORS.textSecondary} />
       <Text style={[styles.tabLabel, active && styles.tabLabelActive]}>{label}</Text>
     </TouchableOpacity>
   );
@@ -247,8 +255,6 @@ const styles = StyleSheet.create({
     gap: 2,
     paddingVertical: 4,
   },
-  tabIcon: { color: COLORS.textSecondary, fontSize: 22 },
-  tabIconActive: { color: COLORS.green },
   tabLabel: { color: COLORS.textSecondary, fontSize: 11, fontWeight: '500' },
   tabLabelActive: { color: COLORS.green, fontWeight: '700' },
   overlay: {

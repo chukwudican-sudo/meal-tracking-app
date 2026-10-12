@@ -13,20 +13,17 @@ import {
   TextInput,
   TouchableOpacity,
   View,
+  useWindowDimensions,
 } from 'react-native';
-import {
-  CameraView,
-  useCameraPermissions,
-  type CameraType,
-  type FlashMode,
-} from 'expo-camera';
+import { CameraView, useCameraPermissions, type FlashMode } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { COLORS } from '@/constants/theme';
 import { aiClient } from '@/ai/aiClient';
 import { AIError } from '@/ai/aiEdgeClient';
-import { scanMeal } from '@/ai/scanMeal';
+import { scanMeal, type ScanMode } from '@/ai/scanMeal';
 import { compressPhotoToBase64 } from '@/lib/media/compressPhoto';
 import type { DayContext, MealDraft } from '@/ai/types';
 import { openPaywall } from '@/lib/paywall';
@@ -35,7 +32,35 @@ import { rateMeal } from '@/utils/mealRating';
 import { useMealStore } from '@/store/useMealStore';
 import { useToastStore } from '@/store/useToastStore';
 
-type Mode = 'scan' | 'upload' | 'barcode';
+// 'food' estimates a plated meal, 'label' reads a Nutrition Facts label (both
+// via scan-meal), 'barcode' looks the product up. Photo-library picks reuse the
+// current photo mode, so there's no separate Upload mode.
+type Mode = 'food' | 'barcode' | 'label';
+
+const MODES: { id: Mode; label: string; icon: React.ComponentProps<typeof Ionicons>['name'] }[] = [
+  { id: 'food',    label: 'Scan Food',  icon: 'scan-outline' },
+  { id: 'barcode', label: 'Barcode',    icon: 'barcode-outline' },
+  { id: 'label',   label: 'Food label', icon: 'document-text-outline' },
+];
+
+const BUSY_TEXT: Record<Mode, string> = {
+  food: 'Identifying…',
+  barcode: 'Looking up product…',
+  label: 'Reading label…',
+};
+
+// expo-camera exposes iOS lenses by AVCaptureDevice.localizedName ("Back Ultra
+// Wide Camera" in English). No match (older phone, non-English device names) ->
+// the .5x toggle simply isn't shown.
+function findUltraWideLens(lenses: string[]): string | null {
+  return lenses.find(l => /ultra ?wide/i.test(l)) ?? null;
+}
+
+// Food label frame: a portrait, label-shaped box (2:3) about two-thirds of the
+// screen wide, centered in the space between the top buttons and the controls.
+const LABEL_WIDTH_RATIO = 0.66;
+const LABEL_ASPECT = 1.5; // height / width
+const LABEL_DIM = 'rgba(0,0,0,0.45)';
 type ScanState = 'camera' | 'result' | 'fix';
 
 interface DraftMeta {
@@ -48,12 +73,20 @@ interface DraftMeta {
 interface Props {
   context: DayContext;
   onDraftReady: (draft: MealDraft, source: DraftMeta) => void;
+  /** Closes the whole Add Meal screen (the camera hides that screen's header). */
+  onClose: () => void;
 }
 
-export function ScanTab({ context, onDraftReady }: Props) {
+export function ScanTab({ context, onDraftReady, onClose }: Props) {
+  const insets = useSafeAreaInsets();
   const [permission, requestPermission] = useCameraPermissions();
-  const [mode, setMode] = useState<Mode>('scan');
-  const [facing, setFacing] = useState<CameraType>('back');
+  const [mode, setMode] = useState<Mode>('food');
+  const [ultraWideLens, setUltraWideLens] = useState<string | null>(null);
+  const [useUltraWide, setUseUltraWide] = useState(false);
+  const [showTips, setShowTips] = useState(false);
+  const { width: screenW } = useWindowDimensions();
+  const [areaH, setAreaH] = useState(0);
+  const [panelH, setPanelH] = useState(0);
   const [flash, setFlash] = useState<FlashMode>('off');
   const [busy, setBusy] = useState(false);
   const [scannedCode, setScannedCode] = useState<string | null>(null);
@@ -143,6 +176,10 @@ export function ScanTab({ context, onDraftReady }: Props) {
       showToast('Your session expired. Please sign in again.');
       return;
     }
+    if (e instanceof AIError && e.code === 'invalid_input') {
+      showToast(e.message || 'Could not read this photo. Try again.');
+      return;
+    }
     if (e instanceof AIError && e.code === 'ai_failed') {
       showToast(e.message || 'The AI scanner is temporarily unavailable. Please try again.');
       return;
@@ -150,56 +187,71 @@ export function ScanTab({ context, onDraftReady }: Props) {
     showToast('Could not scan this meal. Try again.');
   }
 
-  async function handleCapture() {
-    if (busy) return;
-    if (mode === 'upload') return handleUpload();
-    if (mode === 'barcode') return; // barcode triggers via onBarcodeScanned
-
-    if (!cameraRef.current) return;
+  // Photo -> frozen preview -> compress -> scan. Shared by the shutter and the
+  // library button. The paywall's onSuccess retry re-runs it on the SAME photo,
+  // so buying Pro mid-scan never snaps a new picture or reopens the library.
+  async function analyzePhoto(uri: string, scanMode: ScanMode) {
     setBusy(true);
+    setCapturedUri(uri); // freeze on this photo while it's analysed
     try {
-      const shot = await cameraRef.current.takePictureAsync({ quality: 0.5 });
-      if (!shot?.uri) throw new Error('Could not take photo');
       // Resize + recompress before sending (raw captures are multi-MB).
-      const { base64, mimeType } = await compressPhotoToBase64(shot.uri);
+      const { base64, mimeType } = await compressPhotoToBase64(uri);
       if (!base64) throw new Error('Could not read photo data');
-      const result = await scanMeal(base64, mimeType);
-      setCapturedUri(shot.uri);
+      const result = await scanMeal(base64, mimeType, scanMode);
       setDraft(result);
       setServings(1);
       setBookmarked(false);
       setScanState('result');
     } catch (e) {
-      handleScanError(e, () => void handleCapture());
+      setCapturedUri(null); // back to the live camera
+      void cameraRef.current?.resumePreview().catch(() => {});
+      handleScanError(e, () => void analyzePhoto(uri, scanMode));
     } finally {
       setBusy(false);
     }
   }
 
+  async function handleCapture() {
+    if (busy || mode === 'barcode' || !cameraRef.current) return; // barcode scans itself
+    let uri: string | undefined;
+    setBusy(true);
+    // Freeze the preview on the tapped frame right away: takePictureAsync
+    // captures + re-encodes a full-resolution photo (~1-2s on iOS), and the live
+    // preview kept moving until it returned. The still photo replaces this
+    // paused frame once it's ready.
+    void cameraRef.current.pausePreview().catch(() => {});
+    try {
+      const shot = await cameraRef.current.takePictureAsync({ quality: 0.5 });
+      uri = shot?.uri;
+    } catch (e) {
+      console.warn('Capture failed:', e);
+    } finally {
+      setBusy(false);
+    }
+    if (!uri) {
+      void cameraRef.current?.resumePreview().catch(() => {});
+      showToast('Could not take a photo. Try again.');
+      return;
+    }
+    await analyzePhoto(uri, mode === 'label' ? 'label' : 'meal');
+  }
+
   async function handleUpload() {
     if (busy) return;
-    setBusy(true);
+    let uri: string | undefined;
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ['images'],
         quality: 0.5,
       });
       if (result.canceled || !result.assets?.[0]) return;
-      const asset = result.assets[0];
-      // Resize + recompress before sending (library photos can be multi-MB).
-      const { base64, mimeType } = await compressPhotoToBase64(asset.uri);
-      if (!base64) throw new Error('Could not read image data');
-      const parsed = await scanMeal(base64, mimeType);
-      setCapturedUri(asset.uri);
-      setDraft(parsed);
-      setServings(1);
-      setBookmarked(false);
-      setScanState('result');
+      uri = result.assets[0].uri;
     } catch (e) {
-      handleScanError(e, () => void handleUpload());
-    } finally {
-      setBusy(false);
+      console.warn('Photo library failed:', e);
+      showToast('Could not open your photos. Try again.');
+      return;
     }
+    await analyzePhoto(uri, mode === 'label' ? 'label' : 'meal');
   }
 
   async function handleBarcode(code: string) {
@@ -215,6 +267,7 @@ export function ScanTab({ context, onDraftReady }: Props) {
       setScanState('result');
     } catch (e) {
       console.warn('Barcode lookup failed:', e);
+      showToast("We couldn't find this product. Try Food label instead.");
       setScannedCode(null);
     } finally {
       setBusy(false);
@@ -285,77 +338,180 @@ export function ScanTab({ context, onDraftReady }: Props) {
 
   const showCamera = scanState === 'camera';
 
+  // Label frame geometry (only used in Food label mode, once layout is known).
+  const labelTop0 = insets.top + 60;
+  const labelSpace = areaH - labelTop0 - panelH - 24;
+  const labelW = Math.round(screenW * LABEL_WIDTH_RATIO);
+  const labelH = Math.max(0, Math.min(Math.round(labelW * LABEL_ASPECT), labelSpace));
+  const labelRect = {
+    left: Math.round((screenW - labelW) / 2),
+    top: Math.round(labelTop0 + Math.max(0, (labelSpace - labelH) / 2)),
+    width: labelW,
+    height: labelH,
+  };
+  const showLabelFrame = mode === 'label' && areaH > 0 && panelH > 0 && labelH > 0;
+
   return (
     <View style={styles.full}>
       {/* Camera is mounted only in the camera state to avoid stale frames
           peeking through the half-sheet darkness on slower devices. */}
       {showCamera ? (
-        <CameraView
-          ref={cameraRef}
-          style={styles.camera}
-          facing={facing}
-          flash={flash}
-          barcodeScannerSettings={
-            mode === 'barcode'
-              ? { barcodeTypes: ['ean13', 'ean8', 'upc_a', 'upc_e', 'code128'] }
-              : undefined
-          }
-          onBarcodeScanned={mode === 'barcode' ? ({ data }) => handleBarcode(data) : undefined}
-        >
-          <View pointerEvents="none" style={styles.brackets}>
-            <View style={[styles.corner, styles.cornerTL]} />
-            <View style={[styles.corner, styles.cornerTR]} />
-            <View style={[styles.corner, styles.cornerBL]} />
-            <View style={[styles.corner, styles.cornerBR]} />
+        // CameraView must stay childless: expo-camera warns children "may lead to
+        // inconsistent behaviour or crashes", and on iOS (New Architecture) they
+        // did — unmounting the camera after a successful scan hit an RN assertion
+        // in unmountChildComponentView and killed the app. Overlays render as
+        // siblings layered on top instead.
+        <View style={styles.camera} onLayout={e => setAreaH(e.nativeEvent.layout.height)}>
+          <CameraView
+            ref={cameraRef}
+            style={StyleSheet.absoluteFill}
+            facing="back"
+            flash={flash}
+            selectedLens={useUltraWide && ultraWideLens ? ultraWideLens : undefined}
+            onAvailableLensesChanged={({ lenses }) => setUltraWideLens(findUltraWideLens(lenses))}
+            barcodeScannerSettings={
+              mode === 'barcode'
+                ? { barcodeTypes: ['ean13', 'ean8', 'upc_a', 'upc_e', 'code128'] }
+                : undefined
+            }
+            onBarcodeScanned={mode === 'barcode' ? ({ data }) => handleBarcode(data) : undefined}
+          />
+          {capturedUri ? (
+            <Image source={{ uri: capturedUri }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+          ) : null}
+
+          {showLabelFrame ? (
+            <>
+              {/* Dim everything outside the label box so the label is the focus. */}
+              <View pointerEvents="none" style={[styles.dim, { top: 0, left: 0, right: 0, height: labelRect.top }]} />
+              <View
+                pointerEvents="none"
+                style={[styles.dim, { top: labelRect.top + labelRect.height, left: 0, right: 0, bottom: 0 }]}
+              />
+              <View
+                pointerEvents="none"
+                style={[styles.dim, { top: labelRect.top, height: labelRect.height, left: 0, width: labelRect.left }]}
+              />
+              <View
+                pointerEvents="none"
+                style={[styles.dim, { top: labelRect.top, height: labelRect.height, left: labelRect.left + labelRect.width, right: 0 }]}
+              />
+              <View pointerEvents="none" style={[styles.frame, labelRect]}>
+                <View style={[styles.corner, styles.cornerTL]} />
+                <View style={[styles.corner, styles.cornerTR]} />
+                <View style={[styles.corner, styles.cornerBL]} />
+                <View style={[styles.corner, styles.cornerBR]} />
+              </View>
+            </>
+          ) : mode !== 'label' ? (
+            <View
+              pointerEvents="none"
+              style={[styles.frame, mode === 'barcode' ? styles.frameBarcode : styles.framePhoto]}
+            >
+              <View style={[styles.corner, styles.cornerTL]} />
+              <View style={[styles.corner, styles.cornerTR]} />
+              <View style={[styles.corner, styles.cornerBL]} />
+              <View style={[styles.corner, styles.cornerBR]} />
+              {mode === 'barcode' && <View style={styles.scanLine} />}
+            </View>
+          ) : null}
+
+          <View style={[styles.topBar, { top: insets.top + 8 }]}>
+            <TouchableOpacity style={styles.roundBtn} onPress={onClose} accessibilityLabel="Close" hitSlop={6}>
+              <Ionicons name="close" size={22} color="#fff" />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.roundBtn}
+              onPress={() => setShowTips(true)}
+              accessibilityLabel="Scanning tips"
+              hitSlop={6}
+            >
+              <Ionicons name="help" size={22} color="#fff" />
+            </TouchableOpacity>
+          </View>
+
+          {mode === 'barcode' && (
+            <View pointerEvents="none" style={styles.hintWrap}>
+              <Text style={styles.hintText}>Point at a barcode — it scans automatically</Text>
+            </View>
+          )}
+
+          <View style={styles.bottomPanel} onLayout={e => setPanelH(e.nativeEvent.layout.height)}>
+            {ultraWideLens ? (
+              <View style={styles.zoomRow}>
+                <View style={styles.zoomPill}>
+                  {([true, false] as const).map(ultra => {
+                    const active = useUltraWide === ultra;
+                    return (
+                      <TouchableOpacity
+                        key={ultra ? 'ultra' : 'wide'}
+                        style={[styles.zoomBtn, active && styles.zoomBtnActive]}
+                        onPress={() => setUseUltraWide(ultra)}
+                      >
+                        <Text style={[styles.zoomText, active && styles.zoomTextActive]}>
+                          {ultra ? '.5x' : '1x'}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </View>
+            ) : null}
+
+            <View style={styles.modeRow}>
+              {MODES.map(m => {
+                const active = mode === m.id;
+                return (
+                  <TouchableOpacity
+                    key={m.id}
+                    style={[styles.modeTile, active && styles.modeTileActive]}
+                    onPress={() => setMode(m.id)}
+                    disabled={busy}
+                    activeOpacity={0.85}
+                  >
+                    <Ionicons name={m.icon} size={24} color={active ? '#0F0F0F' : '#fff'} />
+                    <Text style={[styles.modeTileText, active && styles.modeTileTextActive]}>{m.label}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
+            <View style={styles.controlsRow}>
+              <TouchableOpacity
+                style={styles.sideBtn}
+                onPress={() => setFlash(f => (f === 'off' ? 'on' : 'off'))}
+                accessibilityLabel={flash === 'on' ? 'Flash on' : 'Flash off'}
+              >
+                <Ionicons name={flash === 'on' ? 'flash' : 'flash-off-outline'} size={22} color="#fff" />
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.shutter, mode === 'barcode' && styles.shutterDisabled]}
+                onPress={handleCapture}
+                disabled={mode === 'barcode' || busy}
+                accessibilityLabel="Take photo"
+              >
+                <View style={styles.shutterInner} />
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.sideBtn}
+                onPress={handleUpload}
+                disabled={busy}
+                accessibilityLabel="Choose from photo library"
+              >
+                <Ionicons name="images-outline" size={22} color="#fff" />
+              </TouchableOpacity>
+            </View>
           </View>
 
           {busy && (
             <View style={styles.busyOverlay}>
               <ActivityIndicator color={COLORS.green} />
-              <Text style={styles.busyText}>
-                {mode === 'barcode' ? 'Looking up product…' : 'Identifying…'}
-              </Text>
+              <Text style={styles.busyText}>{BUSY_TEXT[mode]}</Text>
             </View>
           )}
-
-          <View style={styles.modeRow}>
-            {(['scan', 'upload', 'barcode'] as const).map(m => (
-              <TouchableOpacity
-                key={m}
-                style={[styles.modePill, mode === m && styles.modePillActive]}
-                onPress={() => setMode(m)}
-              >
-                <Text style={[styles.modePillText, mode === m && styles.modePillTextActive]}>
-                  {m === 'scan' ? 'Scan' : m === 'upload' ? 'Upload' : 'Barcode'}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-
-          <View style={styles.controlsRow}>
-            <TouchableOpacity
-              style={styles.sideBtn}
-              onPress={() => setFlash(f => (f === 'off' ? 'on' : 'off'))}
-            >
-              <Text style={styles.sideBtnText}>{flash === 'on' ? '⚡' : '⚡︎'}</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[styles.shutter, mode === 'barcode' && styles.shutterDisabled]}
-              onPress={handleCapture}
-              disabled={mode === 'barcode' || busy}
-            >
-              <View style={styles.shutterInner} />
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.sideBtn}
-              onPress={() => setFacing(f => (f === 'back' ? 'front' : 'back'))}
-            >
-              <Text style={styles.sideBtnText}>↻</Text>
-            </TouchableOpacity>
-          </View>
-        </CameraView>
+        </View>
       ) : (
         // Result / Fix views — captured photo as backdrop, half-sheet overlay.
         <View style={StyleSheet.absoluteFill}>
@@ -389,6 +545,10 @@ export function ScanTab({ context, onDraftReady }: Props) {
           operates at the OS root and reliably lifts the card above the
           keyboard. Embedding inside the result-stack View was unreliable
           because of the dimmed background's absolute positioning. */}
+      <Modal transparent visible={showTips} animationType="slide" onRequestClose={() => setShowTips(false)}>
+        <TipsSheet onClose={() => setShowTips(false)} bottomInset={insets.bottom} />
+      </Modal>
+
       <Modal
         transparent
         visible={scanState === 'fix'}
@@ -578,6 +738,40 @@ function FixOverlay({ fixText, setFixText, busy, onClose, onReevaluate }: FixOve
   );
 }
 
+// ─── Tips sheet ─────────────────────────────────────────────────────────────
+
+const TIPS: { icon: React.ComponentProps<typeof Ionicons>['name']; title: string; body: string }[] = [
+  { icon: 'scan-outline', title: 'Fit the whole plate in the frame', body: "Everything you're eating should be visible inside the corners." },
+  { icon: 'sunny-outline', title: 'Use good light', body: "Daylight works best. Turn on the flash if it's dark." },
+  { icon: 'trending-up-outline', title: 'Shoot from a slight angle', body: 'About 45° shows both the size and the height of the food.' },
+  { icon: 'barcode-outline', title: 'Packaged food? Use Barcode or Food label', body: 'They read the exact numbers from the package.' },
+];
+
+function TipsSheet({ onClose, bottomInset }: { onClose: () => void; bottomInset: number }) {
+  return (
+    <Pressable style={styles.tipsBackdrop} onPress={onClose}>
+      <Pressable style={[styles.tipsSheet, { paddingBottom: Math.max(bottomInset, 16) + 16 }]} onPress={() => {}}>
+        <View style={styles.fixHandle} />
+        <Text style={styles.tipsTitle}>How to get a good scan</Text>
+        {TIPS.map(t => (
+          <View key={t.title} style={styles.tipRow}>
+            <View style={styles.tipIcon}>
+              <Ionicons name={t.icon} size={20} color={COLORS.green} />
+            </View>
+            <View style={styles.tipTextCol}>
+              <Text style={styles.tipTitle}>{t.title}</Text>
+              <Text style={styles.tipBody}>{t.body}</Text>
+            </View>
+          </View>
+        ))}
+        <TouchableOpacity style={styles.tipsBtn} onPress={onClose} activeOpacity={0.85}>
+          <Text style={styles.tipsBtnText}>Got it</Text>
+        </TouchableOpacity>
+      </Pressable>
+    </Pressable>
+  );
+}
+
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 // Contextual rating — shared with the meal detail popup via utils/mealRating.
@@ -620,47 +814,84 @@ const OPAQUE_SHEET_BG = '#1C1C1C';
 
 const styles = StyleSheet.create({
   full: { flex: 1, backgroundColor: '#000' },
-  camera: { flex: 1, justifyContent: 'flex-end' },
-  brackets: { ...StyleSheet.absoluteFillObject, margin: 40 },
-  corner: { position: 'absolute', width: 36, height: 36, borderColor: '#fff' },
-  cornerTL: { top: 0, left: 0, borderLeftWidth: 3, borderTopWidth: 3, borderTopLeftRadius: 8 },
-  cornerTR: { top: 0, right: 0, borderRightWidth: 3, borderTopWidth: 3, borderTopRightRadius: 8 },
-  cornerBL: { bottom: 0, left: 0, borderLeftWidth: 3, borderBottomWidth: 3, borderBottomLeftRadius: 8 },
-  cornerBR: { bottom: 0, right: 0, borderRightWidth: 3, borderBottomWidth: 3, borderBottomRightRadius: 8 },
+  camera: { flex: 1 },
+  frame: { position: 'absolute', alignSelf: 'center' },
+  dim: { position: 'absolute', backgroundColor: LABEL_DIM },
+  framePhoto: { top: '17%', left: 36, right: 36, bottom: '40%' },
+  frameBarcode: { top: '34%', left: 45, right: 45, height: 170 },
+  corner: { position: 'absolute', width: 52, height: 52, borderColor: '#fff' },
+  cornerTL: { top: 0, left: 0, borderLeftWidth: 4, borderTopWidth: 4, borderTopLeftRadius: 22 },
+  cornerTR: { top: 0, right: 0, borderRightWidth: 4, borderTopWidth: 4, borderTopRightRadius: 22 },
+  cornerBL: { bottom: 0, left: 0, borderLeftWidth: 4, borderBottomWidth: 4, borderBottomLeftRadius: 22 },
+  cornerBR: { bottom: 0, right: 0, borderRightWidth: 4, borderBottomWidth: 4, borderBottomRightRadius: 22 },
+  scanLine: { position: 'absolute', top: '50%', left: 24, right: 24, height: 2, backgroundColor: COLORS.green },
+  topBar: { position: 'absolute', left: 16, right: 16, flexDirection: 'row', justifyContent: 'space-between' },
+  roundBtn: {
+    width: 44, height: 44, borderRadius: 22,
+    backgroundColor: 'rgba(0,0,0,0.42)',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  hintWrap: { position: 'absolute', top: '27%', left: 16, right: 16, alignItems: 'center' },
+  hintText: {
+    color: '#fff', fontSize: 14, fontWeight: '600', overflow: 'hidden',
+    backgroundColor: 'rgba(0,0,0,0.5)', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 16,
+  },
+  bottomPanel: { position: 'absolute', left: 0, right: 0, bottom: 0, paddingBottom: 16, gap: 14 },
+  zoomRow: { alignItems: 'center' },
+  zoomPill: { flexDirection: 'row', gap: 4, padding: 4, borderRadius: 20, backgroundColor: 'rgba(0,0,0,0.42)' },
+  zoomBtn: { minWidth: 44, height: 30, paddingHorizontal: 10, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
+  zoomBtnActive: { backgroundColor: '#fff' },
+  zoomText: { color: '#fff', fontSize: 13, fontWeight: '600' },
+  zoomTextActive: { color: '#0F0F0F', fontWeight: '700' },
   busyOverlay: {
     ...StyleSheet.absoluteFillObject,
     alignItems: 'center', justifyContent: 'center',
     backgroundColor: 'rgba(0,0,0,0.45)', gap: 10,
   },
-  busyText: { color: '#fff', fontSize: 13 },
-  modeRow: {
-    flexDirection: 'row', justifyContent: 'center', gap: 8, paddingBottom: 18,
+  busyText: { color: '#fff', fontSize: 14, fontWeight: '600' },
+  modeRow: { flexDirection: 'row', gap: 10, paddingHorizontal: 16 },
+  modeTile: {
+    flex: 1, height: 76, borderRadius: 18,
+    backgroundColor: 'rgba(38,38,38,0.78)',
+    alignItems: 'center', justifyContent: 'center', gap: 6,
   },
-  modePill: {
-    flexDirection: 'row', alignItems: 'center',
-    backgroundColor: 'rgba(60,60,67,0.7)',
-    paddingHorizontal: 14, paddingVertical: 8, borderRadius: 18,
-  },
-  modePillActive: { backgroundColor: '#fff' },
-  modePillText: { color: '#fff', fontSize: 13, fontWeight: '600' },
-  modePillTextActive: { color: '#000' },
+  modeTileActive: { backgroundColor: '#fff' },
+  modeTileText: { color: '#fff', fontSize: 14, fontWeight: '600' },
+  modeTileTextActive: { color: '#0F0F0F' },
   controlsRow: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-around',
-    paddingBottom: 32, paddingHorizontal: 36,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 32,
   },
   sideBtn: {
-    width: 44, height: 44, borderRadius: 22,
-    backgroundColor: 'rgba(60,60,67,0.7)',
+    width: 52, height: 52, borderRadius: 26,
+    backgroundColor: 'rgba(38,38,38,0.78)',
     alignItems: 'center', justifyContent: 'center',
   },
-  sideBtnText: { color: '#fff', fontSize: 18 },
   shutter: {
-    width: 76, height: 76, borderRadius: 38, backgroundColor: 'transparent',
+    width: 80, height: 80, borderRadius: 40, backgroundColor: 'transparent',
     borderWidth: 4, borderColor: '#fff',
     alignItems: 'center', justifyContent: 'center',
   },
-  shutterDisabled: { opacity: 0.4 },
-  shutterInner: { width: 60, height: 60, borderRadius: 30, backgroundColor: '#fff' },
+  shutterDisabled: { opacity: 0.35 },
+  shutterInner: { width: 64, height: 64, borderRadius: 32, backgroundColor: '#fff' },
+  tipsBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
+  tipsSheet: {
+    backgroundColor: OPAQUE_SHEET_BG,
+    borderTopLeftRadius: 24, borderTopRightRadius: 24,
+    paddingHorizontal: 24, paddingTop: 10, gap: 16,
+  },
+  tipsTitle: { color: COLORS.text, fontSize: 22, fontWeight: '700', marginTop: 4 },
+  tipRow: { flexDirection: 'row', gap: 14, alignItems: 'flex-start' },
+  tipIcon: {
+    width: 40, height: 40, borderRadius: 12,
+    backgroundColor: 'rgba(74,222,128,0.14)',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  tipTextCol: { flex: 1, gap: 3 },
+  tipTitle: { color: COLORS.text, fontSize: 15, fontWeight: '600' },
+  tipBody: { color: COLORS.textSecondary, fontSize: 13, lineHeight: 18 },
+  tipsBtn: { marginTop: 6, height: 54, borderRadius: 16, backgroundColor: COLORS.green, alignItems: 'center', justifyContent: 'center' },
+  tipsBtnText: { color: '#04110A', fontSize: 16, fontWeight: '700' },
 
   fallback: {
     flex: 1, backgroundColor: COLORS.bg,

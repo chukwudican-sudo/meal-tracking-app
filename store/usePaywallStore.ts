@@ -15,13 +15,23 @@ export interface OpenPaywallOptions {
   onSuccess?: () => void;
 }
 
+// 'route' = the /paywall screen; 'inline' = PaywallModalHost inside an open RN
+// Modal (AddMealScreen, KitchenScanModal), where a pushed route would render
+// behind the modal and the user would see nothing.
+export type PaywallPresentation = 'route' | 'inline';
+
 interface PaywallStore {
   visible: boolean;
+  presentation: PaywallPresentation;
+  // How many PaywallModalHosts are currently mounted inside a visible modal.
+  inlineHosts: number;
   reason: PaywallReason;
   headline?: string;
   onSuccess?: () => void;
-  open: (opts: OpenPaywallOptions) => void;
+  open: (opts: OpenPaywallOptions & { presentation: PaywallPresentation }) => void;
   close: () => void;
+  addInlineHost: () => void;
+  removeInlineHost: () => void;
 }
 
 // Backs app/paywall.tsx. Kept separate from the route/params system because
@@ -30,15 +40,20 @@ interface PaywallStore {
 // instead of its own route params.
 export const usePaywallStore = create<PaywallStore>((set) => ({
   visible: false,
+  presentation: 'route',
+  inlineHosts: 0,
   reason: 'premium_feature',
   headline: undefined,
   onSuccess: undefined,
 
-  open: ({ reason, headline, onSuccess }) => {
-    set({ visible: true, reason, headline, onSuccess });
+  open: ({ reason, headline, onSuccess, presentation }) => {
+    set({ visible: true, reason, headline, onSuccess, presentation });
   },
 
   close: () => {
     set({ visible: false, onSuccess: undefined });
   },
+
+  addInlineHost: () => set(s => ({ inlineHosts: s.inlineHosts + 1 })),
+  removeInlineHost: () => set(s => ({ inlineHosts: Math.max(0, s.inlineHosts - 1) })),
 }));
