@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import { Screen } from '@/components/Screen';
 
+import { APP_NAME } from '@/constants/app';
 import { COLORS } from '@/constants/theme';
 import { signOut, useAuth } from '@/lib/auth';
 import { clearPendingPassword } from '@/lib/pendingCredentials';
@@ -140,7 +141,7 @@ export default function SettingsScreen() {
                 ? void handleManageSubscription()
                 // Plain browsing entry point, not tied to any blocked action —
                 // general framing rather than a specific-feature headline.
-                : openPaywall({ reason: 'premium_feature', headline: 'Upgrade to Macrotri Pro' })
+                : openPaywall({ reason: 'premium_feature', headline: `Upgrade to ${APP_NAME} Pro` })
             }
           />
         </View>

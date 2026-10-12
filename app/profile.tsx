@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import { Screen } from '@/components/Screen';
 
+import { APP_NAME } from '@/constants/app';
 import { COLORS } from '@/constants/theme';
 import { GOAL_LABEL, kgToLbs, lbsToKg } from '@/constants/goalCalc';
 import { openPaywall } from '@/lib/paywall';
@@ -143,7 +144,7 @@ export default function ProfileScreen() {
             onPress={() =>
               isPro
                 ? void handleManageSubscription()
-                : openPaywall({ reason: 'premium_feature', headline: 'Upgrade to Macrotri Pro' })
+                : openPaywall({ reason: 'premium_feature', headline: `Upgrade to ${APP_NAME} Pro` })
             }
             activeOpacity={0.85}
           >

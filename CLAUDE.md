@@ -1,4 +1,4 @@
-# CLAUDE.md — Meal App (working name; see "Naming" below)
+# CLAUDE.md — Macrotri (meal app)
 
 This file is loaded automatically at the start of every Claude Code session. It is the
 single handover document for this project. It was written on **Oct 9, 2026** when the
@@ -58,7 +58,7 @@ npx expo start --dev-client --tunnel # only when phone + Mac can't see each othe
 - New dev build: `npx eas build --profile development --platform ios` (or `npx expo run:ios` if Xcode is installed — it
   wasn't as of June). Needed whenever a native module/plugin/app.json native field changes.
 - Checks before calling anything done: `npx tsc --noEmit` and `npm run lint`.
-  **Known pre-existing tsc errors (3, ignore unless fixing them on purpose):** `app/profile.tsx:63` (Alert.prompt param
+  **Known pre-existing tsc errors (3, ignore unless fixing them on purpose):** `app/profile.tsx:64` (Alert.prompt param
   implicit any) and `hooks/useRecipeActions.ts:100,119` (implicit any + `RecipeInput.source` possibly undefined).
   Don't trust editor lint panels alone — once they reported 0 errors on a file with 30 real type errors.
 - Supabase CLI: `npx supabase ...` (already logged in + linked on this Mac). `supabase/functions` and `scripts/` are
@@ -186,6 +186,9 @@ generate-plan-shortlist, generate-recipe-concept, generate-recipe-steps, recipe-
 branch `main`. **The repo is PUBLIC** (Alex keeps it public for his resume): scan for secrets before every commit, and
 never commit `.env` or `docs/handover/chat-history/` (gitignored, local only).
 
+**App name: Macrotri** (confirmed Oct 12). Single source `constants/app.ts` `APP_NAME`; `app.json` name = Macrotri (home-screen
+name shows after the next dev build). Slug `meal-app`, scheme `mealapp`, bundle id `com.alex.mealapp` intentionally unchanged.
+
 **Verified on device Oct 10–11:** 6-digit signup, password reset (now code-based, see OPEN_ITEMS §A), delete account,
 RevenueCat webhook full lifecycle (purchase → `active`, renewals, expiry → `expired`). OTP expiry 3600s; custom SMTP on.
 
@@ -193,9 +196,7 @@ RevenueCat webhook full lifecycle (purchase → `active`, renewals, expiry → `
 1. Both *Confirm signup* and *Reset password* email templates must contain `{{ .Token }}` (dev: done; prod: TODO).
 2. Deferred by Alex: widen `hasProfile()` login gate from `!!profile.firstName` to "users row exists" (Apple/Google
    sign-in won't always give a name). He said "separate pass" — ask before doing it.
-3. Pick a real app name (currently `AppName` in `constants/app.ts`, `NutriTrack` in onboarding, "Macrotri Pro" on the
-   paywall, `meal-app` in app.json).
-4. Launch blockers: real Terms/Privacy URLs (placeholders `example.com`), production RevenueCat key + App Store Connect
+3. Launch blockers: real Terms/Privacy URLs (placeholders `example.com`), production RevenueCat key + App Store Connect
    products under `com.alex.mealapp`, production Supabase project (+ its SMTP), Apple Sign-In (required by App Store
    when offering other social logins), remove debug `console.info` logs (paywall, purchases, auth/callback, auth).
 

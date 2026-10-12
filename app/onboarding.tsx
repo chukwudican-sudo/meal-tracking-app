@@ -21,6 +21,7 @@ import { Slider } from '@/components/onboarding/Slider';
 import { WeightPicker, type WeightUnitChoice } from '@/components/onboarding/WeightPicker';
 import { ProgressRing } from '@/components/ProgressRing';
 import { Screen } from '@/components/Screen';
+import { APP_NAME } from '@/constants/app';
 import { NUTRIENT_META } from '@/constants/nutrients';
 import {
   ageFromBirthday,
@@ -36,7 +37,6 @@ import { engine } from '@/lib/sync/engine';
 import type { ActivityLevel, GoalType, NutrientKey } from '@/store/types';
 import { useMealStore } from '@/store/useMealStore';
 
-const APP_NAME = 'NutriTrack';
 
 type StepId =
   | 'welcome' | 'carousel' | 'firstName' | 'goal' | 'gender' | 'birthday'

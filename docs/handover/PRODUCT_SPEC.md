@@ -260,5 +260,6 @@ Exact screen copy is in `chat-history/main-chat-may-oct-2026.md` (message around
 
 ## 12. Brand
 
-No final name. Placeholders: `constants/app.ts` `APP_NAME='AppName'`, `APP_LOGO='🌱'`; onboarding uses `'NutriTrack'`;
-paywall says **"Macrotri Pro"**; `app.json` name/slug `meal-app`. Needs one decision and a sweep.
+**Macrotri** (confirmed Oct 12). Every screen reads `APP_NAME` from `constants/app.ts` (onboarding welcome, Add Meal
+header, disclaimer, AI assistant prompt, "Upgrade to Macrotri Pro"). Emails send as `hello@macrotri.com`. Logo is still
+the placeholder `APP_LOGO='🌱'`.

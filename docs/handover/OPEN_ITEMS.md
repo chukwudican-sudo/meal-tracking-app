@@ -57,8 +57,8 @@ Still open:
 
 ## C. Launch blockers (App Store)
 
-11. **App name** — one decision, then sweep: `constants/app.ts` `APP_NAME='AppName'` / `APP_LOGO='🌱'`,
-    `app/onboarding.tsx` local `APP_NAME='NutriTrack'`, paywall "Macrotri Pro", `app.json` name/slug `meal-app`.
+11. ~~App name~~ — **Macrotri** (Oct 12). All UI reads `APP_NAME` from `constants/app.ts`; `app.json` name updated
+    (home-screen name needs a new dev build). Still a placeholder: `APP_LOGO='🌱'` (replace with the real icon).
 12. Real **Terms / Privacy URLs** (`app/paywall.tsx` `TERMS_URL`/`PRIVACY_URL` = `https://example.com/...`) + the Settings
     Help shells. Apple requires both on the paywall.
 13. **Production RevenueCat**: App Store Connect subscription products under `com.alex.mealapp` (monthly $14.99, yearly
@@ -97,7 +97,7 @@ Still open:
     doesn't roam between devices, renaming the active plan doesn't update `activePlanName` everywhere,
     `progress_daily` / water totals aren't synced.
 32. `supabase/config.toml` has drifted from the live dashboard (auth block) — either update it or note it's unused.
-33. 3 pre-existing tsc errors (`app/profile.tsx:63`, `hooks/useRecipeActions.ts:100,119`).
+33. 3 pre-existing tsc errors (`app/profile.tsx:64`, `hooks/useRecipeActions.ts:100,119`).
 34. Dead code to delete (confirm first): `components/EditMealScreen.tsx`, `components/DayDetailModal.tsx`,
     `components/grocery/PlannedIngredientsSection.tsx` (none are imported anywhere — only mentioned in comments),
     `app/meal/[id].tsx`, `app/modal.tsx`, `app/auth/callback.tsx` once no old signup links can be outstanding
