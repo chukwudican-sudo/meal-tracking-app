@@ -34,6 +34,13 @@ Nothing here is approved for building yet — per the working rules, discuss and
   Fixed a native crash after every successful scan (children inside `CameraView`).
 - ~~Food label~~ — `scan-meal` accepts `mode: 'label'` (reads per-serving label values; no readable label → clear
   `invalid_input` message, no free scan charged). **Deployed to dev Oct 12** (`npx supabase functions deploy scan-meal`).
+- ~~Fix had no memory (Oct 20–22)~~ — "it's just 150g of rice" wiped a chicken-and-rice scan down to rice. Now scan-meal
+  also returns the items it saw (grams; never shown on the scan card), Fix sends them plus every earlier correction,
+  and logging saves them as the meal's ingredients so a Fix from the meal popup later keeps context. fix-meal is
+  "AI decides, code calculates" (see CLAUDE.md). All three Fix buttons use the real `fix-meal` (old stub gone).
+  Toasts inside Add Meal / Kitchen scan / meal popup were rendering behind the modal — fixed (ToastHost in each).
+- ~~AI speed~~ — scan-meal/fix-meal on Gemini thinking `low`: scan ~2.6–3s, fix ~1.6s (competitors 2–5s).
+- ~~AI history~~ — `ai_events` table (migration `20261022010000`, pushed to dev) records every scan/fix for analysis.
 - ~~Paywall hidden behind modals~~ — scan-limit paywall from Scan / AI describe / Kitchen scan opened behind the RN
   Modal. Fixed with `PaywallModalHost`; after purchase the scan retries on the same photo. Verified on the iPhone.
 - ~~Custom SMTP (dev)~~ — on; emails are sent as `Macrotri <hello@macrotri.com>`. The production project needs the same.
@@ -74,14 +81,21 @@ Still open:
     Test Store key to the `appl_` key.
 14. **Production Supabase project** (separate from dev `kpmxjufzggcapljhxutv`): run the 9 migrations, set secrets
     (Gemini, RevenueCat webhook, USDA if scripts run there), deploy 12 functions, seed `macro_*` tables, copy Auth
-    settings (template with `{{ .Token }}`, redirect URLs, rate limits).
+    settings (template with `{{ .Token }}`, redirect URLs, rate limits). Both email templates (*Confirm signup*,
+    *Reset password*) must contain `{{ .Token }}`.
 15. **Custom SMTP** — done on dev (`hello@macrotri.com`); set it up again on the production project.
 16. **Sign in with Apple** (required if Google sign-in ships) + Google sign-in (onboarding buttons say "coming soon").
     Before this, do item 17.
 17. **`hasProfile()` widening** (deferred by Alex Aug 18: "Hold … for a separate pass, not tonight"). Currently the
     login gate checks `!!profile.firstName` after the pull (`app/onboarding.tsx`, `lib/sync/repository.ts`); should check
     that a `public.users` row exists. Ask before doing it.
-18. App icon, splash, screenshots, App Store listing, privacy nutrition labels (camera, photos, mic, health-ish data).
+18. App icon, splash, screenshots, App Store listing, privacy nutrition labels (camera, photos, mic, health-ish data,
+    **and "user content used for analytics"** — the `ai_events` log).
+18b. **AI history privacy** (before launch): privacy-policy line ("we use your AI inputs to improve accuracy"), and a
+    scheduled clean-up deleting `ai_events` rows older than 90 days (pg_cron).
+18c. **Logged meals show as "missed" / not counted** — + adds meals as `pending` timed "now", then
+    `markPastDueMealsAsMissed` flips them to missed. Proposed (awaiting Alex's "build"): now/earlier/past day = eaten
+    (completed); later today/future day = planned (pending).
 19. **Rotate the Gemini API key** (it was handled in plaintext during setup). Manual + `npx supabase secrets set`.
 20. `expo-av` (~16.0.8) is deprecated → migrate the voice recording to `expo-audio` before SDK 55.
 21. Expo dependency drift — run `npx expo install --check` and review (with approval) before the production build.
@@ -94,7 +108,8 @@ Still open:
     `components/addMeal/FixResultScreen.tsx`. Migrate each to an edge function (`fix-meal` already exists for text fixes).
 22b. Barcode lookup calls Open Food Facts directly (works, no key) but logs **per-100g** values as if they were one
     serving — needs a serving-size step or OFF's per-serving fields.
-23. `scan-meal` returns no ingredients list; scanned photo is stored only as a local URI (no Supabase Storage).
+23. Scanned photo is stored only as a local URI (no Supabase Storage). (Ingredient list: done Oct 22.)
+23b. Small AI test set: turn real corrections from `ai_events` into cases re-run after every prompt change.
 24. AI Describe tab spinner is tiny/barely visible.
 25. Cold start feels slow (never profiled).
 26. `compressPhoto` resizes by width (1280) — tall photos stay huge; should resize the long edge.

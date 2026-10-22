@@ -171,6 +171,15 @@ These come straight from months of his feedback. Violating them is the #1 thing 
   always read server-side, never trusted from the client. **Editing anything in `_shared/` means redeploying every
   function that imports it** (each bundles its own copy). `constants/entitlements.ts` is imported by the Deno
   `revenuecat-webhook` via relative path — keep it dependency-free and redeploy the webhook if it changes.
+- **AI quality log (`ai_events`):** scan-meal and fix-meal record every outcome (input, before/after, prompt version,
+  latency, error) via `_shared/aiEvents.ts#recordAiEvent` — private table (RLS, no policies), no photos, rows cascade
+  on account delete. **Bump a function's `PROMPT_VERSION` on any prompt/schema change.** To analyse a test, read it
+  with the service key from `.env` (read-only). Other AI functions can adopt it one at a time.
+- **Gemini speed:** `callGeminiJSON({ thinkingLevel })` — scan-meal and fix-meal use `'low'` (scan 8.7s -> ~2.6s,
+  fix 4.8s -> ~1.6s, accuracy held); unset = model default (medium). Gemini 3 uses `thinkingLevel`, not `thinkingBudget`.
+- **"AI decides, code calculates":** fix-meal's model only labels each item (`unchanged` / `amount` / `replaced` /
+  `added` + `source_index`); `applyEdits` copies unchanged items verbatim, scales amount-only changes proportionally,
+  and totals = sum of items. Don't let the model do arithmetic the server can do.
 - Comments: match the surrounding density; the codebase explains *why* (constraints, past bugs), not *what*.
 
 ## 7. Current state (as of Oct 11, 2026)
@@ -193,6 +202,9 @@ never commit `.env` or `docs/handover/chat-history/` (gitignored, local only).
 
 **App name: Macrotri** (confirmed Oct 12). Single source `constants/app.ts` `APP_NAME`; `app.json` name = Macrotri (home-screen
 name shows after the next dev build). Slug `meal-app`, scheme `mealapp`, bundle id `com.alex.mealapp` intentionally unchanged.
+
+**Verified on device Oct 12–22:** new Scan screen (Food label, tips, .5x, freeze-on-shot), paywall + toasts on top of
+modals, Fix with memory (scan items -> logged meal's ingredients -> later Fix), exact fix maths, AI history log.
 
 **Verified on device Oct 10–11:** 6-digit signup, password reset (now code-based, see OPEN_ITEMS §A), delete account,
 RevenueCat webhook full lifecycle (purchase → `active`, renewals, expiry → `expired`). OTP expiry 3600s; custom SMTP on.
