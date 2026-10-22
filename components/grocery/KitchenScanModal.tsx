@@ -26,6 +26,7 @@ import type { IngredientCategory } from '@/store/types';
 import { useMealStore } from '@/store/useMealStore';
 import { useToastStore } from '@/store/useToastStore';
 import { PaywallModalHost } from '@/components/paywall/PaywallModalHost';
+import { ToastHost } from '@/components/ToastHost';
 
 interface Props {
   visible: boolean;
@@ -323,6 +324,7 @@ export function KitchenScanModal({ visible, onClose }: Props) {
         )}
       </View>
       <PaywallModalHost active={visible} />
+      <ToastHost />
     </Modal>
   );
 }

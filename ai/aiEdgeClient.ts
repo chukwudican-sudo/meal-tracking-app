@@ -52,6 +52,17 @@ export interface InvokeAIOptions {
 // race and reaches the client first — this is just the worst-case ceiling.
 export const INVOKE_TIMEOUT_MS = 35000;
 
+// User-facing text for a failed AI call. Callers handle not_premium first (it
+// opens the paywall); everything else shows the server's own message when it
+// sent one, so a failure is never silent or generic.
+export function aiErrorMessage(e: unknown, fallback: string): string {
+  if (e instanceof AIError) {
+    if (e.code === 'unauthorized') return 'Your session expired. Please sign in again.';
+    if (e.message) return e.message;
+  }
+  return fallback;
+}
+
 export function nowHHMM(): string {
   const d = new Date();
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
@@ -60,6 +71,14 @@ export function nowHHMM(): string {
 export function toInt(value: unknown): number {
   const n = Number(value);
   return Number.isFinite(n) && n > 0 ? Math.round(n) : 0;
+}
+
+// Ingredient macros keep one decimal: they're sent back to fix-meal as the
+// meal's memory, and rounding each item to whole grams made the totals drift
+// ~1g from the sum of the items after a fix. Meal totals stay whole numbers.
+export function toOneDecimal(value: unknown): number {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? Math.round(n * 10) / 10 : 0;
 }
 
 // Both estimate and fix return ingredients in the same wire shape; map them to
@@ -74,9 +93,9 @@ export function mapIngredients(raw: unknown): Ingredient[] {
         servings: 1,
         calories: toInt(ing.calories),
         macros: {
-          protein: toInt(ing.protein),
-          carbs: toInt(ing.carbs),
-          fats: toInt(ing.fats),
+          protein: toOneDecimal(ing.protein),
+          carbs: toOneDecimal(ing.carbs),
+          fats: toOneDecimal(ing.fats),
         },
       }))
     : [];

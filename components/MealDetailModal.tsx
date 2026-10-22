@@ -24,7 +24,11 @@ import * as ImagePicker from 'expo-image-picker';
 import { COLORS } from '@/constants/theme';
 import { getNutrientMeta } from '@/constants/nutrients';
 import { rateMealGrade } from '@/utils/mealRating';
-import { aiClient } from '@/ai/aiClient';
+import { AIError, aiErrorMessage } from '@/ai/aiEdgeClient';
+import { fixMeal } from '@/ai/fixMeal';
+import { openPaywall } from '@/lib/paywall';
+import { PaywallModalHost } from '@/components/paywall/PaywallModalHost';
+import { ToastHost } from '@/components/ToastHost';
 import { useMealStore } from '@/store/useMealStore';
 import { useToastStore } from '@/store/useToastStore';
 import type { Macros, NutrientKey, NutrientValues } from '@/store/types';
@@ -53,11 +57,14 @@ function formatTimeLabel(hhmm: string): string {
   if (h === 0) h = 12;
   return `${h}:${m} ${period}`;
 }
-function scaleMacros(m: Macros, ratio: number): Macros {
+// Meal totals round to whole grams; ingredient macros keep one decimal (see
+// ai/aiEdgeClient.ts#toOneDecimal) so items keep summing to the totals.
+function scaleMacros(m: Macros, ratio: number, decimals = 0): Macros {
+  const f = 10 ** decimals;
   return {
-    protein: Math.round(m.protein * ratio),
-    carbs: Math.round(m.carbs * ratio),
-    fats: Math.round(m.fats * ratio),
+    protein: Math.round(m.protein * ratio * f) / f,
+    carbs: Math.round(m.carbs * ratio * f) / f,
+    fats: Math.round(m.fats * ratio * f) / f,
   };
 }
 function scaleNutrients(n: NutrientValues | undefined, ratio: number): NutrientValues {
@@ -175,7 +182,7 @@ export function MealDetailModal() {
       ingredients: draft.ingredients.map(i => ({
         ...i,
         calories: i.calories != null ? Math.round(i.calories * ratio) : i.calories,
-        macros: i.macros ? scaleMacros(i.macros, ratio) : i.macros,
+        macros: i.macros ? scaleMacros(i.macros, ratio, 1) : i.macros,
       })),
     });
   }
@@ -290,31 +297,39 @@ export function MealDetailModal() {
     router.push({ pathname: '/meal-edit/ingredient/[id]', params: { id } });
   }
 
-  async function submitFix() {
-    const text = fixText.trim();
+  // Fix -> fix-meal: the server corrects name, totals AND the ingredient list
+  // from the current meal + the user's correction text.
+  async function submitFix(textArg?: string) {
+    const text = (textArg ?? fixText).trim();
     if (!text || fixing) return;
     setFixing(true);
     try {
-      const next = await aiClient.fixMeal(
-        {
-          fixText: text,
-          currentDraft: { name: draft.name, time: draft.time, calories: draft.calories, macros: draft.macros },
-          history: [],
-        },
-        {
-          date: session!.date,
-          goals,
-          profile: useMealStore.getState().profile,
-          todaysMeals: [],
-          libraryNames: [],
-        },
+      const result = await fixMeal(
+        text,
+        { name: draft.name, time: draft.time, calories: draft.calories, macros: draft.macros },
+        draft.ingredients,
+        [],
+        draft.id,
       );
-      updateMealDraft({ name: next.name, calories: next.calories, macros: next.macros });
+      updateMealDraft({
+        name: result.draft.name,
+        calories: result.draft.calories,
+        macros: result.draft.macros,
+        // Keep the existing list if the AI returned none.
+        ...(result.ingredients.length > 0 ? { ingredients: result.ingredients } : {}),
+      });
       setFixText('');
       setFixVisible(false);
     } catch (e) {
       console.warn('Fix failed:', e);
-      Alert.alert('Could not re-evaluate', 'Try again.');
+      if (e instanceof AIError && e.code === 'not_premium') {
+        // Close the Fix popup so the paywall isn't stacked under it; the same
+        // correction re-runs after a purchase.
+        setFixVisible(false);
+        openPaywall({ reason: 'scan_limit', onSuccess: () => void submitFix(text) });
+        return;
+      }
+      Alert.alert('Could not re-evaluate', aiErrorMessage(e, 'Try again.'));
     } finally {
       setFixing(false);
     }
@@ -601,7 +616,7 @@ export function MealDetailModal() {
               <TouchableOpacity style={[styles.btn, styles.btnGhost]} onPress={() => setFixVisible(false)}>
                 <Text style={styles.btnGhostText}>Cancel</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.btn, styles.btnPrimary]} onPress={submitFix} disabled={fixing}>
+              <TouchableOpacity style={[styles.btn, styles.btnPrimary]} onPress={() => void submitFix()} disabled={fixing}>
                 {fixing ? <ActivityIndicator color="#0E1A12" /> : <Text style={styles.btnPrimaryText}>Re-evaluate</Text>}
               </TouchableOpacity>
             </View>
@@ -639,6 +654,9 @@ export function MealDetailModal() {
           </View>
         </KeyboardAvoidingView>
       </Modal>
+      {/* Rendered inside this modal so they appear on top of it, not behind. */}
+      <PaywallModalHost active={visible} />
+      <ToastHost />
     </Modal>
   );
 }

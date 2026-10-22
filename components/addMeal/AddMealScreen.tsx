@@ -24,6 +24,7 @@ import { MealDraftCard } from './MealDraftCard';
 import { FixResultScreen } from './FixResultScreen';
 import { DisclaimerScreen } from './DisclaimerScreen';
 import { PaywallModalHost } from '@/components/paywall/PaywallModalHost';
+import { ToastHost } from '@/components/ToastHost';
 import type { MealEntry } from '@/store/types';
 
 // Stable empty-array reference; see DayDetailModal for the same pattern.
@@ -131,7 +132,8 @@ export function AddMealScreen({ visible, date, onClose }: Props) {
                     name: draft.name,
                     time: draft.time,
                     calories: draft.calories,
-                    ingredients: [],
+                    // The scan's item list — the meal's Fix context later.
+                    ingredients: src.ingredients ?? [],
                     macros: draft.macros,
                     status: 'pending',
                     isAdHoc: true,
@@ -196,7 +198,9 @@ export function AddMealScreen({ visible, date, onClose }: Props) {
         />
 
         <DisclaimerScreen visible={showDisclaimer} onClose={() => setShowDisclaimer(false)} />
+        {/* Toasts + paywall render inside this modal, or they'd land behind it. */}
         <PaywallModalHost active={visible} />
+        <ToastHost />
       </View>
     </Modal>
   );

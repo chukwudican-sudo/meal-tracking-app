@@ -21,13 +21,14 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { COLORS } from '@/constants/theme';
-import { aiClient } from '@/ai/aiClient';
-import { AIError } from '@/ai/aiEdgeClient';
+import { AIError, aiErrorMessage } from '@/ai/aiEdgeClient';
+import { fixMeal } from '@/ai/fixMeal';
 import { scanMeal, type ScanMode } from '@/ai/scanMeal';
 import { compressPhotoToBase64 } from '@/lib/media/compressPhoto';
+import { newId } from '@/lib/sync/uuid';
 import type { DayContext, MealDraft } from '@/ai/types';
 import { openPaywall } from '@/lib/paywall';
-import type { UserGoals } from '@/store/types';
+import type { Ingredient, UserGoals } from '@/store/types';
 import { rateMeal } from '@/utils/mealRating';
 import { useMealStore } from '@/store/useMealStore';
 import { useToastStore } from '@/store/useToastStore';
@@ -65,6 +66,8 @@ type ScanState = 'camera' | 'result' | 'fix';
 
 interface DraftMeta {
   photoUri?: string;
+  /** Hidden item list from the scan (scaled to the logged servings). */
+  ingredients?: Ingredient[];
   barcode?: string;
   /** When true, parent (AddMealScreen) logs the meal directly and closes. */
   logImmediately?: boolean;
@@ -99,6 +102,12 @@ export function ScanTab({ context, onDraftReady, onClose }: Props) {
   // Servings counter — multiplies/divides macros relative to base draft.
   const [servings, setServings] = useState(1);
   const [fixText, setFixText] = useState('');
+  // Fix context: the items the scan saw + every correction so far (oldest
+  // first). Never displayed; lives until Log / Retake.
+  const [ingredients, setIngredients] = useState<Ingredient[]>([]);
+  const [fixHistory, setFixHistory] = useState<string[]>([]);
+  // One id per scan, shared by its fixes (server-side quality log only).
+  const [flowId, setFlowId] = useState<string | null>(null);
   const [bookmarked, setBookmarked] = useState(false);
 
   const ensureRecipeSaved = useMealStore(s => s.ensureRecipeSaved);
@@ -115,6 +124,9 @@ export function ScanTab({ context, onDraftReady, onClose }: Props) {
     setScanState('camera');
     setCapturedUri(null);
     setDraft(null);
+    setIngredients([]);
+    setFixHistory([]);
+    setFlowId(null);
     setServings(1);
     setFixText('');
     setBookmarked(false);
@@ -197,8 +209,12 @@ export function ScanTab({ context, onDraftReady, onClose }: Props) {
       // Resize + recompress before sending (raw captures are multi-MB).
       const { base64, mimeType } = await compressPhotoToBase64(uri);
       if (!base64) throw new Error('Could not read photo data');
-      const result = await scanMeal(base64, mimeType, scanMode);
-      setDraft(result);
+      const scanFlowId = newId();
+      const result = await scanMeal(base64, mimeType, scanMode, scanFlowId);
+      setFlowId(scanFlowId);
+      setDraft(result.draft);
+      setIngredients(result.ingredients);
+      setFixHistory([]);
       setServings(1);
       setBookmarked(false);
       setScanState('result');
@@ -278,7 +294,11 @@ export function ScanTab({ context, onDraftReady, onClose }: Props) {
 
   function handleLog() {
     if (!scaledDraft) return;
-    onDraftReady(scaledDraft, { photoUri: capturedUri ?? undefined, logImmediately: true });
+    onDraftReady(scaledDraft, {
+      photoUri: capturedUri ?? undefined,
+      ingredients: scaleIngredients(ingredients, servings),
+      logImmediately: true,
+    });
     resetToCamera();
   }
 
@@ -310,25 +330,31 @@ export function ScanTab({ context, onDraftReady, onClose }: Props) {
     showToast('Added to Saved Recipes');
   }
 
-  async function handleReevaluate() {
-    if (!draft || !fixText.trim()) return;
+  // Fix Result -> fix-meal (text correction of the current estimate; the
+  // server re-derives everything from the draft + correction, no photo needed).
+  async function handleReevaluate(textArg?: string) {
+    const text = (textArg ?? fixText).trim();
+    if (!draft || !text) return;
     setBusy(true);
     try {
-      const next = await aiClient.fixMeal(
-        {
-          fixText: fixText.trim(),
-          imageUri: capturedUri ?? undefined,
-          currentDraft: draft,
-          history: [],
-        },
-        context,
-      );
-      setDraft(next);
-      // Keep the user's serving multiplier — only the base values changed.
+      const result = await fixMeal(text, draft, ingredients, fixHistory, flowId ?? undefined);
+      // Keep the scan's time and the user's serving multiplier — only the base
+      // values changed.
+      setDraft({ ...result.draft, time: draft.time });
+      if (result.ingredients.length > 0) setIngredients(result.ingredients);
+      setFixHistory(h => [...h, text]);
       setFixText('');
       setScanState('result');
     } catch (e) {
       console.warn('Re-evaluate failed:', e);
+      if (e instanceof AIError && e.code === 'not_premium') {
+        // Drop the Fix sheet first so the paywall isn't stacked under it; after
+        // a purchase the same correction re-runs automatically.
+        setScanState('result');
+        openPaywall({ reason: 'scan_limit', onSuccess: () => void handleReevaluate(text) });
+        return;
+      }
+      showToast(aiErrorMessage(e, 'Could not re-evaluate this meal. Try again.'));
     } finally {
       setBusy(false);
     }
@@ -560,7 +586,7 @@ export function ScanTab({ context, onDraftReady, onClose }: Props) {
           setFixText={setFixText}
           busy={busy}
           onClose={() => setScanState('result')}
-          onReevaluate={handleReevaluate}
+          onReevaluate={() => void handleReevaluate()}
         />
       </Modal>
     </View>
@@ -798,6 +824,23 @@ async function lookupBarcode(code: string): Promise<MealDraft> {
       fats: Math.round(n.fat_100g ?? 0),
     },
   };
+}
+
+// Items are estimated for one serving; the logged meal's ingredients must add
+// up to the logged (servings-scaled) totals.
+function scaleIngredients(list: Ingredient[], servings: number): Ingredient[] {
+  if (servings === 1) return list;
+  return list.map(i => ({
+    ...i,
+    quantity: Math.round(i.quantity * servings * 10) / 10,
+    calories: Math.round((i.calories ?? 0) * servings),
+    // One decimal, like mapIngredients, so items keep summing to the totals.
+    macros: i.macros && {
+      protein: Math.round(i.macros.protein * servings * 10) / 10,
+      carbs: Math.round(i.macros.carbs * servings * 10) / 10,
+      fats: Math.round(i.macros.fats * servings * 10) / 10,
+    },
+  }));
 }
 
 function nowHHMM(): string {

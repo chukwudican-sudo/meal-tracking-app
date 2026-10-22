@@ -5,8 +5,9 @@
 // minimal nutrition estimate. Invoke/timeout/error-parsing/mapping plumbing is
 // shared via ./aiEdgeClient.
 
+import type { Ingredient } from '@/store/types';
 import type { MealDraft } from './types';
-import { AIError, type AIErrorCode, invokeAIFunction, mapDraft } from './aiEdgeClient';
+import { AIError, type AIErrorCode, invokeAIFunction, mapDraft, mapIngredients } from './aiEdgeClient';
 
 export type ScanErrorCode = AIErrorCode;
 
@@ -31,14 +32,24 @@ function stripDataUriPrefix(input: string): string {
 // Facts label (per serving). Both return the same draft shape and share quota.
 export type ScanMode = 'meal' | 'label';
 
+// The items the AI saw (grams) are kept alongside the totals: never shown on
+// the scan card, but sent to fix-meal as context and saved as the logged
+// meal's ingredients so a later Fix still knows what was on the plate.
+export interface ScanResult {
+  draft: MealDraft;
+  ingredients: Ingredient[];
+}
+
 export async function scanMeal(
   imageBase64: string,
   mimeType = 'image/jpeg',
   mode: ScanMode = 'meal',
-): Promise<MealDraft> {
+  // Links this scan to its follow-up fixes in the server's ai_events log.
+  flowId?: string,
+): Promise<ScanResult> {
   const data = await invokeAIFunction(
     'scan-meal',
-    { imageBase64: stripDataUriPrefix(imageBase64), mimeType, mode },
+    { imageBase64: stripDataUriPrefix(imageBase64), mimeType, mode, flow_id: flowId },
     {
       logPrefix: '[scanMeal]',
       makeError: (code, message) => new ScanError(code, message),
@@ -47,5 +58,5 @@ export async function scanMeal(
     },
   );
 
-  return mapDraft(data);
+  return { draft: mapDraft(data), ingredients: mapIngredients(data.ingredients) };
 }

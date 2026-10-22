@@ -20,6 +20,7 @@ import { createAdminClient, getAuthedUser } from '../_shared/auth.ts';
 import { consumeFreeScan, resolveEntitlement } from '../_shared/entitlement.ts';
 import { isRateLimited, logAiUsage } from '../_shared/rateLimit.ts';
 import { callGeminiJSON, GeminiTimeoutError } from '../_shared/gemini.ts';
+import { recordAiEvent, sanitizeFlowId } from '../_shared/aiEvents.ts';
 
 // Single, easily-changeable model handle. gemini-3.6-flash is multimodal
 // (accepts image input) — see estimate-nutrition for why this model is pinned.
@@ -37,12 +38,15 @@ const MAX_IMAGE_BASE64_LEN = 10_000_000;
 // than the shared 15s default.
 const GEMINI_TIMEOUT_MS = 20000;
 const FUNCTION_NAME = 'scan-meal';
+// Bump on any prompt/schema change so ai_events can compare versions.
+const PROMPT_VERSION = 'scan-2026-10-22-low';
 const LOG_PREFIX = `[${FUNCTION_NAME}]`;
 
 const ALLOWED_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif']);
 
-// Minimal structured-output schema — name + calories + macros only (matches
-// ScanTab's MealDraft; no ingredients/meal_type/health_rating).
+// Name + totals + the items seen on the plate. The result card shows only the
+// totals; the items are the meal's memory for Fix (sent back to fix-meal) and
+// are saved as the logged meal's ingredients, so a later Fix keeps context too.
 const RESPONSE_SCHEMA = {
   type: 'object',
   properties: {
@@ -51,8 +55,24 @@ const RESPONSE_SCHEMA = {
     protein: { type: 'number' },
     carbs: { type: 'number' },
     fats: { type: 'number' },
+    ingredients: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          name: { type: 'string' },
+          quantity: { type: 'number' },
+          unit: { type: 'string' },
+          calories: { type: 'integer' },
+          protein: { type: 'number' },
+          carbs: { type: 'number' },
+          fats: { type: 'number' },
+        },
+        required: ['name', 'quantity', 'unit', 'calories', 'protein', 'carbs', 'fats'],
+      },
+    },
   },
-  required: ['meal_name', 'calories', 'protein', 'carbs', 'fats'],
+  required: ['meal_name', 'calories', 'protein', 'carbs', 'fats', 'ingredients'],
 };
 
 // Label mode adds found_label so a photo with no readable label becomes a clear
@@ -81,8 +101,9 @@ function buildLabelPrompt(): { system: string; userText: string } {
     'per-100g values, use those. Set meal_name to the product name if it is ' +
     'visible, otherwise a short generic name like "Packaged snack". Never ' +
     'estimate or invent numbers: if no nutrition label is clearly readable, set ' +
-    'found_label to false and every number to 0. Respond with JSON only, ' +
-    'matching the provided schema.';
+    'found_label to false and every number to 0. In ingredients, return ONE ' +
+    'entry for the product (quantity 1, unit "serving") carrying the same ' +
+    'per-serving values. Respond with JSON only, matching the provided schema.';
   return { system, userText: 'Read the nutrition label in this photo.' };
 }
 
@@ -99,9 +120,11 @@ function buildPrompt(p: ProfileContext): { system: string; userText: string } {
     'and estimate its nutrition as accurately as possible for the single ' +
     'serving/portion visible in the image. Give a short, human-friendly ' +
     'meal_name. Estimate calories and macros (protein, carbs, fats in grams) ' +
-    'for the portion shown. Use the user context only to inform reasonable ' +
-    'assumptions; never claim to see foods that are not visible. Respond with ' +
-    'JSON only, matching the provided schema.';
+    'for the portion shown. In ingredients, list each distinct food you can see ' +
+    'with its estimated amount in grams (g; ml for drinks) and its own calories ' +
+    'and macros; the meal totals must equal the sum of the items. Use the user ' +
+    'context only to inform reasonable assumptions; never claim to see foods ' +
+    'that are not visible. Respond with JSON only, matching the provided schema.';
 
   const userText = context
     ? `User context: ${context}\n\nIdentify this meal and estimate its nutrition.`
@@ -127,9 +150,11 @@ Deno.serve(async (req: Request) => {
   let imageBase64 = '';
   let mimeType = 'image/jpeg';
   let mode: ScanMode = 'meal';
+  let flowId: string | null = null;
   try {
     const body = await req.json();
     if (body?.mode === 'label') mode = 'label';
+    flowId = sanitizeFlowId(body?.flow_id);
     imageBase64 = typeof body?.imageBase64 === 'string' ? body.imageBase64 : '';
     if (typeof body?.mimeType === 'string' && ALLOWED_MIME_TYPES.has(body.mimeType)) {
       mimeType = body.mimeType;
@@ -189,6 +214,10 @@ Deno.serve(async (req: Request) => {
 
   const { system, userText } = mode === 'label' ? buildLabelPrompt() : buildPrompt(profile);
 
+  // ai_events: no photo is ever stored, only the mode and the result.
+  const startedAt = Date.now();
+  const event = { userId: user.id, functionName: FUNCTION_NAME, promptVersion: PROMPT_VERSION, flowId, startedAt, input: { mode } };
+
   let estimate: unknown;
   try {
     estimate = await callGeminiJSON({
@@ -200,9 +229,13 @@ Deno.serve(async (req: Request) => {
       logPrefix: LOG_PREFIX,
       timeoutMs: GEMINI_TIMEOUT_MS,
       images: [{ base64: imageBase64, mimeType }],
+      // Speed: default (medium) thinking made scans ~9s; low is Google's
+      // recommendation for simple, latency-sensitive tasks.
+      thinkingLevel: 'low',
     });
   } catch (e) {
     console.error(`${LOG_PREFIX} Gemini call failed:`, e);
+    recordAiEvent(admin, { ...event, success: false, errorCode: e instanceof GeminiTimeoutError ? 'timeout' : 'ai_failed' });
     const message =
       e instanceof GeminiTimeoutError
         ? 'The AI scanner took too long to respond. Please try again.'
@@ -214,6 +247,7 @@ Deno.serve(async (req: Request) => {
 
   // No readable label: tell the user plainly, before charging anything.
   if (mode === 'label' && (estimate as { found_label?: boolean } | null)?.found_label !== true) {
+    recordAiEvent(admin, { ...event, success: false, errorCode: 'no_label', output: estimate });
     return errorResponse(
       'invalid_input',
       "We couldn't find a nutrition label in this photo. Hold the label flat, fill the frame, and try again.",
@@ -227,6 +261,7 @@ Deno.serve(async (req: Request) => {
   // it. consumeFreeScan stays awaited: it's the atomic guard enforcing the
   // free-scan limit and must register before we respond.
   void logAiUsage(admin, user.id, FUNCTION_NAME);
+  recordAiEvent(admin, { ...event, success: true, output: estimate });
   if (!entitlement.isSubscriber) {
     await consumeFreeScan(admin, user.id);
   }

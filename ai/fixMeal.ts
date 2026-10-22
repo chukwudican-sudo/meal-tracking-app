@@ -56,10 +56,15 @@ export async function fixMeal(
   fixText: string,
   draft: MealDraft,
   ingredients: Ingredient[],
+  // Earlier corrections to this same meal (oldest first) so a follow-up builds
+  // on them instead of starting over.
+  history: string[] = [],
+  // Scan id (scan card) or meal id (meal popup), for the server's ai_events log.
+  flowId?: string,
 ): Promise<FixMealResult> {
   const data = await invokeAIFunction(
     'fix-meal',
-    { fixText, currentDraft: toCurrentDraft(draft, ingredients) },
+    { fixText, currentDraft: toCurrentDraft(draft, ingredients), history, flow_id: flowId },
     {
       logPrefix: '[fixMeal]',
       makeError: (code, message) => new FixError(code, message),

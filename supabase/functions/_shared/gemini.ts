@@ -46,6 +46,13 @@ export interface CallGeminiJSONOptions {
    * text prompt.
    */
   images?: { base64: string; mimeType: string }[];
+  /**
+   * Gemini 3 reasoning depth. Unset = the model's default (medium on
+   * gemini-3.6-flash), so existing callers are unchanged. 'low' is Google's
+   * pick for latency-sensitive, simple tasks (photo -> nutrition, apply a
+   * correction). Gemini 3 uses thinkingLevel; thinkingBudget is deprecated.
+   */
+  thinkingLevel?: 'minimal' | 'low' | 'medium' | 'high';
 }
 
 function sleep(ms: number): Promise<void> {
@@ -63,6 +70,7 @@ export async function callGeminiJSON(opts: CallGeminiJSONOptions): Promise<unkno
     timeoutMs = DEFAULT_TIMEOUT_MS,
     logPrefix,
     images,
+    thinkingLevel,
   } = opts;
 
   // Images first, then text — per Gemini's guidance for image prompts. Each
@@ -77,7 +85,12 @@ export async function callGeminiJSON(opts: CallGeminiJSONOptions): Promise<unkno
   const requestBody = JSON.stringify({
     systemInstruction: { parts: [{ text: systemInstruction }] },
     contents: [{ role: 'user', parts }],
-    generationConfig: { temperature, responseMimeType: 'application/json', responseSchema },
+    generationConfig: {
+      temperature,
+      responseMimeType: 'application/json',
+      responseSchema,
+      ...(thinkingLevel ? { thinkingConfig: { thinkingLevel } } : {}),
+    },
   });
 
   let lastError: unknown;

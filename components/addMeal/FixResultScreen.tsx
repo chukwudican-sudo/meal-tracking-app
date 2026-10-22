@@ -12,7 +12,8 @@ import {
 } from 'react-native';
 
 import { COLORS } from '@/constants/theme';
-import { aiClient } from '@/ai/aiClient';
+import { aiErrorMessage } from '@/ai/aiEdgeClient';
+import { fixMeal } from '@/ai/fixMeal';
 import type { ChatMessage, DayContext, MealDraft } from '@/ai/types';
 
 interface Props {
@@ -25,30 +26,24 @@ interface Props {
   onResult: (next: MealDraft) => void;
 }
 
-export function FixResultScreen({
-  visible,
-  context,
-  currentDraft,
-  imageUri,
-  history = [],
-  onClose,
-  onResult,
-}: Props) {
+// context / imageUri / history stay in Props for the caller, but fix-meal works
+// from the draft + correction text alone.
+export function FixResultScreen({ visible, currentDraft, onClose, onResult }: Props) {
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   async function reEvaluate() {
     if (!text.trim() || busy) return;
     setBusy(true);
+    setError(null);
     try {
-      const next = await aiClient.fixMeal(
-        { fixText: text.trim(), imageUri, currentDraft, history },
-        context,
-      );
-      onResult(next);
+      const { draft: next } = await fixMeal(text.trim(), currentDraft, []);
+      onResult({ ...next, time: currentDraft.time });
       setText('');
     } catch (e) {
       console.warn('Fix failed:', e);
+      setError(aiErrorMessage(e, 'Could not re-evaluate. Try again.'));
     } finally {
       setBusy(false);
     }
@@ -89,6 +84,7 @@ export function FixResultScreen({
             autoFocus
             editable={!busy}
           />
+          {error ? <Text style={styles.error}>{error}</Text> : null}
 
           <TouchableOpacity
             style={[styles.actionBtn, (!text.trim() || busy) && styles.actionBtnDisabled]}
@@ -149,5 +145,6 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   actionBtnDisabled: { backgroundColor: COLORS.elevated },
+  error: { color: COLORS.red, fontSize: 13 },
   actionBtnText: { color: '#0E1A12', fontWeight: '700', fontSize: 15 },
 });
