@@ -60,6 +60,7 @@ export default function HomeScreen() {
   const pendingFirstPlan        = useMealStore(s => s.profile.pendingFirstPlan);
   const toggleMealStatus        = useMealStore(s => s.toggleMealStatus);
   const markPastDueMealsAsMissed = useMealStore(s => s.markPastDueMealsAsMissed);
+  const activePlanName = useMealStore(s => s.profile.activePlanName);
   const logWater                = useMealStore(s => s.logWater);
   const resolveDayFromTemplates = useMealStore(s => s.resolveDayFromTemplates);
   const recalcStreak            = useMealStore(s => s.recalcStreak);
@@ -123,9 +124,6 @@ export default function HomeScreen() {
     markPastDueMealsAsMissed(date);
   };
 
-  // Plan tag — weekday vs weekend based on the date being viewed
-  const viewingDayOfWeek = new Date(viewingDate + 'T00:00:00').getDay(); // 0=Sun, 6=Sat
-  const isWeekend        = viewingDayOfWeek === 0 || viewingDayOfWeek === 6;
 
   // ── Render ──────────────────────────────────────────────────────────────────
 
@@ -183,14 +181,14 @@ export default function HomeScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* ── Plan Tag ────────────────────────────────────────────────── */}
-        <View style={styles.planTagRow}>
-          <View style={styles.planTag}>
-            <Text style={styles.planTagText}>
-              {isWeekend ? 'Weekend plan' : 'Weekday plan'}
-            </Text>
+        {/* ── Plan Tag (only while a plan is active) ───────────────────── */}
+        {activePlanName ? (
+          <View style={styles.planTagRow}>
+            <View style={styles.planTag}>
+              <Text style={styles.planTagText} numberOfLines={1}>{activePlanName}</Text>
+            </View>
           </View>
-        </View>
+        ) : null}
 
         {/* ── First-plan nudge (persists until Build My Plan is done) ──── */}
         {pendingFirstPlan ? (

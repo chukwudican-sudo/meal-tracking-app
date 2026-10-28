@@ -31,8 +31,10 @@ const H_LABEL_W     = 16;
 const H_LABEL_GAP   = 5;
 const H_MON_LABEL_H = 16;
 
-function getIntensity(planned: number, completed: number): 0 | 1 | 2 | 3 {
-  if (planned <= 0 || completed <= 0) return 0;
+// `logged` = no plan score, but the user ate meals they added themselves:
+// shown at the lightest level so logging still visibly counts.
+function getIntensity(planned: number, completed: number, logged = false): 0 | 1 | 2 | 3 {
+  if (planned <= 0 || completed <= 0) return logged ? 1 : 0;
   const pct = Math.round((completed / planned) * 100);
   if (pct <= 33) return 1;
   if (pct <= 99) return 2;
@@ -75,11 +77,17 @@ export default function ProgressScreen() {
 
   const getDayProgress = useCallback(
     (iso: string) => {
+      // Plan score counts PLANNED meals only — meals the user added themselves
+      // (isAdHoc) still count toward calories/rings, but mustn't inflate or
+      // drag down how well the plan was followed. `logged` marks a day with
+      // only the user's own eaten meals.
       const dayMeals = logs[iso]?.meals ?? [];
-      const planned = dayMeals.length;
-      const completed = dayMeals.filter(m => m.status === 'completed').length;
+      const planMeals = dayMeals.filter(m => !m.isAdHoc);
+      const planned = planMeals.length;
+      const completed = planMeals.filter(m => m.status === 'completed').length;
       const pct = planned === 0 ? 0 : Math.round((completed / planned) * 100);
-      return { planned, completed, pct };
+      const logged = dayMeals.some(m => m.isAdHoc && m.status === 'completed');
+      return { planned, completed, pct, logged };
     },
     [logs]
   );
@@ -123,8 +131,8 @@ export default function ProgressScreen() {
 
           let intensity: 0 | 1 | 2 | 3 = 0;
           if (!isFiller && !hidden) {
-            const { planned, completed } = getDayProgress(iso);
-            intensity = getIntensity(planned, completed);
+            const { planned, completed, logged } = getDayProgress(iso);
+            intensity = getIntensity(planned, completed, logged);
           }
 
           cells.push({ iso, isFiller, hidden, intensity });

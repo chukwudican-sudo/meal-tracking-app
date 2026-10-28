@@ -22,6 +22,7 @@ import { useToastStore } from '@/store/useToastStore';
 import { useUndoStore } from '@/store/useUndoStore';
 import type { MealPlan, MealSlot, PlanDayMeal, RecipeTemplate } from '@/store/types';
 import { slotNameToCategory } from '@/utils/mealSlots';
+import { confirmPlanActivation } from '@/lib/planActivation';
 
 const EMPTY_SLOT = '__empty__';
 
@@ -38,10 +39,10 @@ export default function PlanDetailScreen() {
 
   const plans = useMealStore(s => s.plans);
   const savedPlans = useMealStore(s => s.savedPlans);
-  const templates = useMealStore(s => s.templates);
   const recipes = useMealStore(s => s.recipes);
   const profile = useMealStore(s => s.profile);
   const activatePlan = useMealStore(s => s.activatePlan);
+  const endPlan = useMealStore(s => s.endPlan);
   const saveCurrentPlanAs = useMealStore(s => s.saveCurrentPlanAs);
   const updateSavedPlan = useMealStore(s => s.updateSavedPlan);
   const customizeDraft = useMealStore(s => s.customizeDraft);
@@ -257,39 +258,40 @@ export default function PlanDetailScreen() {
     if (storedPlan) setCustomizeDraft({ planId: storedPlan.id, draftPlan: next });
   };
 
+  const handleEndPlan = () => {
+    Alert.alert(
+      'End your plan?',
+      'Upcoming plan meals will be removed. Meals you\'ve eaten or added yourself stay.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'End plan',
+          style: 'destructive',
+          onPress: () => {
+            endPlan();
+            showToast(`${plan.name} ended`);
+            router.dismissAll();
+          },
+        },
+      ],
+    );
+  };
+
   const handleStartPlan = () => {
-    if (templates.length === 0) {
+    const start = () => {
       activatePlan(plan);
       showToast(`${plan.name} activated`);
       router.dismissAll();
-      return;
-    }
-    Alert.alert(
-      'Replace your current plan?',
-      'This will replace your current plan. Would you like to save your current plan first?',
-      [
-        {
-          text: 'Save and replace',
-          onPress: () => {
-            const fallback = profile.activePlanName || `Plan saved ${new Date().toLocaleDateString()}`;
-            saveCurrentPlanAs(fallback);
-            activatePlan(plan);
-            showToast(`${plan.name} activated`);
-            router.dismissAll();
-          },
-        },
-        {
-          text: 'Replace',
-          style: 'destructive',
-          onPress: () => {
-            activatePlan(plan);
-            showToast(`${plan.name} activated`);
-            router.dismissAll();
-          },
-        },
-        { text: 'Cancel', style: 'cancel' },
-      ],
-    );
+    };
+    confirmPlanActivation({
+      hasCurrentPlan: !!profile.activePlanName,
+      onActivate: start,
+      onSaveAndActivate: () => {
+        const fallback = profile.activePlanName || `Plan saved ${new Date().toLocaleDateString()}`;
+        saveCurrentPlanAs(fallback);
+        start();
+      },
+    });
   };
 
   return (
@@ -454,13 +456,18 @@ export default function PlanDetailScreen() {
             <Text style={styles.startBtnText}>Save</Text>
           </TouchableOpacity>
         ) : isCurrent ? (
-          <TouchableOpacity
-            style={styles.startBtn}
-            onPress={handleStartCustomize}
-            activeOpacity={0.85}
-          >
-            <Text style={styles.startBtnText}>Customize Plan</Text>
-          </TouchableOpacity>
+          <>
+            <TouchableOpacity
+              style={styles.startBtn}
+              onPress={handleStartCustomize}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.startBtnText}>Customize Plan</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.endBtn} onPress={handleEndPlan} activeOpacity={0.7}>
+              <Text style={styles.endBtnText}>End plan</Text>
+            </TouchableOpacity>
+          </>
         ) : (
           <TouchableOpacity style={styles.startBtn} onPress={handleStartPlan} activeOpacity={0.85}>
             <Text style={styles.startBtnText}>Start Plan</Text>
@@ -845,6 +852,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   startBtnText: { color: '#0E1A12', fontSize: 14, fontWeight: '700' },
+  endBtn: { paddingVertical: 12, alignItems: 'center', marginTop: 4 },
+  endBtnText: { color: COLORS.red, fontSize: 14, fontWeight: '600' },
 
   seeMoreBtn: {
     alignSelf: 'flex-start',

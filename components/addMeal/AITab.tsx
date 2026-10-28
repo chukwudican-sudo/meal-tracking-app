@@ -22,7 +22,7 @@ import type { DayContext, MealDraft } from '@/ai/types';
 import { openPaywall } from '@/lib/paywall';
 import { newId } from '@/lib/sync/uuid';
 import type { Ingredient, MealEntry, RecipeCategory } from '@/store/types';
-import { useMealStore } from '@/store/useMealStore';
+import { useMealStore, initialMealStatus } from '@/store/useMealStore';
 
 interface Props {
   context: DayContext;
@@ -120,21 +120,23 @@ export function AITab({ date, onLogged }: Props) {
 
   function log() {
     if (!draft) return;
+    const time = nowHHMM();
     const entry: MealEntry = {
       // UUID required — meal_logs.id is a uuid column on the server.
       id: newId(),
       name: draft.name,
-      time: nowHHMM(),
+      time,
       calories: draft.calories,
       ingredients,
       macros: draft.macros,
-      status: 'pending',
+      status: initialMealStatus(date, time),
       isAdHoc: true,
       servings: 1,
       ...(category ? { category } : {}),
     };
     addMealToDay(date, entry);
-    if (ingredients.length > 0) {
+    // Groceries are for planned meals only — an eaten meal needs no shopping.
+    if (entry.status === 'pending' && ingredients.length > 0) {
       ingestMidWeekIngredients(ingredients.map(i => ({ name: i.name, mealName: draft.name })));
     }
     onLogged();

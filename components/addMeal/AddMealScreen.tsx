@@ -12,7 +12,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 
 import { COLORS } from '@/constants/theme';
 import { APP_LOGO, APP_NAME } from '@/constants/app';
-import { useMealStore, toIsoDate } from '@/store/useMealStore';
+import { useMealStore, toIsoDate, initialMealStatus } from '@/store/useMealStore';
 import { newId } from '@/lib/sync/uuid';
 import type { ChatMessage, DayContext, MealDraft } from '@/ai/types';
 
@@ -135,7 +135,7 @@ export function AddMealScreen({ visible, date, onClose }: Props) {
                     // The scan's item list — the meal's Fix context later.
                     ingredients: src.ingredients ?? [],
                     macros: draft.macros,
-                    status: 'pending',
+                    status: initialMealStatus(date, draft.time),
                     isAdHoc: true,
                     photoUri: src.photoUri,
                   });

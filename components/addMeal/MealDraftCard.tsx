@@ -10,10 +10,11 @@ import {
 } from 'react-native';
 
 import { COLORS } from '@/constants/theme';
-import { useMealStore } from '@/store/useMealStore';
+import { useMealStore, initialMealStatus } from '@/store/useMealStore';
 import { useUndoStore } from '@/store/useUndoStore';
 import type { MealDraft } from '@/ai/types';
 import type { MealEntry, MealTemplate, RecurrenceRule } from '@/store/types';
+import { newId } from '@/lib/sync/uuid';
 
 type Recurrence = 'once' | 'daily' | 'weekly';
 
@@ -123,7 +124,8 @@ export function MealDraftCard({
     // Materialize today's entry so it shows up immediately on the DayDetailModal.
     // We add the entry directly because resolveDayFromTemplates is a no-op when
     // the day already exists in `logs`.
-    const entryId = `${date}-${id}`;
+    // UUID: meal_logs.id is a uuid column (a `${date}-${id}` id failed sync).
+    const entryId = newId();
     const entry: MealEntry = {
       id: entryId,
       name: draft.name,
@@ -131,7 +133,7 @@ export function MealDraftCard({
       calories: draft.calories,
       ingredients: [],
       macros: draft.macros,
-      status: 'pending',
+      status: initialMealStatus(date, draft.time),
       templateId: id,
       // Created through Add Meal flow — ad-hoc relative to the original plan.
       isAdHoc: true,

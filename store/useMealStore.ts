@@ -15,6 +15,7 @@ import type {
   MealEditSession,
   MealEntry,
   MealPlan,
+  MealStatus,
   MealSlot,
   MealTemplate,
   PendingSwap,
@@ -243,9 +244,14 @@ function buildTemplatesFromPlan(state: AppStore, plan: MealPlan): MealTemplate[]
     // Plan day indices are Monday=0..Sunday=6, but recurrence.days uses
     // the JS weekday convention Sunday=0..Saturday=6. Convert so the
     // meals a user planned for "Monday" actually recur on Mondays.
+    // startDate: a plan applies from the day it's activated, never to earlier
+    // days (without it, every past weekday back-filled with plan meals when
+    // viewed — Oct 28 bug). A login restore can't know the original start, so
+    // it starts that day; days before already have their synced logs.
     const recurrence: RecurrenceRule = {
       type: 'weekly',
       days: [...new Set(bucket.days.map(d => (d + 1) % 7))].sort((a, b) => a - b),
+      startDate: toIsoDate(new Date()),
     };
 
     nextTemplates.push({
@@ -295,6 +301,52 @@ function toMinutesFromHHMM(value: string): number | null {
   if (!Number.isInteger(hours) || !Number.isInteger(minutes)) return null;
   if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return null;
   return hours * 60 + minutes;
+}
+
+// Status for a meal the USER adds (Scan / AI / Manual / Recipes): logging means
+// you ate it, so now-or-earlier today (or any past day) counts immediately;
+// later today or a future day is planned and waits to be ticked off. Before,
+// every add was 'pending' at "now" and flipped to 'missed' a minute later, so
+// scanned meals never counted toward the rings.
+export function initialMealStatus(date: string, time: string, now: Date = new Date()): MealStatus {
+  const today = toIsoDate(now);
+  if (date < today) return 'completed';
+  if (date > today) return 'pending';
+  const mins = toMinutesFromHHMM(time);
+  return mins === null || mins <= now.getHours() * 60 + now.getMinutes() ? 'completed' : 'pending';
+}
+
+// The single test for "does this template belong to the plan?". Plan
+// templates are always minted as `tpl-plan-…` (buildTemplatesFromPlan); the
+// demo seeds (exact ids in SEED_TEMPLATES) act as a plan too. Anything else is
+// the user's own (scheduled recipes; draft-card repeating meals, which are
+// `tpl-${Date.now()}` — so never match seeds by pattern). Works for data
+// persisted before this rule existed — no flag/migration needed.
+export function isPlanTemplate(t: Pick<MealTemplate, 'id'>): boolean {
+  return t.id.startsWith('tpl-plan-') || SEED_TEMPLATES.some(s => s.id === t.id);
+}
+
+// One rule for "this meal is the user's, keep it" (plan activation + end).
+function isUserOwnedMeal(m: MealEntry, ownTemplateIds: Set<string>): boolean {
+  return !!m.isAdHoc || m.status === 'completed' || (!!m.templateId && ownTemplateIds.has(m.templateId));
+}
+
+// Meals on days after today — the ones activating a new plan replaces.
+export function countFutureMeals(
+  logs: Record<string, DailyLog>,
+  templates: MealTemplate[],
+  now: Date = new Date(),
+): number {
+  const today = toIsoDate(now);
+  const inLogs = Object.entries(logs).reduce((n, [d, log]) => (d > today ? n + log.meals.length : n), 0);
+  // Recipes scheduled on a future day nobody has opened yet live only as
+  // 'once' templates — activation drops them too, so they count.
+  const unopened = templates.filter(
+    t => t.recurrence.type === 'once' && t.recurrence.date >= today && !logs[t.recurrence.date],
+  ).length;
+  // The user's own repeating meals live only as templates too.
+  const ownRepeating = templates.filter(t => !isPlanTemplate(t) && t.recurrence.type !== 'once').length;
+  return inLogs + unopened + ownRepeating;
 }
 
 // ─── Goals ────────────────────────────────────────────────────────────────────
@@ -557,6 +609,7 @@ export const useMealStore = create<AppStore>()(
       savedPlans:   [],
       viewedRecipeIds: [],
       planAvoidFoods: [],
+      goalsBeforePlan: null,
       pendingSwap:    null,
       customizeDraft: null,
       pendingRecipeConcept: null,
@@ -600,12 +653,26 @@ export const useMealStore = create<AppStore>()(
 
       // ── Meal CRUD on a day ─────────────────────────────────────────────────
       addMealToDay: (date, entry) => {
+        // A today/future day with no log yet would be created holding ONLY this
+        // meal, and resolveDayFromTemplates skips days that already have a log,
+        // so that day's plan meals would never appear. Fill them in first.
+        const resolvedNow = !get().logs[date] && date >= toIsoDate(new Date());
+        if (resolvedNow) get().resolveDayFromTemplates(date);
         set(state => {
           const log = state.logs[date] ?? { date, meals: [], waterMl: 0 };
+          // Only right after that pre-resolve: if it just built a meal for the
+          // entry's own template (draft card: addTemplate then addMealToDay),
+          // replace it instead of adding the same meal twice.
+          const dupIdx = resolvedNow && entry.templateId
+            ? log.meals.findIndex(m => m.templateId === entry.templateId)
+            : -1;
+          const meals = dupIdx >= 0
+            ? log.meals.map((m, i) => (i === dupIdx ? entry : m))
+            : [...log.meals, entry];
           return {
             logs: {
               ...state.logs,
-              [date]: { ...log, meals: [...log.meals, entry] },
+              [date]: { ...log, meals },
             },
           };
         });
@@ -738,7 +805,9 @@ export const useMealStore = create<AppStore>()(
           let changed = false;
 
           const nextMeals = log.meals.map(meal => {
-            if (meal.status !== 'pending') return meal;
+            // Only planned meals can be "missed"; an unticked meal the user
+            // added just means "not eaten".
+            if (meal.status !== 'pending' || meal.isAdHoc) return meal;
             const mealMinutes = toMinutesFromHHMM(meal.time);
             if (mealMinutes === null || mealMinutes > nowMinutes) return meal;
             changed = true;
@@ -800,6 +869,9 @@ export const useMealStore = create<AppStore>()(
             macros:      t.macros,
             status:      'pending',
             templateId:  t.id,
+            // Built from the user's own template (scheduled recipe / repeating
+            // meal): theirs, not the plan's — for heatmap, activation, swaps.
+            ...(isPlanTemplate(t) ? {} : { isAdHoc: true }),
           }));
           return {
             logs: {
@@ -821,8 +893,9 @@ export const useMealStore = create<AppStore>()(
         set(state => ({ library: state.library.map(m => m.id === meal.id ? meal : m) })),
 
       // ── Goals ─────────────────────────────────────────────────────────────
+      // A manual edit wins: nothing gets restored over it when a plan ends.
       updateGoals: partial =>
-        set(state => ({ goals: { ...state.goals, ...partial } })),
+        set(state => ({ goals: { ...state.goals, ...partial }, goalsBeforePlan: null })),
 
       // ── Profile ───────────────────────────────────────────────────────────
       updateProfile: partial =>
@@ -852,6 +925,7 @@ export const useMealStore = create<AppStore>()(
         set({
           logs:         {},
           goals:        DEFAULT_GOALS,
+          goalsBeforePlan: null,
           // DEFAULT_PROFILE has onboardingComplete:false, so a reset restarts
           // the onboarding flow on next app entry.
           profile:      DEFAULT_PROFILE,
@@ -920,6 +994,26 @@ export const useMealStore = create<AppStore>()(
                 weekIngredients.set(key, { name: ing.name, mealNames: new Set() });
               }
               weekIngredients.get(key)!.mealNames.add(t.name);
+            });
+          });
+        });
+
+        // Plus meals already on the days (today onward) that are planned but not
+        // eaten — the user's own (recipes added for later, Day Detail slots)
+        // and materialised plan meals. Rebuilding from templates alone wiped
+        // the user's own planned ingredients every time Cart opened.
+        const todayIso = toIsoDate(new Date());
+        days.forEach(iso => {
+          if (iso < todayIso) return;
+          (state.logs[iso]?.meals ?? []).forEach(m => {
+            if (m.status !== 'pending') return;
+            (m.ingredients ?? []).forEach(ing => {
+              const key = normalizeIngredientName(ing.name);
+              if (!key) return;
+              if (!weekIngredients.has(key)) {
+                weekIngredients.set(key, { name: ing.name, mealNames: new Set() });
+              }
+              weekIngredients.get(key)!.mealNames.add(m.name);
             });
           });
         });
@@ -1325,19 +1419,28 @@ export const useMealStore = create<AppStore>()(
       },
 
       addRecipeToToday: (recipe, opts) => {
-        const todayIso = toIsoDate(new Date());
+        const now = new Date();
+        const todayIso = toIsoDate(now);
+        // After 23:30 the next half hour is 00:00 (tomorrow) — keep it today.
+        const rounded = roundToNextHalfHour(now);
+        const time = rounded < `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}` ? '23:59' : rounded;
         const entry: MealEntry = {
           id: newId(),
           name: recipe.name,
-          time: roundToNextHalfHour(new Date()),
+          time,
           calories: recipe.calories,
           ingredients: cloneIngredients(recipe.ingredients),
           macros: recipe.macros,
+          // "Add to Today" from a recipe means "to cook": always planned,
+          // waiting to be ticked once eaten.
           status: 'pending',
+          // The user's own addition: survives plan activation, shows "Added".
+          isAdHoc: true,
         };
         get().addMealToDay(todayIso, entry);
 
-        // Ingest ingredients into the grocery system (no-op for items already in Kitchen).
+        // Ingest ingredients into the grocery system (no-op for items already in
+        // Kitchen) — Add to Today is always a planned meal.
         if (recipe.ingredients.length > 0) {
           get().ingestMidWeekIngredients(
             recipe.ingredients.map(i => ({ name: i.name, mealName: recipe.name }))
@@ -1405,49 +1508,71 @@ export const useMealStore = create<AppStore>()(
         // Materialize today's log immediately from the new templates so the
         // Home tab and Day Detail reflect the plan the instant it's activated.
         const today = toIsoDate(new Date());
-        const todayMeals: MealEntry[] = nextTemplates
-          .filter(t => isTemplateApplicableOnDate(t, today))
-          .map(t => ({
-            id:          newId(),
-            name:        t.name,
-            time:        t.time,
-            calories:    t.calories,
-            ingredients: t.ingredients,
-            macros:      t.macros,
-            status:      'pending',
-            templateId:  t.id,
-          }));
+        const planMealsFor = (date: string, keep: MealEntry[]): MealEntry[] => {
+          const kept = new Set(keep.map(m => `${m.time}|${m.name}`));
+          return nextTemplates
+            .filter(t => isTemplateApplicableOnDate(t, date))
+            .filter(t => !kept.has(`${t.time}|${t.name}`))
+            .map(t => ({
+              id:          newId(),
+              name:        t.name,
+              time:        t.time,
+              calories:    t.calories,
+              ingredients: t.ingredients,
+              macros:      t.macros,
+              status:      'pending' as const,
+              templateId:  t.id,
+            }));
+        };
 
-        // Preserve past days (history / streaks) but discard today + any future
-        // logs so they re-resolve from the new plan. This guarantees an old
-        // plan's meals are fully replaced everywhere when a new plan activates.
+        // Past days are history and stay as they are. Today keeps the user's
+        // own meals and anything already ticked (activation used to wipe them
+        // and sync the deletes, losing meals the user had eaten); today's
+        // untouched old-plan meals are replaced. Future days belong to the new
+        // plan entirely (Alex, Oct 28: keeping hand-added future meals would
+        // double up slots) — they're dropped and re-resolve from the new plan
+        // when viewed. The UI warns first (lib/planActivation.ts).
+        const ownTemplateIds = new Set(state.templates.filter(t => !isPlanTemplate(t)).map(t => t.id));
         const refreshedLogs: Record<string, DailyLog> = {};
         Object.entries(state.logs).forEach(([d, log]) => {
-          if (d < today) refreshedLogs[d] = log;
+          if (d < today) {
+            refreshedLogs[d] = log;
+            return;
+          }
+          if (d > today) return;
+          const keep = log.meals.filter(m => isUserOwnedMeal(m, ownTemplateIds));
+          refreshedLogs[d] = {
+            ...log,
+            meals: [...keep, ...planMealsFor(d, keep)].sort((a, b) => a.time.localeCompare(b.time)),
+          };
         });
-        refreshedLogs[today] = {
-          date: today,
-          meals: todayMeals,
-          waterMl: state.logs[today]?.waterMl ?? 0,
-        };
+        if (!refreshedLogs[today]) {
+          refreshedLogs[today] = { date: today, meals: planMealsFor(today, []), waterMl: 0 };
+        }
 
         // If the plan defines explicit daily targets (premade plans), reflect
         // them in the Home tab goals. Built plans have no targets, so the
         // user's onboarding-derived goals are kept.
+        // Plans with their own targets (premade) set the goals; the user's own
+        // goals are saved first (only once — switching plan to plan keeps the
+        // original) and restored by endPlan, or by starting a plan without
+        // targets, so nobody is left on a previous plan's numbers.
+        const ownGoals = state.goalsBeforePlan ?? state.goals;
         const nextGoals = plan.targets
           ? {
-              ...state.goals,
+              ...ownGoals,
               dailyCalories: plan.targets.calories,
               protein: plan.targets.protein,
               carbs: plan.targets.carbs,
               fats: plan.targets.fats,
             }
-          : state.goals;
+          : ownGoals;
 
         set({
           templates: nextTemplates,
           logs: refreshedLogs,
           goals: nextGoals,
+          goalsBeforePlan: plan.targets ? ownGoals : null,
           // Building/activating a plan satisfies the onboarding "first plan"
           // step, so clear the persistent Home nudge.
           profile: { ...state.profile, activePlanName: plan.name, pendingFirstPlan: false },
@@ -1456,6 +1581,44 @@ export const useMealStore = create<AppStore>()(
         // Rebuild Planned Ingredients from the new plan's templates for the
         // current week — this clears the previous plan's planned items and
         // repopulates from the meals that are actually scheduled.
+        get().refreshGroceryWeek(mondayOfWeek(today));
+      },
+
+      endPlan: () => {
+        const state = get();
+        const today = toIsoDate(new Date());
+
+        // The user's own templates (scheduled recipes, repeating meals) stay;
+        // the plan's go.
+        const keptTemplates = state.templates.filter(t => !isPlanTemplate(t));
+        const keptTemplateIds = new Set(keptTemplates.map(t => t.id));
+
+        // Past days are history. From today on keep only what the user owns:
+        // meals they added (isAdHoc), anything already eaten, and meals built
+        // from their own templates. Plan meals — including slots filled from
+        // Day Detail — go with the plan.
+        const logs: Record<string, DailyLog> = {};
+        Object.entries(state.logs).forEach(([d, log]) => {
+          if (d < today) {
+            logs[d] = log;
+            return;
+          }
+          const keep = log.meals.filter(m => isUserOwnedMeal(m, keptTemplateIds));
+          if (d > today && keep.length === 0) return;
+          logs[d] = { ...log, meals: keep };
+        });
+
+        set({
+          templates: keptTemplates,
+          logs,
+          // Clearing the pointer makes the projector re-push every saved plan
+          // with is_active=false, so login's hydrateActivePlanIfNeeded can't
+          // bring the plan back.
+          profile: { ...state.profile, activePlanName: undefined },
+          goals: state.goalsBeforePlan ?? state.goals,
+          goalsBeforePlan: null,
+          customizeDraft: null,
+        });
         get().refreshGroceryWeek(mondayOfWeek(today));
       },
 
@@ -1649,8 +1812,10 @@ export const useMealStore = create<AppStore>()(
           const log = state.logs[date] ?? { date, meals: [], waterMl: 0 };
           // Identify the existing entry for this slot: match slotId first,
           // then fall back to time (legacy entries that predate slotId).
+          // The time fallback (legacy slots without slotId) must never match a
+          // meal the user added themselves.
           const matchIdx = log.meals.findIndex(m =>
-            slot.slotId ? m.slotId === slot.slotId : m.time === slot.time,
+            slot.slotId ? m.slotId === slot.slotId : !m.isAdHoc && m.time === slot.time,
           );
           const nextEntry: MealEntry = {
             id: matchIdx >= 0
@@ -1853,7 +2018,7 @@ export const useMealStore = create<AppStore>()(
     }),
     {
       name:    'meal-app-store-v2',
-      version: 6,
+      version: 7,
       // Assign UUIDs to any records (meals + saved recipes + saved plans) with a
       // non-UUID id, so their local id can double as the Supabase primary key. v4
       // re-runs this to heal meals created by UI paths that briefly still
@@ -1865,6 +2030,18 @@ export const useMealStore = create<AppStore>()(
       // templateId references are left intact (local-only).
       migrate: (persisted, _version) => {
         const p = (persisted ?? {}) as Partial<AppStore>;
+        // v7: plans activated before startDate existed applied to every past
+        // weekday too. Start them today so no further past days fill. Meals
+        // already back-filled aren't auto-removed: sync drops the meal->template
+        // link, so they can't be told apart from real history (Oct 28).
+        if (p.templates) {
+          const today = toIsoDate(new Date());
+          p.templates = p.templates.map(t =>
+            isPlanTemplate(t) && t.recurrence.type !== 'once' && !t.recurrence.startDate
+              ? { ...t, recurrence: { ...t.recurrence, startDate: today } }
+              : t,
+          );
+        }
         if (p.logs) {
           for (const log of Object.values(p.logs)) {
             (log?.meals ?? []).forEach(m => {
@@ -1955,6 +2132,7 @@ export const useMealStore = create<AppStore>()(
           savedPlans:   p.savedPlans   ?? current.savedPlans ?? [],
           viewedRecipeIds: p.viewedRecipeIds ?? current.viewedRecipeIds ?? [],
           planAvoidFoods: p.planAvoidFoods ?? current.planAvoidFoods ?? [],
+          goalsBeforePlan: p.goalsBeforePlan ?? null,
           // Ephemeral swap coordination — always start clean on launch so a
           // stale persisted swap target can never fire on the wrong screen.
           pendingSwap:    null,

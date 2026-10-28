@@ -63,6 +63,7 @@ function shiftMonth(iso: string, months: number): string {
 export default function PlanScreen() {
   const logs = useMealStore(s => s.logs);
   const profile = useMealStore(s => s.profile);
+  const plans = useMealStore(s => s.plans);
   const savedPlans = useMealStore(s => s.savedPlans);
   const templates = useMealStore(s => s.templates);
   const groceryItems = useMealStore(s => s.grocery.items);
@@ -108,9 +109,11 @@ export default function PlanScreen() {
     }, []),
   );
 
-  // Active plan card — only renders when a plan is active.
+  // Active plan card — only renders when a plan is active. Plans started from
+  // Explore are premade (not in savedPlans), so look there too.
   const activePlan = profile.activePlanName
-    ? savedPlans.find(p => p.name === profile.activePlanName)
+    ? savedPlans.find(p => p.name === profile.activePlanName) ??
+      plans.find(p => p.name === profile.activePlanName)
     : undefined;
 
   // Day Detail button summary: reflect the meals scheduled on the selected day
@@ -147,7 +150,7 @@ export default function PlanScreen() {
             </View>
             <Text style={styles.currentPlanName} numberOfLines={1}>{activePlan.name}</Text>
             <Text style={styles.currentPlanMeta}>
-              Started {formatSavedDate(activePlan.savedAt)}
+              {activePlan.source === 'premade' ? 'Tap to customize or end' : `Started ${formatSavedDate(activePlan.savedAt)}`}
             </Text>
           </TouchableOpacity>
         )}

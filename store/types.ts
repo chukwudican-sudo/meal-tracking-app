@@ -359,6 +359,9 @@ export interface AppStore {
   // Persisted "foods to avoid" from Build My Plan — survives across sessions so
   // the user doesn't have to re-enter custom items like "shellfish" each time.
   planAvoidFoods: string[];
+  // The user's own goals, saved when a plan with its own targets (premade
+  // plans) overwrote them; restored when the plan ends. Local only, not synced.
+  goalsBeforePlan: UserGoals | null;
 
   // Ephemeral swap coordination (not persisted across launches in practice).
   pendingSwap: PendingSwap | null;
@@ -429,6 +432,11 @@ export interface AppStore {
   // per day (weekly recurrence). Sets profile.activePlanName. Ingests any
   // missing ingredients into Planned Ingredients.
   activatePlan: (plan: MealPlan) => void;
+  // Stop the active plan: clears the plan's templates (isPlanTemplate) + the
+  // active pointer (synced as is_active=false), removes today's untouched and
+  // all future plan meals; keeps eaten/own meals, the user's own templates and
+  // past days.
+  endPlan: () => void;
   // Non-destructive re-activation on restore: if there's an active plan pointer
   // but no local templates (fresh device / wiped cache), re-derive templates and
   // fill today's missing slots WITHOUT clobbering existing/synced logs. No-op if

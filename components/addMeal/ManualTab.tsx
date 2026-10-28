@@ -6,7 +6,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { MealForm, type MealFormValues } from '@/components/MealForm';
 import { COLORS } from '@/constants/theme';
 import { newId } from '@/lib/sync/uuid';
-import { useMealStore } from '@/store/useMealStore';
+import { useMealStore, initialMealStatus } from '@/store/useMealStore';
 import { useUndoStore } from '@/store/useUndoStore';
 import type { MealEntry } from '@/store/types';
 
@@ -39,12 +39,13 @@ export function ManualTab({ date, onCreated }: Props) {
       calories: values.calories,
       ingredients: values.ingredients,
       macros: values.macros,
-      status: 'pending',
+      status: initialMealStatus(date, values.time),
       isAdHoc: true,
     };
     addMealToDay(date, entry);
 
-    if (values.ingredients.length > 0) {
+    // Groceries are for planned meals only — an eaten meal needs no shopping.
+    if (entry.status === 'pending' && values.ingredients.length > 0) {
       ingestMidWeekIngredients(values.ingredients.map(i => ({ name: i.name, mealName: values.name })));
     }
 

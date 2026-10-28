@@ -30,6 +30,7 @@ import { openPaywall } from '@/lib/paywall';
 import { useEntitlementStore } from '@/store/useEntitlementStore';
 import { useMealStore } from '@/store/useMealStore';
 import { useToastStore } from '@/store/useToastStore';
+import { confirmPlanActivation } from '@/lib/planActivation';
 import type {
   MealPlan,
   MealSlot,
@@ -361,7 +362,6 @@ const EMPTY_PREFS: WizardPrefs = {
 export default function BuildPlanScreen() {
   const profile = useMealStore(s => s.profile);
   const recipes = useMealStore(s => s.recipes);
-  const templates = useMealStore(s => s.templates);
   const activatePlan = useMealStore(s => s.activatePlan);
   const saveCurrentPlanAs = useMealStore(s => s.saveCurrentPlanAs);
   const ensureRecipeSaved = useMealStore(s => s.ensureRecipeSaved);
@@ -1850,31 +1850,15 @@ export default function BuildPlanScreen() {
       router.dismissAll();
     };
 
-    if (templates.length === 0) {
-      finalize();
-      return;
-    }
-
-    Alert.alert(
-      'Replace your current plan?',
-      'This will replace your current plan. Would you like to save your current plan first?',
-      [
-        {
-          text: 'Save and replace',
-          onPress: () => {
-            const fallback = profile.activePlanName || `Plan saved ${new Date().toLocaleDateString()}`;
-            saveCurrentPlanAs(fallback);
-            finalize();
-          },
-        },
-        {
-          text: 'Replace',
-          style: 'destructive',
-          onPress: finalize,
-        },
-        { text: 'Cancel', style: 'cancel' },
-      ],
-    );
+    confirmPlanActivation({
+      hasCurrentPlan: !!profile.activePlanName,
+      onActivate: finalize,
+      onSaveAndActivate: () => {
+        const fallback = profile.activePlanName || `Plan saved ${new Date().toLocaleDateString()}`;
+        saveCurrentPlanAs(fallback);
+        finalize();
+      },
+    });
   }
 
   // ── Render: PICK step (swap browsing only) ──────────────────────────────
