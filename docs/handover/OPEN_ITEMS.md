@@ -40,6 +40,16 @@ Nothing here is approved for building yet — per the working rules, discuss and
   "AI decides, code calculates" (see CLAUDE.md). All three Fix buttons use the real `fix-meal` (old stub gone).
   Toasts inside Add Meal / Kitchen scan / meal popup were rendering behind the modal — fixed (ToastHost in each).
 - ~~AI speed~~ — scan-meal/fix-meal on Gemini thinking `low`: scan ~2.6–3s, fix ~1.6s (competitors 2–5s).
+- ~~Meals added never counted (Oct 22–28)~~ — eaten/planned rule, groceries only from planned meals, heatmap scores the
+  plan only, plan activation no longer deletes the user's eaten/own meals, Cart no longer wipes their planned
+  ingredients, adding to an unopened future day keeps its plan meals, swaps never overwrite the user's meals.
+- ~~No way to stop a plan~~ — End plan (+ goals restore). Plans start on activation day (past days used to fill).
+  Already back-filled test meals aren't auto-removed: sync drops the meal→template link, so they're indistinguishable
+  from real history.
+- ~~Customize broken~~ — swaps were discarded (stale draft read); Save didn't apply / didn't save Explore plans. Fixed,
+  plus Undo on every swap.
+- ~~Barcode logged per-100g as one serving~~ — now per serving (or labelled 100 g/ml), kJ fallback, 10s timeout,
+  untrusted-data validation, product saved as the meal's item.
 - ~~AI history~~ — `ai_events` table (migration `20261022010000`, pushed to dev) records every scan/fix for analysis.
 - ~~Paywall hidden behind modals~~ — scan-limit paywall from Scan / AI describe / Kitchen scan opened behind the RN
   Modal. Fixed with `PaywallModalHost`; after purchase the scan retries on the same photo. Verified on the iPhone.
@@ -93,9 +103,11 @@ Still open:
     **and "user content used for analytics"** — the `ai_events` log).
 18b. **AI history privacy** (before launch): privacy-policy line ("we use your AI inputs to improve accuracy"), and a
     scheduled clean-up deleting `ai_events` rows older than 90 days (pg_cron).
-18c. **Logged meals show as "missed" / not counted** — + adds meals as `pending` timed "now", then
-    `markPastDueMealsAsMissed` flips them to missed. Proposed (awaiting Alex's "build"): now/earlier/past day = eaten
-    (completed); later today/future day = planned (pending).
+18c. **Active plan is identified by name** (`activePlanName`) — two plans with the same name confuse isCurrent /
+    login restore. Store an id instead (touches sync: `plans.is_active`).
+18d. **"Missed" doesn't sync** (server only stores is_completed) — on another device/reinstall past missed meals show
+    as not eaten. Needs a status column.
+18e. Single-device assumption: ending a plan on one phone doesn't remove it on another (pull ignores a null pointer).
 19. **Rotate the Gemini API key** (it was handled in plaintext during setup). Manual + `npx supabase secrets set`.
 20. `expo-av` (~16.0.8) is deprecated → migrate the voice recording to `expo-audio` before SDK 55.
 21. Expo dependency drift — run `npx expo install --check` and review (with approval) before the production build.
@@ -106,8 +118,6 @@ Still open:
     `components/addMeal/ScanTab.tsx` re-evaluate (also has a `file://` URI bug — must send base64 like `scan-meal`),
     voice/Whisper transcription (`AITab.tsx`), `components/MealDetailModal.tsx` Fix,
     `components/addMeal/FixResultScreen.tsx`. Migrate each to an edge function (`fix-meal` already exists for text fixes).
-22b. Barcode lookup calls Open Food Facts directly (works, no key) but logs **per-100g** values as if they were one
-    serving — needs a serving-size step or OFF's per-serving fields.
 23. Scanned photo is stored only as a local URI (no Supabase Storage). (Ingredient list: done Oct 22.)
 23b. Small AI test set: turn real corrections from `ai_events` into cases re-run after every prompt change.
 24. AI Describe tab spinner is tiny/barely visible.

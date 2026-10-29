@@ -20,6 +20,7 @@ import * as ImagePicker from 'expo-image-picker';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { APP_NAME } from '@/constants/app';
 import { COLORS } from '@/constants/theme';
 import { AIError, aiErrorMessage } from '@/ai/aiEdgeClient';
 import { fixMeal } from '@/ai/fixMeal';
@@ -93,6 +94,11 @@ export function ScanTab({ context, onDraftReady, onClose }: Props) {
   const [flash, setFlash] = useState<FlashMode>('off');
   const [busy, setBusy] = useState(false);
   const [scannedCode, setScannedCode] = useState<string | null>(null);
+  // The camera fires onBarcodeScanned many times per second, faster than state
+  // updates: a ref guards against parallel lookups, and a short lockout stops
+  // a not-found/failed code from re-querying every frame.
+  const barcodeInFlightRef = useRef(false);
+  const lastFailedRef = useRef<{ code: string; at: number } | null>(null);
   const cameraRef = useRef<CameraView>(null);
 
   // Half-sheet state — populated after a successful scan/upload/barcode hit.
@@ -122,6 +128,7 @@ export function ScanTab({ context, onDraftReady, onClose }: Props) {
   // Reset all half-sheet state when leaving the result/fix view back to camera.
   function resetToCamera() {
     setScanState('camera');
+    setScannedCode(null);
     setCapturedUri(null);
     setDraft(null);
     setIngredients([]);
@@ -271,21 +278,34 @@ export function ScanTab({ context, onDraftReady, onClose }: Props) {
   }
 
   async function handleBarcode(code: string) {
-    if (busy || scannedCode === code) return;
+    if (barcodeInFlightRef.current || busy || scannedCode === code) return;
+    const failed = lastFailedRef.current;
+    if (failed && failed.code === code && Date.now() - failed.at < BARCODE_RETRY_LOCKOUT_MS) return;
+    barcodeInFlightRef.current = true;
     setScannedCode(code);
     setBusy(true);
     try {
       const parsed = await lookupBarcode(code);
       setCapturedUri(null);
-      setDraft(parsed);
+      setDraft(parsed.draft);
+      // The product as one item: Fix context + the logged meal's ingredient.
+      setIngredients(parsed.ingredients);
+      setFixHistory([]);
+      setFlowId(null);
       setServings(1);
       setBookmarked(false);
       setScanState('result');
     } catch (e) {
       console.warn('Barcode lookup failed:', e);
-      showToast("We couldn't find this product. Try Food label instead.");
+      showToast(
+        e instanceof BarcodeTimeoutError
+          ? 'The product lookup took too long. Check your connection and try again.'
+          : "We couldn't find this product. Try Food label instead.",
+      );
+      lastFailedRef.current = { code, at: Date.now() };
       setScannedCode(null);
     } finally {
+      barcodeInFlightRef.current = false;
       setBusy(false);
     }
   }
@@ -321,7 +341,7 @@ export function ScanTab({ context, onDraftReady, onClose }: Props) {
       name: scaledDraft.name,
       calories: scaledDraft.calories,
       macros: scaledDraft.macros,
-      ingredients: [],
+      ingredients: scaleIngredients(ingredients, servings),
       source: 'ai',
       favourited: true,
     });
@@ -805,24 +825,95 @@ function rateForGoals(draft: MealDraft, goals: UserGoals): { label: string; colo
   return rateMeal({ calories: draft.calories, macros: draft.macros }, goals);
 }
 
-// Open Food Facts barcode lookup — unchanged.
-async function lookupBarcode(code: string): Promise<MealDraft> {
-  const res = await fetch(`https://world.openfoodfacts.org/api/v0/product/${code}.json`);
-  const json = await res.json();
-  if (json.status !== 1 || !json.product) {
-    throw new Error('Product not found');
+// Open Food Facts barcode lookup.
+const BARCODE_TIMEOUT_MS = 10_000;
+const BARCODE_RETRY_LOCKOUT_MS = 4_000;
+// Only the fields we read (full product JSON is often 50–300 KB).
+const OFF_FIELDS = 'product_name,generic_name,nutriments,serving_quantity,serving_quantity_unit,product_quantity_unit';
+class BarcodeTimeoutError extends Error {}
+
+// Open Food Facts data is public, crowd-edited and untrusted: only finite,
+// non-negative, plausibly-sized numbers are used (anything else -> 0).
+function offNumber(v: unknown, max = 5000): number {
+  const n = typeof v === 'number' ? v : typeof v === 'string' ? Number(v) : NaN;
+  return Number.isFinite(n) && n >= 0 && n <= max ? n : 0;
+}
+function offText(v: unknown, max: number): string {
+  return typeof v === 'string' ? v.trim().slice(0, max) : '';
+}
+
+// One serving when the product lists per-serving values (most do); otherwise
+// 100 g, labelled as such. Before, it always logged per-100g values as one
+// serving (a 30 g bar counted as 100 g).
+async function lookupBarcode(rawCode: string): Promise<{ draft: MealDraft; ingredients: Ingredient[] }> {
+  const code = rawCode.replace(/\D/g, '').slice(0, 20);
+  if (!code) throw new Error('Invalid barcode');
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), BARCODE_TIMEOUT_MS);
+  let json: any;
+  try {
+    const res = await fetch(`https://world.openfoodfacts.org/api/v2/product/${code}.json?fields=${OFF_FIELDS}`, {
+      // OFF asks apps to identify themselves.
+      headers: { 'User-Agent': `${APP_NAME}/1.0 (${Platform.OS})` },
+      signal: controller.signal,
+    });
+    if (!res.ok) throw new Error(`Lookup failed: ${res.status}`);
+    json = await res.json();
+  } catch (e) {
+    if (e instanceof Error && e.name === 'AbortError') throw new BarcodeTimeoutError('Barcode lookup timed out');
+    throw e;
+  } finally {
+    clearTimeout(timer);
   }
+  if (json?.status !== 1 || !json.product) throw new Error('Product not found');
+
   const p = json.product;
   const n = p.nutriments ?? {};
+  const servingG = offNumber(p.serving_quantity, 2000);
+  const hasServing = servingG > 0;
+  // Per-100g value for a nutrient; kcal falls back to the alt key, then kJ.
+  const per100 = (key: string): number => {
+    const v = offNumber(n[`${key}_100g`]);
+    if (v > 0 || key !== 'energy-kcal') return v;
+    return offNumber(n.energy_kcal_100g) || Math.round(offNumber(n['energy-kj_100g'] ?? n.energy_100g, 20000) / 4.184);
+  };
+  // Per-serving value when listed, else derived from per-100g × serving size,
+  // so a product with serving kcal but no serving protein still gets protein.
+  const pick = (key: string): number => {
+    if (!hasServing) return per100(key);
+    const direct = offNumber(n[`${key}_serving`]);
+    return direct > 0 ? direct : (per100(key) * servingG) / 100;
+  };
+
+  const product = offText(p.product_name, 50) || offText(p.generic_name, 50) || 'Scanned product';
+  const amount = hasServing ? Math.round(servingG * 10) / 10 : 100;
+  // Drinks are measured in ml (e.g. a 330 ml can); everything else in g.
+  const servingUnit = offText(p.serving_quantity_unit, 5).toLowerCase();
+  const baseUnit = offText(p.product_quantity_unit, 5).toLowerCase();
+  const unit = (hasServing ? servingUnit : baseUnit) === 'ml' ? 'ml' : 'g';
+  const calories = Math.round(pick('energy-kcal'));
+  const protein = Math.round(pick('proteins') * 10) / 10;
+  const carbs = Math.round(pick('carbohydrates') * 10) / 10;
+  const fats = Math.round(pick('fat') * 10) / 10;
+
   return {
-    name: (p.product_name || p.generic_name || 'Scanned product').slice(0, 60),
-    time: nowHHMM(),
-    calories: Math.round(n['energy-kcal_100g'] ?? n.energy_kcal_100g ?? 0),
-    macros: {
-      protein: Math.round(n.proteins_100g ?? 0),
-      carbs: Math.round(n.carbohydrates_100g ?? 0),
-      fats: Math.round(n.fat_100g ?? 0),
+    draft: {
+      // The amount lives on the item (it scales with servings); in the name it
+      // would stay "30 g" after logging 3 servings.
+      name: product,
+      time: nowHHMM(),
+      calories,
+      macros: { protein, carbs, fats },
     },
+    ingredients: [{
+      id: newId(),
+      name: product,
+      quantity: amount,
+      unit,
+      calories,
+      macros: { protein, carbs, fats },
+    }],
   };
 }
 

@@ -180,9 +180,23 @@ These come straight from months of his feedback. Violating them is the #1 thing 
 - **"AI decides, code calculates":** fix-meal's model only labels each item (`unchanged` / `amount` / `replaced` /
   `added` + `source_index`); `applyEdits` copies unchanged items verbatim, scales amount-only changes proportionally,
   and totals = sum of items. Don't let the model do arithmetic the server can do.
+- **Meal ownership & status (one rule each, in `store/useMealStore.ts`):** `initialMealStatus(date, time)` — a meal the
+  user adds for now/earlier/a past day is `completed` (counts at once), later/future is `pending` (planned).
+  `isAdHoc` = the user's own meal (never auto-"missed", kept by plan changes, excluded from the heatmap's plan score).
+  `isPlanTemplate(t)` (`tpl-plan-…` or the seed ids) tells plan templates from the user's own (scheduled recipes,
+  draft-card repeating meals `tpl-${Date.now()}` — never match seeds by pattern). `isUserOwnedMeal` = what plan
+  activation / End plan keep. Groceries (Planned Ingredients) only come from **planned** meals + the plan.
+- **Plans:** start date = activation day (never fill past days). Activate = today keeps eaten/own meals, future days
+  belong to the new plan (warns first, `lib/planActivation.ts`). `endPlan` clears plan templates + pointer (synced
+  is_active=false) and restores `goalsBeforePlan` (saved when a premade plan's targets overwrote goals). Customize
+  Save = `saveCustomizedPlan`: premade → user's own copy "My <name>" (UUID, unique name), then re-applies from today.
+  Placeholder slots `EMPTY_SLOT`/`REMOVED_SLOT` (`constants/planSlots.ts`) are never meals. The active plan is still
+  matched **by name** (`activePlanName`) — known limitation.
+- **External data is untrusted** (Open Food Facts barcode lookups, AI output): validate numbers (finite, ≥0, capped),
+  cap string lengths, timeouts on every network call.
 - Comments: match the surrounding density; the codebase explains *why* (constraints, past bugs), not *what*.
 
-## 7. Current state (as of Oct 11, 2026)
+## 7. Current state (as of Oct 28, 2026)
 
 **Built and working (dev):** onboarding + email/password auth (6-digit code verification, "verify later" allowed),
 offline-first sync of profile/meals/weight/recipes/grocery/plans, Home (rings, tick-off, Added tags, sync icon, verify
@@ -202,6 +216,9 @@ never commit `.env` or `docs/handover/chat-history/` (gitignored, local only).
 
 **App name: Macrotri** (confirmed Oct 12). Single source `constants/app.ts` `APP_NAME`; `app.json` name = Macrotri (home-screen
 name shows after the next dev build). Slug `meal-app`, scheme `mealapp`, bundle id `com.alex.mealapp` intentionally unchanged.
+
+**Verified on device Oct 22–28:** meals count when added (eaten vs planned), End plan, plan start dates, goals
+restore, Customize (swaps stick, Save applies, own copy of Explore plans), Undo on swaps.
 
 **Verified on device Oct 12–22:** new Scan screen (Food label, tips, .5x, freeze-on-shot), paywall + toasts on top of
 modals, Fix with memory (scan items -> logged meal's ingredients -> later Fix), exact fix maths, AI history log.
