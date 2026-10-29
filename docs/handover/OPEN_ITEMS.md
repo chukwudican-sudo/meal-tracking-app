@@ -108,6 +108,8 @@ Still open:
 18d. **"Missed" doesn't sync** (server only stores is_completed) — on another device/reinstall past missed meals show
     as not eaten. Needs a status column.
 18e. Single-device assumption: ending a plan on one phone doesn't remove it on another (pull ignores a null pointer).
+18g. **Revisit the Add Meal disclaimer (•••) in a later version** (Alex, Oct 28): wording was only corrected
+    (voice section removed, data now synced, AI = Gemini); rewrite it alongside the privacy policy.
 18f. **Barcode coverage (launch):** Open Food Facts misses many North American products (e.g. Diet Coke
     067000014451, verified Oct 28). Add the USDA FoodData Central branded-foods database as a fallback via an edge
     function (keeps the USDA key server-side). Lookup order: OFF → USDA → "try Food label" message.

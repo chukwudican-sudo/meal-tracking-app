@@ -49,20 +49,12 @@ export function DisclaimerScreen({ visible, onClose }: Props) {
             </Text>
           </Section>
 
-          <Section title="Voice dictation">
-            <Text style={styles.p}>
-              When you use the microphone, audio is recorded on your device and sent
-              to the AI provider for transcription. Recording stops as soon as you
-              release the mic button.
-            </Text>
-          </Section>
-
           <Section title="Your data">
             <Text style={styles.p}>
-              Your meals, goals, and profile are stored locally on this device. The
-              AI assistant only sees the day-level context required to do its job
-              (today&apos;s goals, today&apos;s logged meals, your saved meal names, your
-              first name). It does not see your full history.
+              Your meals, goals, and profile are saved on this device and synced
+              securely to your account. AI features receive only what each request
+              needs (for example the photo or description you send, plus your
+              dietary preferences). See the Privacy Policy for details.
             </Text>
           </Section>
 
@@ -72,8 +64,8 @@ export function DisclaimerScreen({ visible, onClose }: Props) {
               information ({'\u00A0'}https://world.openfoodfacts.org{'\u00A0'}).
             </Text>
             <Text style={styles.p}>
-              · OpenAI — AI provider used for chat, vision, and audio transcription
-              (https://openai.com).
+              · Google Gemini — AI provider used for meal scans, estimates, corrections
+              and recipes (https://ai.google.dev).
             </Text>
           </Section>
 

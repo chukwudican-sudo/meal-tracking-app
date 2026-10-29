@@ -1,7 +1,6 @@
 import { useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -11,10 +10,8 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { Audio } from 'expo-av';
 
 import { COLORS } from '@/constants/theme';
-import { aiClient } from '@/ai/aiClient';
 import { AIError } from '@/ai/aiEdgeClient';
 import { estimateNutrition } from '@/ai/estimateNutrition';
 import { fixMeal } from '@/ai/fixMeal';
@@ -47,8 +44,6 @@ export function AITab({ date, onLogged }: Props) {
   const [category, setCategory] = useState<RecipeCategory | undefined>(undefined);
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
-  const [recording, setRecording] = useState(false);
-  const recordingRef = useRef<Audio.Recording | null>(null);
   const fullTextRef = useRef('');
 
   const cals = draft?.calories ?? 0;
@@ -142,42 +137,6 @@ export function AITab({ date, onLogged }: Props) {
     onLogged();
   }
 
-  async function startRecording() {
-    if (Platform.OS === 'web') {
-      Alert.alert('Not available', 'Voice dictation only works on the mobile app.');
-      return;
-    }
-    try {
-      const perm = await Audio.requestPermissionsAsync();
-      if (!perm.granted) {
-        Alert.alert('Permission needed', 'Microphone access is required for voice dictation.');
-        return;
-      }
-      await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
-      const { recording: rec } = await Audio.Recording.createAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
-      recordingRef.current = rec;
-      setRecording(true);
-    } catch (e) {
-      console.warn('Could not start recording:', e);
-    }
-  }
-
-  async function stopRecording() {
-    const rec = recordingRef.current;
-    recordingRef.current = null;
-    setRecording(false);
-    if (!rec) return;
-    try {
-      await rec.stopAndUnloadAsync();
-      const uri = rec.getURI();
-      if (!uri) return;
-      const text = await aiClient.transcribe(uri);
-      setInput(prev => (prev ? `${prev} ${text}` : text));
-    } catch (e) {
-      console.warn('Could not transcribe:', e);
-    }
-  }
-
   return (
     <KeyboardAvoidingView
       style={styles.full}
@@ -230,13 +189,6 @@ export function AITab({ date, onLogged }: Props) {
           multiline
           editable={!busy}
         />
-        <TouchableOpacity
-          onPressIn={startRecording}
-          onPressOut={stopRecording}
-          style={[styles.iconBtn, recording && styles.iconBtnActive]}
-        >
-          <Text style={styles.iconText}>{recording ? '🔴' : '🎙️'}</Text>
-        </TouchableOpacity>
         <TouchableOpacity
           onPress={estimate}
           disabled={busy || !input.trim()}
@@ -342,16 +294,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     maxHeight: 110,
   },
-  iconBtn: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: COLORS.card,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  iconBtnActive: { backgroundColor: COLORS.red + '33' },
-  iconText: { fontSize: 18 },
   sendBtn: {
     width: 38,
     height: 38,

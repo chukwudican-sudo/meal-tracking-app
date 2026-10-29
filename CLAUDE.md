@@ -38,9 +38,10 @@ Deeper material lives in `docs/handover/` — read the relevant file before touc
 - **Backend:** Supabase (dev project ref **`kpmxjufzggcapljhxutv`**, `https://kpmxjufzggcapljhxutv.supabase.co`).
   Postgres + RLS, email/password auth, 12 Deno edge functions. A separate *production* project is planned before launch.
 - **AI:** Google Gemini **`gemini-3.6-flash`**, called only from edge functions (key is a Supabase secret).
-  A legacy client-side OpenAI stub (`ai/aiClient.ts`) still backs a few un-migrated flows (see OPEN_ITEMS).
+  No client-side AI remains (the legacy OpenAI client was deleted Oct 28). Voice = the keyboard's own dictation;
+  a dedicated on-device voice button is planned after launch.
 - **Payments:** RevenueCat (`react-native-purchases`) → **requires a dev build; Expo Go can no longer run this app.**
-- Other: expo-camera, expo-image-picker, expo-image-manipulator, expo-av (deprecated, migrate later), expo-secure-store,
+- Other: expo-camera, expo-image-picker, expo-image-manipulator, expo-secure-store,
   expo-crypto, NetInfo, react-native-svg, datetimepicker, Ionicons/MaterialCommunityIcons via `@expo/vector-icons`.
 - Bundle id / package: **`com.alex.mealapp`** (iOS + Android). URL scheme: `mealapp`. EAS project id in `app.json`.
 
@@ -89,7 +90,7 @@ components/              MealDetailModal, MealForm, MealCard, CustomTabBar, Scre
 store/                   useMealStore (everything), types.ts, useEntitlementStore, usePaywallStore, useToastStore, useUndoStore
 lib/                     supabase.ts, auth.tsx, purchases.ts, paywall.ts, entitlements.ts (client Pro gates), deleteAccount.ts,
                          macroFoodOptions.ts, pendingCredentials.ts, media/compressPhoto.ts, sync/* (offline-first engine)
-ai/                      aiEdgeClient.ts (shared invoke + AIError) + one wrapper per edge function; aiClient.ts = legacy OpenAI stub
+ai/                      aiEdgeClient.ts (shared invoke + AIError) + one wrapper per edge function
 constants/               theme.ts (COLORS), entitlements.ts (PRO_ENTITLEMENT_ID — shared with Deno!), recipeSeed (60 recipes),
                          planSeed, premadeRecipes (seeded UUIDs), goalCalc, onboardingCalc, ingredientCategories, nutrients, app.ts
 supabase/                migrations/ (9), functions/ (12 + _shared/), config.toml, README.md (deploy + dashboard steps)
