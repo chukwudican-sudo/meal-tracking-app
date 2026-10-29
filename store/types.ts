@@ -437,6 +437,13 @@ export interface AppStore {
   // all future plan meals; keeps eaten/own meals, the user's own templates and
   // past days.
   endPlan: () => void;
+  // Undo for a day-level swap: put a day's log back exactly as it was
+  // (undefined = the day had no log), then rebuild Planned Ingredients.
+  restoreDayLog: (date: string, log: DailyLog | undefined) => void;
+  // Save Customize edits to the current plan and apply them from today on.
+  // A premade (Explore) plan is read-only, so it becomes the user's own copy
+  // ("My <name>") in savedPlans. Returns the plan now active (its id may differ).
+  saveCustomizedPlan: (sourceId: string, draft: MealPlan) => MealPlan;
   // Non-destructive re-activation on restore: if there's an active plan pointer
   // but no local templates (fresh device / wiped cache), re-derive templates and
   // fill today's missing slots WITHOUT clobbering existing/synced logs. No-op if
@@ -446,8 +453,6 @@ export interface AppStore {
   saveCurrentPlanAs: (name: string) => MealPlan;
   renameSavedPlan: (id: string, name: string) => void;
   removeSavedPlan: (id: string) => void;
-  /** Replace a saved plan in-place, e.g. after Customize Plan edits. */
-  updateSavedPlan: (id: string, plan: MealPlan) => void;
 
   // ─── Plan avoid foods ───────────────────────────────────────────────────
   setPlanAvoidFoods: (foods: string[]) => void;

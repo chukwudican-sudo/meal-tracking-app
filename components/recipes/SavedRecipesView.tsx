@@ -28,6 +28,7 @@ import type {
   SavedRecipe,
 } from '@/store/types';
 import { useMealStore } from '@/store/useMealStore';
+import { useUndoStore } from '@/store/useUndoStore';
 
 type TabKey = 'all' | 'saved' | 'recent' | 'recipes';
 
@@ -98,6 +99,8 @@ export function SavedRecipesView({ mode, context, swapFilter = 'All', onBeforeNa
   const setCustomizeDraft = useMealStore(s => s.setCustomizeDraft);
   const clearPendingSwap = useMealStore(s => s.clearPendingSwap);
   const ensureRecipeSaved = useMealStore(s => s.ensureRecipeSaved);
+  const restoreDayLog = useMealStore(s => s.restoreDayLog);
+  const showUndo = useUndoStore(s => s.showUndo);
   const { addToToday } = useRecipeActions();
   const insets = useSafeAreaInsets();
 
@@ -201,8 +204,19 @@ export function SavedRecipesView({ mode, context, swapFilter = 'All', onBeforeNa
       openPreview(s);
       return;
     }
-    executeSwap(pendingSwap, s, { swapMealInDay, setCustomizeDraft, customizeDraft, ensureRecipeSaved });
+    // Snapshot what the swap replaces so Undo can put it back exactly.
+    const swap = pendingSwap;
+    const prevDayLog = swap.type === 'daily' ? useMealStore.getState().logs[swap.date] : undefined;
+    const prevDraft = customizeDraft;
+    executeSwap(swap, s, { swapMealInDay, setCustomizeDraft, customizeDraft, ensureRecipeSaved });
     clearPendingSwap();
+    showUndo({
+      message: `Swapped to ${s.name}`,
+      undo: () => {
+        if (swap.type === 'daily') restoreDayLog(swap.date, prevDayLog);
+        else setCustomizeDraft(prevDraft);
+      },
+    });
     if (router.canGoBack()) router.back();
     else router.replace('/(tabs)/recipes');
   };

@@ -5,7 +5,7 @@
 
 import { Alert } from 'react-native';
 
-import { countFutureMeals, useMealStore } from '@/store/useMealStore';
+import { countFutureMeals, countOwnFutureMeals, useMealStore } from '@/store/useMealStore';
 
 interface Options {
   /** A plan is already active (profile.activePlanName is set). */
@@ -39,6 +39,24 @@ export function confirmPlanActivation({ hasCurrentPlan, onActivate, onSaveAndAct
       ...(onSaveAndActivate ? [{ text: 'Save and replace', onPress: onSaveAndActivate }] : []),
       { text: 'Replace', style: 'destructive' as const, onPress: onActivate },
       { text: 'Cancel', style: 'cancel' as const },
+    ],
+  );
+}
+
+// Saving Customize re-applies the plan to future days; the plan's own meals are
+// expected to change, so only warn when the user's OWN future meals would go.
+export function confirmCustomizeSave(onSave: () => void): void {
+  const { logs, templates } = useMealStore.getState();
+  if (countOwnFutureMeals(logs, templates) === 0) {
+    onSave();
+    return;
+  }
+  Alert.alert(
+    'Replace your upcoming meals?',
+    'Saving applies this plan from tomorrow onward, replacing meals you added for upcoming days.',
+    [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Save', style: 'destructive', onPress: onSave },
     ],
   );
 }

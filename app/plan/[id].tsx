@@ -22,9 +22,9 @@ import { useToastStore } from '@/store/useToastStore';
 import { useUndoStore } from '@/store/useUndoStore';
 import type { MealPlan, MealSlot, PlanDayMeal, RecipeTemplate } from '@/store/types';
 import { slotNameToCategory } from '@/utils/mealSlots';
-import { confirmPlanActivation } from '@/lib/planActivation';
+import { confirmCustomizeSave, confirmPlanActivation } from '@/lib/planActivation';
+import { EMPTY_SLOT, REMOVED_SLOT } from '@/constants/planSlots';
 
-const EMPTY_SLOT = '__empty__';
 
 const WEEKDAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
@@ -44,8 +44,7 @@ export default function PlanDetailScreen() {
   const activatePlan = useMealStore(s => s.activatePlan);
   const endPlan = useMealStore(s => s.endPlan);
   const saveCurrentPlanAs = useMealStore(s => s.saveCurrentPlanAs);
-  const updateSavedPlan = useMealStore(s => s.updateSavedPlan);
-  const customizeDraft = useMealStore(s => s.customizeDraft);
+  const saveCustomizedPlan = useMealStore(s => s.saveCustomizedPlan);
   const setCustomizeDraft = useMealStore(s => s.setCustomizeDraft);
   const clearCustomizeDraft = useMealStore(s => s.clearCustomizeDraft);
   const setPendingSwap = useMealStore(s => s.setPendingSwap);
@@ -59,7 +58,7 @@ export default function PlanDetailScreen() {
 
   // ── Customize Plan state ────────────────────────────────────────────
   // We deep-clone the stored plan when entering customize mode so the user
-  // can freely edit until they hit Save (commits via updateSavedPlan) or
+  // can freely edit until they hit Save (commits via saveCustomizedPlan) or
   // discard via the back arrow.
   const [isCustomizing, setIsCustomizing] = useState(false);
   const [draftPlan, setDraftPlan] = useState<MealPlan | null>(null);
@@ -76,6 +75,13 @@ export default function PlanDetailScreen() {
   // Day index awaiting the "Add meal slot" popup (null = popup closed).
   const [addSlotDayIdx, setAddSlotDayIdx] = useState<number | null>(null);
 
+  // Follow the store draft while customizing: a swap Undo restores it while
+  // this page is already open (no focus event to re-read it).
+  const storeDraft = useMealStore(s => s.customizeDraft);
+  useEffect(() => {
+    if (isCustomizing && storeDraft && storeDraft.planId === id) setDraftPlan(storeDraft.draftPlan);
+  }, [storeDraft, isCustomizing, id]);
+
   // Reset the draft if the underlying plan id changes while mounted.
   useEffect(() => {
     if (!isCustomizing) setDraftPlan(null);
@@ -86,12 +92,12 @@ export default function PlanDetailScreen() {
   useFocusEffect(
     useCallback(() => {
       if (!isCustomizing) return;
-      if (customizeDraft && customizeDraft.planId === id) {
-        setDraftPlan(customizeDraft.draftPlan);
+      // Read the store directly: a closure value is from before the swap
+      // round-trip, so the picked recipe was silently discarded (Oct 28 bug).
+      const latest = useMealStore.getState().customizeDraft;
+      if (latest && latest.planId === id) {
+        setDraftPlan(latest.draftPlan);
       }
-      // We intentionally depend only on focus + customize state; reading the
-      // latest customizeDraft via the closure on each focus is sufficient.
-      // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [isCustomizing, id]),
   );
 
@@ -167,11 +173,21 @@ export default function PlanDetailScreen() {
 
   const handleSaveCustomize = () => {
     if (!draftPlan || !storedPlan) return;
-    updateSavedPlan(storedPlan.id, draftPlan);
-    setIsCustomizing(false);
-    setDraftPlan(null);
-    clearCustomizeDraft();
-    showToast('Plan updated');
+    const draft = draftPlan;
+    const source = storedPlan;
+    confirmCustomizeSave(() => {
+      const applied = saveCustomizedPlan(source.id, draft);
+      setIsCustomizing(false);
+      setDraftPlan(null);
+      clearCustomizeDraft();
+      if (applied.id !== source.id) {
+        // Explore plan -> the user's own copy; show that (it's the current one).
+        showToast(`Saved as ${applied.name}`);
+        router.replace({ pathname: '/plan/[id]', params: { id: applied.id } });
+      } else if (applied !== source) {
+        showToast('Plan updated');
+      }
+    });
   };
 
   const handleCancelCustomize = () => {
@@ -213,7 +229,7 @@ export default function PlanDetailScreen() {
       days: draftPlan.days.map(day =>
         day.map(m =>
           m.recipeId === recipeId
-            ? { ...m, recipeName: 'Removed', recipeId: '__removed__' }
+            ? { ...m, recipeName: 'Removed', recipeId: REMOVED_SLOT }
             : m,
         ),
       ),
@@ -339,7 +355,7 @@ export default function PlanDetailScreen() {
           // Hide globally-removed and empty-slot placeholders — they only
           // surface in the day-by-day weekly schedule below.
           const visibleMeals = distinctMeals.filter(
-            m => m.recipeId !== '__removed__' && m.recipeId !== EMPTY_SLOT,
+            m => m.recipeId !== REMOVED_SLOT && m.recipeId !== EMPTY_SLOT,
           );
           const COLLAPSED_LIMIT = 4;
           const shown = mealsExpanded ? visibleMeals : visibleMeals.slice(0, COLLAPSED_LIMIT);
@@ -413,7 +429,7 @@ export default function PlanDetailScreen() {
                 <Text style={styles.daySkip}>Rest day</Text>
               ) : (
                 day.map((m, mi) => {
-                  const removed = m.recipeId === '__removed__';
+                  const removed = m.recipeId === REMOVED_SLOT;
                   const empty = m.recipeId === EMPTY_SLOT;
                   return (
                     <View key={mi} style={styles.dayMealRow}>
@@ -570,7 +586,7 @@ function CustomizeDayOverlay({
     };
 
     meals.forEach(m => {
-      const isFilled = m.recipeId !== EMPTY_SLOT && m.recipeId !== '__removed__';
+      const isFilled = m.recipeId !== EMPTY_SLOT && m.recipeId !== REMOVED_SLOT;
       // Legacy bug: slotName === recipeName means the slot was never a real
       // slot. Re-home it into a fixed slot by time.
       let targetName = m.slotName;
@@ -607,7 +623,7 @@ function CustomizeDayOverlay({
 
       <ScrollView contentContainerStyle={styles.dayEditorBody} showsVerticalScrollIndicator={false}>
         {sections.map(sec => {
-          const filled = sec.meal && sec.meal.recipeId !== EMPTY_SLOT && sec.meal.recipeId !== '__removed__';
+          const filled = sec.meal && sec.meal.recipeId !== EMPTY_SLOT && sec.meal.recipeId !== REMOVED_SLOT;
           const recipe = filled ? recipeById.get(sec.meal!.recipeId) : undefined;
           return (
             <View key={sec.slotName} style={styles.slotBlock}>

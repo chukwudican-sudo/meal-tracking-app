@@ -28,6 +28,7 @@ import type {
   WeightLogEntry,
 } from './types';
 import { RECIPE_SEED } from '@/constants/recipeSeed';
+import { isPlaceholderSlot } from '@/constants/planSlots';
 import { PLAN_SEED } from '@/constants/planSeed';
 import { DEFAULT_TRACKED_NUTRIENTS } from '@/constants/nutrients';
 import { classifyIngredient, normalizeIngredientName } from '@/constants/ingredientCategories';
@@ -212,6 +213,8 @@ function buildTemplatesFromPlan(state: AppStore, plan: MealPlan): MealTemplate[]
 
   plan.days.forEach((dayMeals, dayIdx) => {
     (dayMeals ?? []).forEach(m => {
+      // Empty / removed customize slots are placeholders, never meals.
+      if (isPlaceholderSlot(m.recipeId)) return;
       const key = `${m.slotName}|${m.time}|${m.recipeId}|${m.recipeName}`;
       const bucket = buckets.get(key);
       if (bucket) {
@@ -314,6 +317,25 @@ export function initialMealStatus(date: string, time: string, now: Date = new Da
   if (date > today) return 'pending';
   const mins = toMinutesFromHHMM(time);
   return mins === null || mins <= now.getHours() * 60 + now.getMinutes() ? 'completed' : 'pending';
+}
+
+// The user's own meals after today (their meals on future days, recipes
+// scheduled on unopened days, own repeating meals) — what re-applying a plan
+// would replace, excluding the plan's own meals.
+export function countOwnFutureMeals(
+  logs: Record<string, DailyLog>,
+  templates: MealTemplate[],
+  now: Date = new Date(),
+): number {
+  const today = toIsoDate(now);
+  const inLogs = Object.entries(logs).reduce(
+    (n, [d, log]) => (d > today ? n + log.meals.filter(m => m.isAdHoc).length : n),
+    0,
+  );
+  const own = templates.filter(
+    t => !isPlanTemplate(t) && (t.recurrence.type !== 'once' || (t.recurrence.date > today && !logs[t.recurrence.date])),
+  ).length;
+  return inLogs + own;
 }
 
 // The single test for "does this template belong to the plan?". Plan
@@ -1783,17 +1805,35 @@ export const useMealStore = create<AppStore>()(
         }));
       },
 
-      updateSavedPlan: (id, plan) => {
-        // Replace the matching saved plan in-place. We only update `savedPlans`
-        // here — the active templates (used for week resolution) are untouched
-        // since the spec only requires the saved plan record to reflect the
-        // new structure for now. If a future change should also rewrite the
-        // user's day-by-day templates, it can be layered on top of this.
-        set(state => ({
-          savedPlans: state.savedPlans.map(p =>
-            p.id === id ? { ...plan, id, source: p.source } : p,
-          ),
-        }));
+      saveCustomizedPlan: (sourceId, draft) => {
+        const state = get();
+        const own = state.savedPlans.find(p => p.id === sourceId);
+        const current = own ?? state.plans.find(p => p.id === sourceId);
+        // Nothing changed: no copy, no re-activation.
+        if (current && JSON.stringify(current.days) === JSON.stringify(draft.days)) return current;
+        let applied: MealPlan;
+        if (own) {
+          applied = { ...draft, id: own.id, name: own.name, source: own.source };
+          set({ savedPlans: state.savedPlans.map(p => (p.id === own.id ? applied : p)) });
+        } else {
+          // Premade: read-only seed content. Save the edits as the user's own
+          // plan (UUID id so it syncs; unique name since the active plan is
+          // matched by name).
+          // Unique across saved AND premade plans (the active plan is matched by name).
+          const taken = new Set([...state.savedPlans, ...state.plans].map(p => p.name));
+          const base = `My ${draft.name}`;
+          let name = base;
+          for (let n = 2; taken.has(name); n++) name = `${base} ${n}`;
+          applied = { ...draft, id: newId(), name, source: 'user', savedAt: new Date().toISOString() };
+          set({ savedPlans: [applied, ...state.savedPlans] });
+        }
+        // Same rules as starting a plan: today keeps eaten/own meals, future
+        // days follow the edited plan, past days untouched. The plan was
+        // already active, so goals (incl. edits made during it) stay as they are.
+        const { goals, goalsBeforePlan } = state;
+        get().activatePlan(applied);
+        set({ goals, goalsBeforePlan });
+        return applied;
       },
 
       // ─── Plan avoid foods ────────────────────────────────────────────────
@@ -1806,6 +1846,18 @@ export const useMealStore = create<AppStore>()(
       clearCustomizeDraft: () => set({ customizeDraft: null }),
       setPendingRecipeConcept: (concept) => set({ pendingRecipeConcept: concept }),
       clearPendingRecipeConcept: () => set({ pendingRecipeConcept: null }),
+
+      restoreDayLog: (date, log) => {
+        set(state => {
+          const logs = { ...state.logs };
+          if (log) logs[date] = log;
+          else delete logs[date];
+          return { logs };
+        });
+        // The swap added the new meal's ingredients; rebuilding drops them
+        // unless something else still needs them.
+        get().refreshGroceryWeek(mondayOfWeek(toIsoDate(new Date())));
+      },
 
       swapMealInDay: (date, slot, recipe) => {
         set(state => {
