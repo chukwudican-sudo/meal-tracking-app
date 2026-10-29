@@ -13,6 +13,9 @@ interface ProgressiveLoaderProps {
   // cycling for its whole duration instead of going static after the last
   // line. Defaults to the middle of the intended 1.2-1.5s range.
   intervalMs?: number;
+  // 'block' (default): big centred spinner + line, for full-screen waits.
+  // 'inline': small spinner + line in a row, to sit in a title slot.
+  variant?: 'block' | 'inline';
 }
 
 const DEFAULT_INTERVAL_MS = 1350;
@@ -24,7 +27,7 @@ const DEFAULT_INTERVAL_MS = 1350;
 // ProcessingStep, minus the progress ring (there's no real percentage to show
 // for an indeterminate network wait). Parents keep full control of when it
 // appears/disappears by conditionally rendering it around their loading flag.
-export function ProgressiveLoader({ messages, intervalMs = DEFAULT_INTERVAL_MS }: ProgressiveLoaderProps) {
+export function ProgressiveLoader({ messages, intervalMs = DEFAULT_INTERVAL_MS, variant = 'block' }: ProgressiveLoaderProps) {
   const [index, setIndex] = useState(0);
   const opacity = useRef(new Animated.Value(1)).current;
   const mountedRef = useRef(true);
@@ -48,10 +51,11 @@ export function ProgressiveLoader({ messages, intervalMs = DEFAULT_INTERVAL_MS }
     return () => clearInterval(id);
   }, [messages.length, intervalMs, opacity]);
 
+  const inline = variant === 'inline';
   return (
-    <View style={styles.wrap}>
-      <ActivityIndicator size="large" color={COLORS.green} />
-      <Animated.Text style={[styles.text, { opacity }]}>
+    <View style={inline ? styles.inlineWrap : styles.wrap}>
+      <ActivityIndicator size={inline ? 'small' : 'large'} color={COLORS.green} />
+      <Animated.Text style={[inline ? styles.inlineText : styles.text, { opacity }]} numberOfLines={1}>
         {messages[index % messages.length]}
       </Animated.Text>
     </View>
@@ -61,4 +65,6 @@ export function ProgressiveLoader({ messages, intervalMs = DEFAULT_INTERVAL_MS }
 const styles = StyleSheet.create({
   wrap: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32, gap: 16 },
   text: { color: COLORS.textSecondary, fontSize: 15, fontWeight: '600', textAlign: 'center' },
+  inlineWrap: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  inlineText: { color: COLORS.textSecondary, fontSize: 15, fontWeight: '600', flexShrink: 1 },
 });

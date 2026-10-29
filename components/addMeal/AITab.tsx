@@ -12,6 +12,8 @@ import {
 } from 'react-native';
 
 import { COLORS } from '@/constants/theme';
+import { ProgressiveLoader } from '@/components/ProgressiveLoader';
+import { FadeIn, Skeleton } from '@/components/Skeleton';
 import { AIError } from '@/ai/aiEdgeClient';
 import { estimateNutrition } from '@/ai/estimateNutrition';
 import { fixMeal } from '@/ai/fixMeal';
@@ -34,6 +36,8 @@ function nowHHMM(): string {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
+
+const ESTIMATE_MESSAGES = ['Estimating nutrition…', 'Breaking down ingredients…', 'Almost there…'];
 export function AITab({ date, onLogged }: Props) {
   const addMealToDay = useMealStore(s => s.addMealToDay);
   const ingestMidWeekIngredients = useMealStore(s => s.ingestMidWeekIngredients);
@@ -146,21 +150,43 @@ export function AITab({ date, onLogged }: Props) {
       <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollBody} keyboardShouldPersistTaps="handled">
         {/* Live nutrition card */}
         <View style={styles.card}>
-          <Text style={styles.cardName} numberOfLines={1}>{draft?.name ?? 'Describe your meal'}</Text>
+          {/* Skeleton loading: the card keeps its shape, values become
+              shimmering placeholders, and the status sits in the title slot
+              (the send-button spinner alone was barely visible). */}
+          {busy ? (
+            <View style={styles.titleSlot}>
+              <ProgressiveLoader messages={ESTIMATE_MESSAGES} variant="inline" />
+            </View>
+          ) : (
+            <FadeIn key={`name-${draft?.name ?? ''}`} style={styles.titleSlot}>
+              <Text style={styles.cardName} numberOfLines={1}>{draft?.name ?? 'Describe your meal'}</Text>
+            </FadeIn>
+          )}
           <View style={styles.calRow}>
-            <Text style={styles.calValue}>{cals}</Text>
-            <Text style={styles.calUnit}>cal</Text>
+            {busy ? (
+              <Skeleton width={110} height={38} radius={10} />
+            ) : (
+              <FadeIn key={`cal-${cals}`} style={styles.calInner}>
+                <Text style={styles.calValue}>{cals}</Text>
+                <Text style={styles.calUnit}>cal</Text>
+              </FadeIn>
+            )}
           </View>
           <View style={styles.macroRow}>
-            <MacroChip label="Protein" value={macros.protein} />
-            <MacroChip label="Carbs" value={macros.carbs} />
-            <MacroChip label="Fats" value={macros.fats} />
+            <MacroChip label="Protein" value={macros.protein} loading={busy} />
+            <MacroChip label="Carbs" value={macros.carbs} loading={busy} />
+            <MacroChip label="Fats" value={macros.fats} loading={busy} />
           </View>
         </View>
 
         {/* Estimated ingredients */}
         <Text style={styles.sectionLabel}>Estimated ingredients</Text>
-        {ingredients.length === 0 ? (
+        {busy ? (
+          <View style={styles.skelList}>
+            <Skeleton height={44} radius={12} />
+            <Skeleton width="80%" height={44} radius={12} />
+          </View>
+        ) : ingredients.length === 0 ? (
           <View style={styles.emptyIng}>
             <Text style={styles.emptyIngText}>
               Ingredients appear here once you describe what you ate.
@@ -168,10 +194,10 @@ export function AITab({ date, onLogged }: Props) {
           </View>
         ) : (
           ingredients.map(ing => (
-            <View key={ing.id} style={styles.ingRow}>
+            <FadeIn key={ing.id} style={styles.ingRow}>
               <Text style={styles.ingName} numberOfLines={1}>{ing.name}</Text>
               <Text style={styles.ingCal}>{ing.calories ?? 0} cal</Text>
-            </View>
+            </FadeIn>
           ))
         )}
 
@@ -211,10 +237,16 @@ export function AITab({ date, onLogged }: Props) {
   );
 }
 
-function MacroChip({ label, value }: { label: string; value: number }) {
+function MacroChip({ label, value, loading }: { label: string; value: number; loading?: boolean }) {
   return (
     <View style={styles.macroChip}>
-      <Text style={styles.macroChipValue}>{value}g</Text>
+      {loading ? (
+        <Skeleton width={40} height={18} radius={6} />
+      ) : (
+        <FadeIn key={`${label}-${value}`}>
+          <Text style={styles.macroChipValue}>{value}g</Text>
+        </FadeIn>
+      )}
       <Text style={styles.macroChipLabel}>{label}</Text>
     </View>
   );
@@ -232,8 +264,10 @@ const styles = StyleSheet.create({
     borderColor: COLORS.border,
     padding: 16,
   },
+  titleSlot: { minHeight: 22, justifyContent: 'center' },
   cardName: { color: COLORS.text, fontSize: 16, fontWeight: '700' },
-  calRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 6, marginTop: 8 },
+  calRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 6, marginTop: 8, minHeight: 46 },
+  calInner: { flexDirection: 'row', alignItems: 'flex-end', gap: 6 },
   calValue: { color: COLORS.text, fontSize: 38, fontWeight: '800' },
   calUnit: { color: COLORS.textSecondary, fontSize: 16, marginBottom: 7 },
   macroRow: { flexDirection: 'row', gap: 10, marginTop: 12 },
@@ -271,6 +305,7 @@ const styles = StyleSheet.create({
   },
   ingName: { color: COLORS.text, fontSize: 14, fontWeight: '600', flex: 1, marginRight: 10 },
   ingCal: { color: COLORS.textSecondary, fontSize: 13 },
+  skelList: { gap: 8 },
 
   note: { color: COLORS.textSecondary, fontSize: 13, marginTop: 14, lineHeight: 19 },
 

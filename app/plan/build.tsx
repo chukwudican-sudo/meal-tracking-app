@@ -31,6 +31,7 @@ import { useEntitlementStore } from '@/store/useEntitlementStore';
 import { useMealStore } from '@/store/useMealStore';
 import { useToastStore } from '@/store/useToastStore';
 import { confirmPlanActivation } from '@/lib/planActivation';
+import { PLAN_PICK_LIMITS } from '@/constants/planPicks';
 import type {
   MealPlan,
   MealSlot,
@@ -1104,6 +1105,10 @@ export default function BuildPlanScreen() {
         );
         return;
       }
+      if (!prefs.loves.some(l => l.toLowerCase() === v.toLowerCase()) && prefs.loves.length >= PLAN_PICK_LIMITS.loves) {
+        showToast(`You can add up to ${PLAN_PICK_LIMITS.loves} foods you love.`);
+        return;
+      }
       setPrefs(p => p.loves.some(l => l.toLowerCase() === v.toLowerCase()) ? p : { ...p, loves: [...p.loves, v] });
     };
     const removeLoveToken = (token: string) =>
@@ -1129,6 +1134,10 @@ export default function BuildPlanScreen() {
           `${v} is one of your picked foods`,
           'Remove it from your foods first if you\u2019d rather avoid it.',
         );
+        return;
+      }
+      if (!prefs.avoid.some(l => l.toLowerCase() === v.toLowerCase()) && prefs.avoid.length >= PLAN_PICK_LIMITS.avoid) {
+        showToast(`You can add up to ${PLAN_PICK_LIMITS.avoid} foods to avoid.`);
         return;
       }
       setPrefs(p => p.avoid.some(l => l.toLowerCase() === v.toLowerCase()) ? p : { ...p, avoid: [...p.avoid, v] });
@@ -1423,6 +1432,10 @@ export default function BuildPlanScreen() {
         `${v} is in foods to avoid`,
         'A food can only be a preference or avoided. Pick one.',
       );
+      return;
+    }
+    if (!prefs[group].some(x => x.toLowerCase() === v.toLowerCase()) && prefs[group].length >= PLAN_PICK_LIMITS[group]) {
+      showToast(`You can pick up to ${PLAN_PICK_LIMITS[group]} ${group}.`);
       return;
     }
     setPrefs(p =>

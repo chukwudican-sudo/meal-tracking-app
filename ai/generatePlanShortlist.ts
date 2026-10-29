@@ -13,6 +13,7 @@ import type { Ingredient, RecipeCategory, RecipeDifficulty } from '@/store/types
 import { AIError, type AIErrorCode, invokeAIFunction, toInt } from './aiEdgeClient';
 import type { RecipeConcept } from './types';
 import type { CookTimePref } from './generateMealSuggestions';
+import { PLAN_PICK_LIMITS } from '@/constants/planPicks';
 
 export type GeneratePlanShortlistErrorCode = AIErrorCode;
 
@@ -130,13 +131,13 @@ export async function generatePlanShortlist(
 ): Promise<PlanShortlist> {
   const body = {
     mealTypes: params.mealTypes,
-    proteins: cleanList(params.proteins, 15),
-    carbs: cleanList(params.carbs, 15),
-    fats: cleanList(params.fats, 15),
-    cuisines: cleanList(params.cuisines, 20),
+    proteins: cleanList(params.proteins, PLAN_PICK_LIMITS.proteins),
+    carbs: cleanList(params.carbs, PLAN_PICK_LIMITS.carbs),
+    fats: cleanList(params.fats, PLAN_PICK_LIMITS.fats),
+    cuisines: cleanList(params.cuisines, PLAN_PICK_LIMITS.cuisines),
     cookTime: params.cookTime ?? null,
-    loves: cleanList(params.loves, 20),
-    avoid: cleanList(params.avoid, 20),
+    loves: cleanList(params.loves, PLAN_PICK_LIMITS.loves),
+    avoid: cleanList(params.avoid, PLAN_PICK_LIMITS.avoid),
     countPerType: params.countPerType ?? undefined,
   };
 
