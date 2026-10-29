@@ -108,6 +108,9 @@ Still open:
 18d. **"Missed" doesn't sync** (server only stores is_completed) — on another device/reinstall past missed meals show
     as not eaten. Needs a status column.
 18e. Single-device assumption: ending a plan on one phone doesn't remove it on another (pull ignores a null pointer).
+18f. **Barcode coverage (launch):** Open Food Facts misses many North American products (e.g. Diet Coke
+    067000014451, verified Oct 28). Add the USDA FoodData Central branded-foods database as a fallback via an edge
+    function (keeps the USDA key server-side). Lookup order: OFF → USDA → "try Food label" message.
 19. **Rotate the Gemini API key** (it was handled in plaintext during setup). Manual + `npx supabase secrets set`.
 20. `expo-av` (~16.0.8) is deprecated → migrate the voice recording to `expo-audio` before SDK 55.
 21. Expo dependency drift — run `npx expo install --check` and review (with approval) before the production build.
