@@ -20,6 +20,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Screen } from '@/components/Screen';
 
 import { AIError } from '@/ai/aiEdgeClient';
+import { useRecipeFix } from '@/components/recipes/useRecipeFix';
+import { NutritionTiles } from '@/components/recipes/NutritionTiles';
 import { recipeAssistant, type RecipeAssistantSource } from '@/ai/recipeAssistant';
 import { COLORS } from '@/constants/theme';
 import {
@@ -150,6 +152,9 @@ export default function RecipeDetailScreen() {
   // isPro flips true (purchase completed right here, or restored elsewhere).
   const locked = !!resolved?.requiresPro && !isPro;
 
+  // Fix: only the user's own recipes (built-in ones are reference content).
+  const { canFix, openFix, fixSheet } = useRecipeFix(resolved?.source === 'saved' ? resolved.id : undefined);
+
   const handleUnlock = () => {
     openPaywall({ reason: 'premium_feature', headline: 'Unlock the full recipe with Pro' });
   };
@@ -214,19 +219,25 @@ export default function RecipeDetailScreen() {
           ) : null}
         </View>
 
-        <View style={styles.statRow}>
-          <Stat label="Calories" value={`${resolved.calories}`} />
-          {resolved.cookTimeMin != null ? <Stat label="Cook time" value={`${resolved.cookTimeMin}m`} /> : null}
-          <Stat label="Protein" value={`${resolved.macros.protein}g`} />
-          <Stat label="Carbs" value={`${resolved.macros.carbs}g`} />
-          <Stat label="Fats" value={`${resolved.macros.fats}g`} />
+        {resolved.cookTimeMin != null ? (
+          <Text style={styles.cookTime}>{resolved.cookTimeMin}m cook</Text>
+        ) : null}
+        <View style={styles.tiles}>
+          <NutritionTiles calories={resolved.calories} macros={resolved.macros} />
         </View>
 
-        {locked ? (
-          <LockedRecipeCard onUnlock={handleUnlock} />
-        ) : (
-          <>
-            <Text style={styles.sectionHeader}>Ingredients</Text>
+        {/* Ingredients are visible to everyone; free users see step 1 of a
+            Pro recipe and unlock the rest (teaser). */}
+        <>
+            <View style={styles.sectionHeaderRow}>
+              <Text style={[styles.sectionHeader, styles.sectionHeaderInRow]}>Ingredients</Text>
+              {canFix ? (
+                <TouchableOpacity style={styles.fixBtn} onPress={openFix} activeOpacity={0.8} accessibilityLabel="Fix this recipe">
+                  <Ionicons name="create-outline" size={15} color={COLORS.text} />
+                  <Text style={styles.fixBtnText}>Fix</Text>
+                </TouchableOpacity>
+              ) : null}
+            </View>
             {resolved.ingredients.length === 0 ? (
               <Text style={styles.emptyText}>No ingredients listed.</Text>
             ) : (
@@ -241,7 +252,7 @@ export default function RecipeDetailScreen() {
 
             <Text style={styles.sectionHeader}>Steps</Text>
             {resolved.steps && resolved.steps.length > 0 ? (
-              resolved.steps.map((s, idx) => (
+              (locked ? resolved.steps.slice(0, 1) : resolved.steps).map((s, idx) => (
                 <View key={idx} style={styles.stepRow}>
                   <View style={styles.stepNumber}><Text style={styles.stepNumberText}>{idx + 1}</Text></View>
                   <Text style={styles.stepText}>{s}</Text>
@@ -250,9 +261,11 @@ export default function RecipeDetailScreen() {
             ) : (
               <Text style={styles.emptyText}>No steps included for this recipe.</Text>
             )}
-          </>
-        )}
+            {locked ? <LockedRecipeCard onUnlock={handleUnlock} /> : null}
+        </>
       </ScrollView>
+
+      {fixSheet}
 
       <RecipeAiChat
         recipeName={resolved.name}
@@ -273,9 +286,9 @@ function LockedRecipeCard({ onUnlock }: { onUnlock: () => void }) {
   return (
     <View style={styles.lockedCard}>
       <Ionicons name="lock-closed" size={22} color={COLORS.textSecondary} />
-      <Text style={styles.lockedTitle}>Full recipe locked</Text>
+      <Text style={styles.lockedTitle}>The rest of the steps are locked</Text>
       <Text style={styles.lockedBody}>
-        Upgrade to Pro to see the full ingredient list and step-by-step instructions.
+        Upgrade to Pro to see every step of this recipe.
       </Text>
       <TouchableOpacity style={styles.lockedBtn} onPress={onUnlock} activeOpacity={0.85}>
         <Text style={styles.lockedBtnText}>Unlock with Pro</Text>
@@ -473,14 +486,6 @@ function RecipeAiChat({
   );
 }
 
-function Stat({ label, value }: { label: string; value: string }) {
-  return (
-    <View style={styles.stat}>
-      <Text style={styles.statValue}>{value}</Text>
-      <Text style={styles.statLabel}>{label}</Text>
-    </View>
-  );
-}
 
 function difficultyStyle(d: RecipeDifficulty) {
   switch (d) {
@@ -544,25 +549,6 @@ const styles = StyleSheet.create({
   difficultyPill: { borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4 },
   difficultyText: { fontSize: 12, fontWeight: '700' },
 
-  statRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginTop: 14,
-  },
-  stat: {
-    backgroundColor: COLORS.card,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    borderRadius: 12,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    alignItems: 'center',
-    minWidth: 64,
-    flexGrow: 1,
-  },
-  statValue: { color: COLORS.text, fontSize: 15, fontWeight: '700' },
-  statLabel: { color: COLORS.textSecondary, fontSize: 11, marginTop: 2 },
 
   sectionHeader: {
     color: COLORS.text,
@@ -571,6 +557,16 @@ const styles = StyleSheet.create({
     marginTop: 24,
     marginBottom: 8,
   },
+  cookTime: { color: COLORS.textSecondary, fontSize: 13, marginTop: 8 },
+  tiles: { marginTop: 14 },
+  sectionHeaderRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 24, marginBottom: 8 },
+  sectionHeaderInRow: { marginTop: 0, marginBottom: 0 },
+  fixBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    paddingHorizontal: 12, paddingVertical: 7, borderRadius: 16,
+    borderWidth: 1, borderColor: COLORS.border, backgroundColor: COLORS.card,
+  },
+  fixBtnText: { color: COLORS.text, fontSize: 13, fontWeight: '600' },
 
   ingredientRow: {
     flexDirection: 'row',

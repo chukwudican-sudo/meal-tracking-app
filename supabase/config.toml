@@ -443,6 +443,13 @@ verify_jwt = true
 enabled = true
 verify_jwt = true
 
+# AI correction of the user's own saved recipes (fix-recipe; built-in recipes
+# are not fixable). Same gateway/secret
+# setup; free-scan pool / Pro like fix-meal.
+[functions.fix-recipe]
+enabled = true
+verify_jwt = true
+
 # AI in-recipe chat backend (recipe-assistant). Same gateway/secret setup;
 # text-only. Subscription-mandatory + steps-exist sequencing check for AI
 # recipes. Deliberately unmetered (no rate limit / usage logging).

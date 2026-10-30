@@ -24,6 +24,7 @@ import { createAdminClient, getAuthedUser } from '../_shared/auth.ts';
 import { isEntitled } from '../_shared/entitlement.ts';
 import { isRateLimited, logAiUsage } from '../_shared/rateLimit.ts';
 import { callGeminiJSON, GeminiTimeoutError } from '../_shared/gemini.ts';
+import { recordAiEvent, sanitizeFlowId } from '../_shared/aiEvents.ts';
 import {
   buildHardConstraints,
   buildUserContext,
@@ -39,6 +40,8 @@ const GEMINI_TIMEOUT_MS = 20000; // heavier output (ingredients + numbered steps
 const MAX_NAME_LEN = 120;
 const MAX_DESCRIPTION_LEN = 500;
 const FUNCTION_NAME = 'generate-recipe-steps';
+// Bump on any prompt/schema change so ai_events can compare versions.
+const PROMPT_VERSION = 'steps-2026-10-30';
 const LOG_PREFIX = `[${FUNCTION_NAME}]`;
 
 const MEAL_TYPES = ['Breakfast', 'Lunch', 'Dinner', 'Snacks'] as const;
@@ -75,7 +78,13 @@ interface ConceptInput {
   carbs: number;
   fats: number;
   mealType: MealType | null;
+  // The recipe's existing ingredient list (from the concept / a Fix). When
+  // present, the steps are written from exactly these and the list is
+  // returned unchanged — the user already saw and approved it.
+  ingredients: { name: string; quantity: number; unit: string }[];
 }
+
+const MAX_INGREDIENTS = 40;
 
 function sanitizeMealType(raw: unknown): MealType | null {
   return typeof raw === 'string' && (MEAL_TYPES as readonly string[]).includes(raw)
@@ -105,6 +114,17 @@ function sanitizeConcept(raw: unknown): ConceptInput | null {
     carbs: num(d.carbs),
     fats: num(d.fats),
     mealType: sanitizeMealType(d.mealType),
+    ingredients: (Array.isArray(d.ingredients) ? d.ingredients.slice(0, MAX_INGREDIENTS) : [])
+      .map(i => {
+        const o = (i ?? {}) as Record<string, unknown>;
+        const iName = typeof o.name === 'string' ? o.name.trim().slice(0, MAX_NAME_LEN) : '';
+        const q = Number(o.quantity);
+        return iName
+          // Same fallback as the app (ai/aiEdgeClient mapRecipeIngredients).
+          ? { name: iName, quantity: Number.isFinite(q) && q >= 0 && q <= 100000 ? q : 1, unit: typeof o.unit === 'string' ? o.unit.slice(0, 40) : '' }
+          : null;
+      })
+      .filter((i): i is { name: string; quantity: number; unit: string } => i !== null),
   };
 }
 
@@ -122,9 +142,20 @@ function buildPrompt(
     'quantity, and unit) and clear numbered cooking steps. Keep the recipe ' +
     'consistent with the macro target you are given — the calories and ' +
     'protein/carbs/fats should roughly match what the user already saw, so do ' +
-    'not silently redesign it into a different dish. Allergies and dietary ' +
-    'preferences are HARD constraints you must never violate. Respond with JSON ' +
-    'only, matching the provided schema.';
+    'not silently redesign it into a different dish. Use exactly the foods the ' +
+    'concept names; add only what is needed to cook it the way described (e.g. ' +
+    'a cooking oil to pan-fry, water to boil). For savory cooked dishes list ' +
+    'salt and black pepper with a starting amount, named "Salt (to taste)" and ' +
+    '"Black pepper (to taste)"; never add them to sweet or no-cook dishes. Any ' +
+    'other addition (herbs, spices, sauces, garnishes) must end its name with ' +
+    '" (optional)" and is not counted in the macro target. In the steps, refer ' +
+    'to seasonings plainly ("season with salt and pepper", "add the garlic ' +
+    'powder if using") without repeating their amounts or labels. Use grams ' +
+    '(g) or millilitres (ml) for food amounts; tsp/tbsp only for small ' +
+    'seasonings and oils. Give every cooking temperature in both units, e.g. ' +
+    '"74°C / 165°F" or "200°C / 400°F". Allergies and dietary preferences are ' +
+    'HARD constraints you must never violate. Respond with JSON only, matching ' +
+    'the provided schema.';
 
   const conceptJson = JSON.stringify({
     name: concept.name,
@@ -134,11 +165,16 @@ function buildPrompt(
     carbs: concept.carbs,
     fats: concept.fats,
     mealType: concept.mealType,
+    ...(concept.ingredients.length ? { ingredients: concept.ingredients } : {}),
   });
 
   const parts = [
     userContext ? `User context: ${userContext}` : '',
     hardConstraints ? `Hard constraints (must always respect, no exceptions): ${hardConstraints}` : '',
+    concept.ingredients.length
+      ? 'The ingredient list is final: write the steps using exactly these ingredients and amounts, ' +
+        'add nothing, and return the list unchanged.'
+      : '',
     `Recipe concept to build ingredients + steps for:\n${conceptJson}`,
   ].filter(Boolean);
 
@@ -160,9 +196,11 @@ Deno.serve(async (req: Request) => {
   if (!user) return errorResponse('unauthorized', 'Not signed in', 401);
 
   let concept: ConceptInput | null = null;
+  let flowId: string | null = null;
   try {
     const body = await req.json();
     concept = sanitizeConcept(body);
+    flowId = sanitizeFlowId(body?.flow_id);
   } catch {
     return errorResponse('invalid_input', 'Invalid request body', 400);
   }
@@ -220,6 +258,9 @@ Deno.serve(async (req: Request) => {
 
   const { system, userText } = buildPrompt(concept, profile);
 
+  const startedAt = Date.now();
+  const event = { userId: user.id, functionName: FUNCTION_NAME, promptVersion: PROMPT_VERSION, flowId, startedAt, input: { concept } };
+
   let result: unknown;
   try {
     result = await callGeminiJSON({
@@ -233,6 +274,7 @@ Deno.serve(async (req: Request) => {
     });
   } catch (e) {
     console.error(`${LOG_PREFIX} Gemini call failed:`, e);
+    recordAiEvent(admin, { ...event, success: false, errorCode: e instanceof GeminiTimeoutError ? 'timeout' : 'ai_failed' });
     const message =
       e instanceof GeminiTimeoutError
         ? 'The AI took too long to write the full recipe. Please try again.'
@@ -243,7 +285,14 @@ Deno.serve(async (req: Request) => {
   // Log usage only after success. No consumeFreeScan here — this function is
   // subscription-only and never touches the free-scan pool. Fire-and-forget:
   // it's bookkeeping, so don't block the response on the write.
+  // Code enforces what the prompt asks: a recipe that arrived with
+  // ingredients keeps exactly those (the model only writes the steps).
+  if (concept.ingredients.length && result && typeof result === 'object') {
+    result = { ...(result as Record<string, unknown>), ingredients: concept.ingredients };
+  }
+
   void logAiUsage(admin, user.id, FUNCTION_NAME);
+  recordAiEvent(admin, { ...event, success: true, output: result });
 
   return jsonResponse(result, 200);
 });

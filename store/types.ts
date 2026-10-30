@@ -362,6 +362,9 @@ export interface AppStore {
   // The user's own goals, saved when a plan with its own targets (premade
   // plans) overwrote them; restored when the plan ends. Local only, not synced.
   goalsBeforePlan: UserGoals | null;
+  // Fix memory per saved recipe id (corrections, oldest first). Kept apart
+  // from SavedRecipe because sync pulls replace whole recipes; local only.
+  recipeFixHistory: Record<string, string[]>;
 
   // Ephemeral swap coordination (not persisted across launches in practice).
   pendingSwap: PendingSwap | null;
@@ -437,9 +440,23 @@ export interface AppStore {
   // all future plan meals; keeps eaten/own meals, the user's own templates and
   // past days.
   endPlan: () => void;
+  // Custom Recipe result -> a NEW saved recipe in Recent (never merged with an
+  // existing one by name; a clashing name gets a number). Not bookmarked.
+  addCustomRecipe: (recipe: RecipeConcept) => SavedRecipe;
+  // Steps written later (View Full Recipe) for a saved recipe.
+  setRecipeSteps: (savedId: string, steps: string[]) => void;
   // Undo for a day-level swap: put a day's log back exactly as it was
   // (undefined = the day had no log), then rebuild Planned Ingredients.
   restoreDayLog: (date: string, log: DailyLog | undefined) => void;
+  // Apply a Fix to one of the user's own saved recipes (Custom Recipe / AI /
+  // manual — never the app's built-in recipes, which aren't editable).
+  // Returns the updated recipe and the one it replaced (for Undo).
+  applyRecipeFix: (savedId: string, fixText: string, fixed: {
+    calories: number; macros: Macros; cookTimeMin?: number; ingredients: Ingredient[]; steps: string[];
+  }) => { applied: SavedRecipe; previous: SavedRecipe; previousHistory: string[] } | null;
+  // Undo for applyRecipeFix: restore only the fields the fix changed (other
+  // edits made meanwhile, e.g. a heart, survive) and the fix memory.
+  revertRecipeFix: (savedId: string, previous: SavedRecipe, previousHistory: string[]) => void;
   // Save Customize edits to the current plan and apply them from today on.
   // A premade (Explore) plan is read-only, so it becomes the user's own copy
   // ("My <name>") in savedPlans. Returns the plan now active (its id may differ).

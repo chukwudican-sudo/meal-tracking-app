@@ -23,6 +23,7 @@ import { createAdminClient, getAuthedUser } from '../_shared/auth.ts';
 import { consumeFreeScan, resolveEntitlement } from '../_shared/entitlement.ts';
 import { isRateLimited, logAiUsage } from '../_shared/rateLimit.ts';
 import { callGeminiJSON, GeminiTimeoutError } from '../_shared/gemini.ts';
+import { recordAiEvent, sanitizeFlowId } from '../_shared/aiEvents.ts';
 import {
   buildHardConstraints,
   buildUserContext,
@@ -39,10 +40,13 @@ const RATE_LIMIT = 30; // calls per hour, per user
 const RATE_WINDOW_MS = 60 * 60 * 1000;
 const MAX_DESCRIPTION_LEN = 500;
 const FUNCTION_NAME = 'generate-recipe-concept';
+// Bump on any prompt/schema change so ai_events can compare versions.
+const PROMPT_VERSION = 'concept-2026-10-30';
 const LOG_PREFIX = `[${FUNCTION_NAME}]`;
 
-// A lightweight concept preview — name, short description, and a rough macro
-// estimate. No ingredients / steps (those are generate-recipe-steps' job).
+// The recipe the user sees first: name, description, per-serving macros and
+// the full ingredient list. Steps are written later from exactly these
+// ingredients (generate-recipe-steps, Pro).
 const RESPONSE_SCHEMA = {
   type: 'object',
   properties: {
@@ -52,8 +56,20 @@ const RESPONSE_SCHEMA = {
     protein: { type: 'number' },
     carbs: { type: 'number' },
     fats: { type: 'number' },
+    ingredients: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          name: { type: 'string' },
+          quantity: { type: 'number' },
+          unit: { type: 'string' },
+        },
+        required: ['name', 'quantity', 'unit'],
+      },
+    },
   },
-  required: ['name', 'description', 'calories', 'protein', 'carbs', 'fats'],
+  required: ['name', 'description', 'calories', 'protein', 'carbs', 'fats', 'ingredients'],
 };
 
 const MEAL_TYPES = ['Breakfast', 'Lunch', 'Dinner', 'Snacks'] as const;
@@ -78,12 +94,23 @@ function buildPrompt(
     'recipe the user wants, return a lightweight PREVIEW concept only: a clear, ' +
     'accurately-named recipe (based only on what the user actually described — ' +
     'do not invent a cuisine style, sauce, or flavor descriptor the user did not ' +
-    'mention or clearly imply), a one- or two-sentence description, and a rough ' +
-    'per-serving macro estimate (calories + protein/carbs/fats in grams). Do ' +
-    'NOT return an ingredient list or cooking steps — those come later. Keep ' +
-    'the estimate realistic for a single serving. Allergies and dietary ' +
-    'preferences are HARD constraints you must never violate. Respond with JSON ' +
-    'only, matching the provided schema.';
+    'mention or clearly imply), a one- or two-sentence description of the dish ' +
+    'itself (its foods and how it is cooked — no health, diet or goal claims ' +
+    'such as "muscle-building" or "guilt-free"; never add details the user did ' +
+    'not state, e.g. "boneless" when they only said skinless), a per-serving ' +
+    'macro estimate (calories + protein/carbs/fats in grams), and the ' +
+    'ingredient list for ONE serving (name, quantity, unit). No cooking steps. ' +
+    'Ingredients: list the main foods first and seasonings/oils last. Use ' +
+    'exactly the foods the user described; add only what is needed to cook it ' +
+    'that way (e.g. a cooking oil to pan-fry, water to boil). For savory cooked ' +
+    'dishes add "Salt (to taste)" and "Black pepper (to taste)" with a starting ' +
+    'amount; never add them to sweet or no-cook dishes. Any other addition ' +
+    '(herbs, spices, sauces, garnishes) must end its name with " (optional)" ' +
+    'and is not counted in the macros. Use grams (g) or millilitres (ml) for ' +
+    'food amounts; tsp/tbsp only for small seasonings and oils. The macros must ' +
+    'match these ingredients. Allergies and dietary preferences are HARD ' +
+    'constraints you must never violate. Respond with JSON only, matching the ' +
+    'provided schema.';
 
   const parts = [
     userContext ? `User context: ${userContext}` : '',
@@ -110,10 +137,12 @@ Deno.serve(async (req: Request) => {
   if (!user) return errorResponse('unauthorized', 'Not signed in', 401);
 
   let description = '';
+  let flowId: string | null = null;
   let mealType: MealType | null = null;
   try {
     const body = await req.json();
     description = typeof body?.description === 'string' ? body.description.trim() : '';
+    flowId = sanitizeFlowId(body?.flow_id);
     mealType = sanitizeMealType(body?.mealType);
   } catch {
     return errorResponse('invalid_input', 'Invalid request body', 400);
@@ -175,6 +204,9 @@ Deno.serve(async (req: Request) => {
 
   const { system, userText } = buildPrompt(description, mealType, profile);
 
+  const startedAt = Date.now();
+  const event = { userId: user.id, functionName: FUNCTION_NAME, promptVersion: PROMPT_VERSION, flowId, startedAt, input: { description, mealType } };
+
   let result: unknown;
   try {
     result = await callGeminiJSON({
@@ -187,6 +219,7 @@ Deno.serve(async (req: Request) => {
     });
   } catch (e) {
     console.error(`${LOG_PREFIX} Gemini call failed:`, e);
+    recordAiEvent(admin, { ...event, success: false, errorCode: e instanceof GeminiTimeoutError ? 'timeout' : 'ai_failed' });
     const message =
       e instanceof GeminiTimeoutError
         ? 'The AI took too long to sketch your recipe. Please try again.'
@@ -200,6 +233,7 @@ Deno.serve(async (req: Request) => {
   // it. consumeFreeScan stays awaited: it's the atomic guard enforcing the
   // free-scan limit and must register before we respond.
   void logAiUsage(admin, user.id, FUNCTION_NAME);
+  recordAiEvent(admin, { ...event, success: true, output: result });
   if (!entitlement.isSubscriber) {
     await consumeFreeScan(admin, user.id);
   }

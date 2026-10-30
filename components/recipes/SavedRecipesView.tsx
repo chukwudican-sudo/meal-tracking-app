@@ -21,14 +21,13 @@ import { RecipeCard } from '@/components/recipes/RecipeCard';
 import { COLORS } from '@/constants/theme';
 import { toRecipeInputFromSaved, useRecipeActions } from '@/hooks/useRecipeActions';
 import type {
-  CustomizeDraft,
-  PendingSwap,
   RecipeCategory,
   RecipeTemplate,
   SavedRecipe,
 } from '@/store/types';
 import { useMealStore } from '@/store/useMealStore';
 import { useUndoStore } from '@/store/useUndoStore';
+import { applyRecipeSwap } from '@/lib/recipeSwap';
 
 type TabKey = 'all' | 'saved' | 'recent' | 'recipes';
 
@@ -94,12 +93,7 @@ export function SavedRecipesView({ mode, context, swapFilter = 'All', onBeforeNa
   const recipes = useMealStore(s => s.recipes);
   const viewedRecipeIds = useMealStore(s => s.viewedRecipeIds);
   const pendingSwap = useMealStore(s => s.pendingSwap);
-  const customizeDraft = useMealStore(s => s.customizeDraft);
-  const swapMealInDay = useMealStore(s => s.swapMealInDay);
-  const setCustomizeDraft = useMealStore(s => s.setCustomizeDraft);
   const clearPendingSwap = useMealStore(s => s.clearPendingSwap);
-  const ensureRecipeSaved = useMealStore(s => s.ensureRecipeSaved);
-  const restoreDayLog = useMealStore(s => s.restoreDayLog);
   const showUndo = useUndoStore(s => s.showUndo);
   const { addToToday } = useRecipeActions();
   const insets = useSafeAreaInsets();
@@ -204,19 +198,9 @@ export function SavedRecipesView({ mode, context, swapFilter = 'All', onBeforeNa
       openPreview(s);
       return;
     }
-    // Snapshot what the swap replaces so Undo can put it back exactly.
-    const swap = pendingSwap;
-    const prevDayLog = swap.type === 'daily' ? useMealStore.getState().logs[swap.date] : undefined;
-    const prevDraft = customizeDraft;
-    executeSwap(swap, s, { swapMealInDay, setCustomizeDraft, customizeDraft, ensureRecipeSaved });
+    const undo = applyRecipeSwap(pendingSwap, s);
     clearPendingSwap();
-    showUndo({
-      message: `Swapped to ${s.name}`,
-      undo: () => {
-        if (swap.type === 'daily') restoreDayLog(swap.date, prevDayLog);
-        else setCustomizeDraft(prevDraft);
-      },
-    });
+    showUndo({ message: `Swapped to ${s.name}`, undo });
     if (router.canGoBack()) router.back();
     else router.replace('/(tabs)/recipes');
   };
@@ -378,71 +362,6 @@ export function SavedRecipesView({ mode, context, swapFilter = 'All', onBeforeNa
   );
 }
 
-// ─── Swap execution ───────────────────────────────────────────────────────────
-
-function executeSwap(
-  pending: PendingSwap,
-  recipe: SavedRecipe,
-  deps: {
-    swapMealInDay: ReturnType<typeof useMealStore.getState>['swapMealInDay'];
-    setCustomizeDraft: (draft: CustomizeDraft | null) => void;
-    customizeDraft: CustomizeDraft | null;
-    ensureRecipeSaved: ReturnType<typeof useMealStore.getState>['ensureRecipeSaved'];
-  },
-) {
-  if (pending.type === 'daily') {
-    deps.swapMealInDay(
-      pending.date,
-      { slotId: pending.slotId, slotName: pending.slotName, time: pending.time },
-      {
-        recipeId: recipe.recipeId,
-        name: recipe.name,
-        calories: recipe.calories,
-        cookTimeMin: recipe.cookTimeMin,
-        macros: recipe.macros,
-        ingredients: recipe.ingredients,
-        steps: recipe.steps,
-        category: recipe.category,
-        source: recipe.source,
-      },
-    );
-    return;
-  }
-
-  const draft = deps.customizeDraft;
-  if (!draft) return;
-  const planRecipeId = recipe.recipeId ?? recipe.id;
-  const nextDays = draft.draftPlan.days.map((day, di) => {
-    if (di !== pending.dayIdx) return day;
-    let found = false;
-    const updated = day.map(m => {
-      if (m.slotName === pending.slotName && m.time === pending.time) {
-        found = true;
-        return { ...m, recipeId: planRecipeId, recipeName: recipe.name };
-      }
-      return m;
-    });
-    if (!found) {
-      updated.push({ slotName: pending.slotName, time: pending.time, recipeId: planRecipeId, recipeName: recipe.name });
-    }
-    return updated.sort((a, b) => a.time.localeCompare(b.time));
-  });
-  deps.ensureRecipeSaved({
-    recipeId: recipe.recipeId,
-    name: recipe.name,
-    category: recipe.category,
-    calories: recipe.calories,
-    cookTimeMin: recipe.cookTimeMin,
-    macros: recipe.macros,
-    ingredients: recipe.ingredients,
-    steps: recipe.steps,
-    source: recipe.source,
-  });
-  deps.setCustomizeDraft({
-    planId: draft.planId,
-    draftPlan: { ...draft.draftPlan, days: nextDays },
-  });
-}
 
 function byAddedAtDesc(a: SavedRecipe, b: SavedRecipe) {
   return (b.addedAt || '').localeCompare(a.addedAt || '');

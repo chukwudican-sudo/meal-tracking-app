@@ -108,6 +108,9 @@ Still open:
 18d. **"Missed" doesn't sync** (server only stores is_completed) — on another device/reinstall past missed meals show
     as not eaten. Needs a status column.
 18e. Single-device assumption: ending a plan on one phone doesn't remove it on another (pull ignores a null pointer).
+18h. **Remove recipes you made / clear Recent (later, Alex Oct 30):** Custom Recipe now saves every result to Recent
+    and nothing can be removed. Build safely: a recipe used in a plan must not be deleted silently (plan restarts
+    would fall back to made-up nutrition via fallbackNutrition).
 18g. **Revisit the Add Meal disclaimer (•••) in a later version** (Alex, Oct 28): wording was only corrected
     (voice section removed, data now synced, AI = Gemini); rewrite it alongside the privacy policy.
 18f. **Barcode coverage (launch):** Open Food Facts misses many North American products (e.g. Diet Coke

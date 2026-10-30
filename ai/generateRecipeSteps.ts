@@ -28,6 +28,11 @@ export interface GenerateRecipeStepsParams {
   carbs: number;
   fats: number;
   mealType?: RecipeCategory;
+  // Same id as the concept call, for the server's ai_events log.
+  flowId?: string;
+  // The recipe's final ingredient list: the steps are written from exactly
+  // these, and the server returns them unchanged.
+  ingredients?: Ingredient[];
 }
 
 export interface RecipeStepsResult {
@@ -74,6 +79,8 @@ export async function generateRecipeSteps(
     carbs: params.carbs,
     fats: params.fats,
     mealType: params.mealType,
+    flow_id: params.flowId,
+    ingredients: params.ingredients?.map(i => ({ name: i.name, quantity: i.quantity, unit: i.unit })),
   };
 
   const data = await invokeAIFunction('generate-recipe-steps', body, {

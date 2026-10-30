@@ -1,5 +1,5 @@
 import { router, useLocalSearchParams } from 'expo-router';
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   ScrollView,
   StyleSheet,
@@ -19,6 +19,17 @@ import {
 } from '@/hooks/useRecipeActions';
 import type { Ingredient, Macros, RecipeDifficulty } from '@/store/types';
 import { useMealStore } from '@/store/useMealStore';
+import { useRecipeFix } from '@/components/recipes/useRecipeFix';
+import { NutritionTiles } from '@/components/recipes/NutritionTiles';
+import { ProgressiveLoader } from '@/components/ProgressiveLoader';
+import { AIError, aiErrorMessage } from '@/ai/aiEdgeClient';
+import { generateRecipeSteps } from '@/ai/generateRecipeSteps';
+import { recipeRequiresPro } from '@/lib/entitlements';
+import { openPaywall } from '@/lib/paywall';
+import { applyRecipeSwap } from '@/lib/recipeSwap';
+import { useEntitlementStore } from '@/store/useEntitlementStore';
+import { useToastStore } from '@/store/useToastStore';
+import { useUndoStore } from '@/store/useUndoStore';
 
 interface ResolvedRecipe {
   source: 'premade' | 'saved';
@@ -38,8 +49,16 @@ interface ResolvedRecipe {
 const KEY_INGREDIENT_COUNT = 4;
 
 export default function RecipePreviewScreen() {
-  const params = useLocalSearchParams<{ id: string }>();
+  const params = useLocalSearchParams<{ id: string; swap?: string }>();
   const id = (params.id || '').toString();
+  // Opened from Custom Recipe during a swap: offer "Use this recipe".
+  const swapMode = params.swap === 'true';
+  const pendingSwap = useMealStore(s => s.pendingSwap);
+  const clearPendingSwap = useMealStore(s => s.clearPendingSwap);
+  const setRecipeSteps = useMealStore(s => s.setRecipeSteps);
+  const showUndo = useUndoStore(s => s.showUndo);
+  const showToast = useToastStore(s => s.showToast);
+  const [writingSteps, setWritingSteps] = useState(false);
 
   const recipes = useMealStore(s => s.recipes);
   const savedRecipes = useMealStore(s => s.savedRecipes);
@@ -107,6 +126,81 @@ export default function RecipePreviewScreen() {
     return saved ? toRecipeInputFromSaved(saved) : null;
   }, [resolved, recipes, savedRecipes]);
 
+  // Fix: only the user's own recipes (rules live in useRecipeFix).
+  const { canFix, openFix, fixSheet } = useRecipeFix(resolved?.source === 'saved' ? resolved.id : undefined);
+
+  const openFullRecipe = (recipeId: string) =>
+    router.push({ pathname: '/recipe/detail/[id]', params: { id: recipeId } });
+
+  // View Full Recipe: open it when the steps exist; otherwise (a Custom Recipe
+  // that only has ingredients) write the steps from exactly these ingredients
+  // first. Writing steps is the Pro part.
+  const handleViewFull = async () => {
+    if (!resolved || writingSteps) return;
+    const saved = useMealStore.getState().savedRecipes.find(r => r.id === resolved.id);
+    // Only an AI recipe that has ingredients but no steps yet gets its steps
+    // written; everything else (built-in, manual, already complete) just opens.
+    const needsSteps = !!saved && saved.source === 'ai' && saved.ingredients.length > 0
+      && !(saved.steps && saved.steps.length > 0);
+    if (!saved || !needsSteps) {
+      openFullRecipe(resolved.id);
+      return;
+    }
+    // Read live: a retry after the paywall runs from an older closure.
+    if (recipeRequiresPro({ source: saved.source }) && !useEntitlementStore.getState().isPro) {
+      openPaywall({
+        reason: 'premium_feature',
+        headline: 'Unlock the full recipe with Pro',
+        onSuccess: () => void handleViewFull(),
+      });
+      return;
+    }
+    setWritingSteps(true);
+    try {
+      const full = await generateRecipeSteps({
+        name: saved.name,
+        calories: saved.calories,
+        protein: saved.macros.protein,
+        carbs: saved.macros.carbs,
+        fats: saved.macros.fats,
+        mealType: saved.category,
+        ingredients: saved.ingredients,
+        flowId: saved.id,
+      });
+      if (full.steps.length === 0) throw new Error('No steps returned');
+      setRecipeSteps(saved.id, full.steps);
+      openFullRecipe(saved.id);
+    } catch (e) {
+      console.warn('[recipe] writing steps failed:', e);
+      if (e instanceof AIError && e.code === 'not_premium') {
+        openPaywall({
+          reason: 'premium_feature',
+          headline: 'Unlock the full recipe with Pro',
+          onSuccess: () => void handleViewFull(),
+        });
+        return;
+      }
+      showToast(aiErrorMessage(e, 'Could not write the full recipe right now. Please try again.'));
+    } finally {
+      setWritingSteps(false);
+    }
+  };
+
+  // Swap from Custom Recipe: put this recipe in the slot the swap came from,
+  // then return there (this page replaced Custom Recipe, which sits on top of
+  // the recipe picker).
+  const canUseForSwap = swapMode && !!pendingSwap && resolved?.source === 'saved';
+  const handleUseForSwap = () => {
+    if (!resolved || !pendingSwap) return;
+    const saved = useMealStore.getState().savedRecipes.find(r => r.id === resolved.id);
+    if (!saved) return;
+    const undo = applyRecipeSwap(pendingSwap, saved);
+    clearPendingSwap();
+    showUndo({ message: `Swapped to ${saved.name}`, undo });
+    if (router.canDismiss()) router.dismiss(2);
+    else handleBack();
+  };
+
   if (!resolved || !recipeInput) {
     return (
       <Screen edges={['top', 'bottom']}>
@@ -147,12 +241,8 @@ export default function RecipePreviewScreen() {
           ) : null}
         </View>
 
-        <Text style={styles.calories}>{resolved.calories} cal</Text>
-
-        <View style={styles.macroRow}>
-          <MacroChip label="Protein" value={`${resolved.macros.protein}g`} color={COLORS.blue} />
-          <MacroChip label="Carbs" value={`${resolved.macros.carbs}g`} color={COLORS.green} />
-          <MacroChip label="Fats" value={`${resolved.macros.fats}g`} color={COLORS.orange} />
+        <View style={styles.tiles}>
+          <NutritionTiles calories={resolved.calories} macros={resolved.macros} />
         </View>
 
         <Text style={styles.sectionHeader}>Key ingredients</Text>
@@ -169,15 +259,36 @@ export default function RecipePreviewScreen() {
         )}
       </ScrollView>
 
-      <View style={[styles.footer, { paddingBottom: footerBottomPad }]}>
-        <TouchableOpacity
-          onPress={() => router.push({ pathname: '/recipe/detail/[id]', params: { id: resolved.id } })}
-          style={styles.viewBtn}
-          activeOpacity={0.85}
-        >
-          <Text style={styles.viewBtnText}>View Full Recipe</Text>
-        </TouchableOpacity>
+      {writingSteps ? (
+        <View style={styles.writing}>
+          <ProgressiveLoader
+            messages={['Writing the steps…', 'Using your ingredients…', 'Almost ready…']}
+            variant="inline"
+          />
+        </View>
+      ) : null}
+      <View style={[styles.footer, styles.footerRow, { paddingBottom: footerBottomPad }]}>
+        {canFix ? (
+          <TouchableOpacity onPress={openFix} disabled={writingSteps} style={[styles.footerBtn, styles.fixBtn]} activeOpacity={0.85}>
+            <Text style={styles.fixBtnText}>Fix</Text>
+          </TouchableOpacity>
+        ) : null}
+        {canUseForSwap ? (
+          <TouchableOpacity onPress={handleUseForSwap} disabled={writingSteps} style={[styles.footerBtn, styles.viewBtn]} activeOpacity={0.85}>
+            <Text style={styles.viewBtnText}>Use this recipe</Text>
+          </TouchableOpacity>
+        ) : (
+          <TouchableOpacity
+            onPress={() => void handleViewFull()}
+            disabled={writingSteps}
+            style={[styles.footerBtn, styles.viewBtn, writingSteps && styles.btnDisabled]}
+            activeOpacity={0.85}
+          >
+            <Text style={styles.viewBtnText}>View Full Recipe</Text>
+          </TouchableOpacity>
+        )}
       </View>
+      {fixSheet}
     </Screen>
   );
 }
@@ -228,14 +339,6 @@ function Header({
   );
 }
 
-function MacroChip({ label, value, color }: { label: string; value: string; color: string }) {
-  return (
-    <View style={[styles.macroChip, { borderColor: color + '55' }]}>
-      <Text style={[styles.macroChipLabel, { color }]}>{label}</Text>
-      <Text style={styles.macroChipValue}>{value}</Text>
-    </View>
-  );
-}
 
 function formatQty(ing: Ingredient): string {
   if (ing.quantity == null) return '';
@@ -291,20 +394,7 @@ const styles = StyleSheet.create({
   tagPillText: { color: COLORS.green, fontSize: 12, fontWeight: '700' },
   meta: { color: COLORS.textSecondary, fontSize: 13 },
 
-  calories: { color: COLORS.text, fontSize: 16, fontWeight: '600', marginTop: 12 },
 
-  macroRow: { flexDirection: 'row', gap: 8, marginTop: 12 },
-  macroChip: {
-    flex: 1,
-    backgroundColor: COLORS.card,
-    borderWidth: 1,
-    borderRadius: 12,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    alignItems: 'center',
-  },
-  macroChipLabel: { fontSize: 12, fontWeight: '700' },
-  macroChipValue: { color: COLORS.text, fontSize: 14, fontWeight: '600', marginTop: 2 },
 
   sectionHeader: {
     color: COLORS.text,
@@ -343,6 +433,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   viewBtnText: { color: '#0E1A12', fontWeight: '700', fontSize: 15 },
+  btnDisabled: { opacity: 0.5 },
+  tiles: { marginTop: 14 },
+  writing: { paddingHorizontal: 16, paddingVertical: 10 },
+  // Fix | View Full Recipe — same pattern as Custom Recipe's Fix | Generate.
+  footerRow: { flexDirection: 'row', gap: 12 },
+  footerBtn: { flex: 1 },
+  fixBtn: {
+    backgroundColor: COLORS.card, borderWidth: 1, borderColor: COLORS.border,
+    paddingVertical: 14, borderRadius: 12, alignItems: 'center',
+  },
+  fixBtnText: { color: COLORS.text, fontWeight: '700', fontSize: 15 },
 
   empty: { flex: 1, padding: 32, alignItems: 'center', justifyContent: 'center' },
   emptyText: { color: COLORS.textSecondary, fontSize: 14, textAlign: 'center' },

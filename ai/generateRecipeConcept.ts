@@ -9,7 +9,7 @@
 // ./aiEdgeClient.
 
 import type { RecipeCategory } from '@/store/types';
-import { AIError, type AIErrorCode, invokeAIFunction, toInt } from './aiEdgeClient';
+import { AIError, type AIErrorCode, invokeAIFunction, mapRecipeIngredients, toInt } from './aiEdgeClient';
 import type { RecipeConcept } from './types';
 
 export type GenerateRecipeConceptErrorCode = AIErrorCode;
@@ -31,6 +31,8 @@ export type ConceptPreview = RecipeConcept & { description: string };
 export interface GenerateRecipeConceptParams {
   description: string;
   mealType?: RecipeCategory;
+  // Links this concept to its steps call in the server's ai_events log.
+  flowId?: string;
 }
 
 function mapConcept(
@@ -48,10 +50,11 @@ function mapConcept(
       carbs: toInt(data.carbs),
       fats: toInt(data.fats),
     },
-    ingredients: [],
+    ingredients: mapRecipeIngredients(data.ingredients),
     steps: undefined,
   };
 }
+
 
 export async function generateRecipeConcept(
   params: GenerateRecipeConceptParams,
@@ -60,6 +63,7 @@ export async function generateRecipeConcept(
   const body = {
     description: params.description.trim().slice(0, 500),
     mealType: params.mealType,
+    flow_id: params.flowId,
   };
 
   const data = await invokeAIFunction('generate-recipe-concept', body, {

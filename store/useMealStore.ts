@@ -348,6 +348,12 @@ export function isPlanTemplate(t: Pick<MealTemplate, 'id'>): boolean {
   return t.id.startsWith('tpl-plan-') || SEED_TEMPLATES.some(s => s.id === t.id);
 }
 
+// Recipes the user made (Custom Recipe / AI / manual) can be fixed; the
+// app's built-in recipes ('premade') are reference content and can't.
+export function isOwnRecipe(r: Pick<SavedRecipe, 'source'>): boolean {
+  return r.source !== 'premade';
+}
+
 // One rule for "this meal is the user's, keep it" (plan activation + end).
 function isUserOwnedMeal(m: MealEntry, ownTemplateIds: Set<string>): boolean {
   return !!m.isAdHoc || m.status === 'completed' || (!!m.templateId && ownTemplateIds.has(m.templateId));
@@ -631,6 +637,7 @@ export const useMealStore = create<AppStore>()(
       savedPlans:   [],
       viewedRecipeIds: [],
       planAvoidFoods: [],
+      recipeFixHistory: {},
       goalsBeforePlan: null,
       pendingSwap:    null,
       customizeDraft: null,
@@ -956,6 +963,7 @@ export const useMealStore = create<AppStore>()(
           library:      [],
           grocery:      INITIAL_GROCERY,
           savedRecipes: [],
+          recipeFixHistory: {},
           weightLog:    [],
           savedPlans:   [],
           viewedRecipeIds: [],
@@ -1427,9 +1435,10 @@ export const useMealStore = create<AppStore>()(
       },
 
       removeSavedRecipe: (id) => {
-        set(state => ({
-          savedRecipes: state.savedRecipes.filter(r => r.id !== id),
-        }));
+        set(state => {
+          const { [id]: _dropped, ...recipeFixHistory } = state.recipeFixHistory;
+          return { savedRecipes: state.savedRecipes.filter(r => r.id !== id), recipeFixHistory };
+        });
       },
 
       markRecipeViewed: (id) => {
@@ -1847,6 +1856,75 @@ export const useMealStore = create<AppStore>()(
       setPendingRecipeConcept: (concept) => set({ pendingRecipeConcept: concept }),
       clearPendingRecipeConcept: () => set({ pendingRecipeConcept: null }),
 
+      applyRecipeFix: (savedId, fixText, fixed) => {
+        const state = get();
+        const own = state.savedRecipes.find(r => r.id === savedId && isOwnRecipe(r));
+        if (!own) return null;
+        // The name stays: plans and saved-recipe lookups refer to recipes by
+        // name, so a Fix never renames.
+        const updated: SavedRecipe = {
+          ...own,
+          calories: fixed.calories,
+          macros: fixed.macros,
+          cookTimeMin: fixed.cookTimeMin ?? own.cookTimeMin,
+          ingredients: cloneIngredients(fixed.ingredients),
+          steps: [...fixed.steps],
+        };
+        const previousHistory = state.recipeFixHistory[own.id] ?? [];
+        set({
+          savedRecipes: state.savedRecipes.map(r => (r.id === own.id ? updated : r)),
+          recipeFixHistory: { ...state.recipeFixHistory, [own.id]: [...previousHistory, fixText] },
+        });
+        return { applied: updated, previous: own, previousHistory };
+      },
+
+      revertRecipeFix: (savedId, previous, previousHistory) => {
+        set(state => ({
+          savedRecipes: state.savedRecipes.map(r =>
+            r.id === savedId
+              ? {
+                  ...r,
+                  calories: previous.calories,
+                  macros: previous.macros,
+                  cookTimeMin: previous.cookTimeMin,
+                  ingredients: previous.ingredients,
+                  steps: previous.steps,
+                }
+              : r,
+          ),
+          recipeFixHistory: { ...state.recipeFixHistory, [savedId]: previousHistory },
+        }));
+      },
+
+      addCustomRecipe: (recipe) => {
+        const state = get();
+        const taken = new Set([...state.savedRecipes, ...state.recipes].map(r => r.name.trim().toLowerCase()));
+        let name = recipe.name;
+        for (let n = 2; taken.has(name.trim().toLowerCase()); n++) name = `${recipe.name} ${n}`;
+        const saved: SavedRecipe = {
+          id: newId(),
+          name,
+          category: recipe.category,
+          calories: recipe.calories,
+          cookTimeMin: recipe.cookTimeMin,
+          macros: recipe.macros,
+          ingredients: cloneIngredients(recipe.ingredients),
+          steps: recipe.steps && recipe.steps.length > 0 ? [...recipe.steps] : undefined,
+          difficulty: recipe.difficulty,
+          source: 'ai',
+          favourited: false,
+          addedAt: new Date().toISOString(),
+        };
+        set({ savedRecipes: [saved, ...state.savedRecipes] });
+        return saved;
+      },
+
+      setRecipeSteps: (savedId, steps) => {
+        set(state => ({
+          savedRecipes: state.savedRecipes.map(r => (r.id === savedId ? { ...r, steps: [...steps] } : r)),
+        }));
+      },
+
       restoreDayLog: (date, log) => {
         set(state => {
           const logs = { ...state.logs };
@@ -2184,6 +2262,7 @@ export const useMealStore = create<AppStore>()(
           savedPlans:   p.savedPlans   ?? current.savedPlans ?? [],
           viewedRecipeIds: p.viewedRecipeIds ?? current.viewedRecipeIds ?? [],
           planAvoidFoods: p.planAvoidFoods ?? current.planAvoidFoods ?? [],
+          recipeFixHistory: p.recipeFixHistory ?? {},
           goalsBeforePlan: p.goalsBeforePlan ?? null,
           // Ephemeral swap coordination — always start clean on launch so a
           // stale persisted swap target can never fire on the wrong screen.

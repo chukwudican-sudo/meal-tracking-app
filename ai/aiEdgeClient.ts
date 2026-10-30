@@ -52,6 +52,28 @@ export interface InvokeAIOptions {
 // race and reaches the client first — this is just the worst-case ceiling.
 export const INVOKE_TIMEOUT_MS = 35000;
 
+// Ingredient list from an AI recipe response (untrusted): names capped, a
+// real 0 kept ("to taste"), anything missing/invalid -> 1. One parser for
+// every recipe wrapper.
+export function mapRecipeIngredients(raw: unknown): Ingredient[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((o: Record<string, unknown>): Ingredient | null => {
+      const name = String(o?.name ?? '').trim().slice(0, 120);
+      if (!name) return null;
+      const quantity = Number(o.quantity);
+      return {
+        id: newId(),
+        name,
+        quantity: Number.isFinite(quantity) && quantity >= 0 && quantity <= 100000 ? quantity : 1,
+        unit: String(o.unit ?? '').slice(0, 40),
+        servings: 1,
+      };
+    })
+    .filter((i): i is Ingredient => i !== null)
+    .slice(0, 40);
+}
+
 // User-facing text for a failed AI call. Callers handle not_premium first (it
 // opens the paywall); everything else shows the server's own message when it
 // sent one, so a failure is never silent or generic.
