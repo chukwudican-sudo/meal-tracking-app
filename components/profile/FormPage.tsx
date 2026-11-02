@@ -1,5 +1,8 @@
-import { router } from 'expo-router';
+import { usePreventRemove } from '@react-navigation/native';
+import { router, useNavigation } from 'expo-router';
+import { useRef, useState } from 'react';
 import {
+  Alert,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -17,8 +20,14 @@ interface FormPageProps {
   children: React.ReactNode;
   // Optional sticky footer button (e.g. "Save"). Hidden if not provided.
   saveLabel?: string;
-  onSave?: () => void;
+  // Return false when the save was refused (validation) and the page stays.
+  onSave?: () => void | false;
   saveDisabled?: boolean;
+  // Edit forms pass this (see useIsDirty): Save then sits top-right in the
+  // header, greyed out until something changes (the iOS/Instagram pattern).
+  // Without it, the button is the sticky footer (e.g. Feedback's Submit).
+  // Screens of switches/choices save on tap and have no button.
+  dirty?: boolean;
   onBack?: () => void;
   rightAction?: React.ReactNode;
   // Render extra content above the scroll body (banners, hero rows, etc).
@@ -31,10 +40,36 @@ export function FormPage({
   saveLabel,
   onSave,
   saveDisabled,
+  dirty,
   onBack,
   rightAction,
   topSlot,
 }: FormPageProps) {
+  const navigation = useNavigation();
+  const showSave = !!(saveLabel && onSave);
+  const headerSave = showSave && dirty !== undefined;
+  const headerSaveEnabled = dirty === true && !saveDisabled;
+  // Leaving with unsaved edits (back arrow or swipe) asks first. Save itself
+  // navigates back while the form is still dirty, so after a save the page
+  // may leave freely. The flag can't be cleared right after onSave():
+  // expo-router queues router.back() and runs it later, so the leave check
+  // fires after onSave has returned (that showed the prompt on Save, Nov 2).
+  const saved = useRef(false);
+  usePreventRemove(dirty === true, ({ data }) => {
+    if (saved.current) {
+      navigation.dispatch(data.action);
+      return;
+    }
+    Alert.alert('Discard changes?', "Your changes haven't been saved.", [
+      { text: 'Keep editing', style: 'cancel' },
+      { text: 'Discard', style: 'destructive', onPress: () => navigation.dispatch(data.action) },
+    ]);
+  });
+  const handleSave = () => {
+    saved.current = true;
+    if (onSave?.() === false) saved.current = false;
+  };
+
   const handleBack = () => {
     if (onBack) return onBack();
     if (router.canGoBack()) router.back();
@@ -50,14 +85,28 @@ export function FormPage({
         <View style={styles.header}>
           <TouchableOpacity
             onPress={handleBack}
-            style={styles.iconBtn}
+            style={[styles.iconBtn, headerSave && styles.sideWide, headerSave && styles.backBtnWide]}
             hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
             activeOpacity={0.7}
           >
             <Text style={styles.backArrow}>←</Text>
           </TouchableOpacity>
           <Text style={styles.title} numberOfLines={1}>{title}</Text>
-          <View style={styles.iconBtn}>{rightAction}</View>
+          {headerSave ? (
+            <TouchableOpacity
+              onPress={handleSave}
+              disabled={!headerSaveEnabled}
+              style={[styles.iconBtn, styles.sideWide, styles.headerSaveBtn]}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              activeOpacity={0.7}
+            >
+              <Text style={[styles.headerSaveText, !headerSaveEnabled && styles.headerSaveTextOff]}>
+                {saveLabel}
+              </Text>
+            </TouchableOpacity>
+          ) : (
+            <View style={styles.iconBtn}>{rightAction}</View>
+          )}
         </View>
 
         {topSlot}
@@ -70,12 +119,12 @@ export function FormPage({
           {children}
         </ScrollView>
 
-        {saveLabel && onSave ? (
+        {showSave && !headerSave ? (
           <View style={styles.footer}>
             <TouchableOpacity
               style={[styles.saveBtn, saveDisabled && styles.saveBtnDisabled]}
               disabled={saveDisabled}
-              onPress={onSave}
+              onPress={handleSave}
               activeOpacity={0.85}
             >
               <Text style={styles.saveBtnText}>{saveLabel}</Text>
@@ -85,6 +134,12 @@ export function FormPage({
       </KeyboardAvoidingView>
     </Screen>
   );
+}
+
+// True once `values` differ from what they were on first render.
+export function useIsDirty(values: unknown): boolean {
+  const [initial] = useState(() => JSON.stringify(values));
+  return JSON.stringify(values) !== initial;
 }
 
 // ─── Reusable form primitives ────────────────────────────────────────────────
@@ -129,6 +184,12 @@ const styles = StyleSheet.create({
     borderBottomColor: COLORS.border,
   },
   iconBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  // Both sides match so the title stays centred next to "Save".
+  sideWide: { width: 56 },
+  backBtnWide: { alignItems: 'flex-start', paddingLeft: 9 }, // arrow stays where it was
+  headerSaveBtn: { alignItems: 'flex-end' },
+  headerSaveText: { color: COLORS.green, fontSize: 16, fontWeight: '700' },
+  headerSaveTextOff: { color: COLORS.textMuted },
   backArrow: { color: COLORS.text, fontSize: 22, fontWeight: '600' },
   title: { flex: 1, color: COLORS.text, fontSize: 18, fontWeight: '700', textAlign: 'center' },
 

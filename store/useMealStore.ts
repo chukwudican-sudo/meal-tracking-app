@@ -338,6 +338,16 @@ export function countOwnFutureMeals(
   return inLogs + own;
 }
 
+// "This profile holds the user's real data" (onboarding answers or a pulled
+// account): a name, or any onboarding answer — accounts from Apple/Google
+// sign-in may have no name. Used by the sync engine's first-login decision.
+// (The login gate's own `!!firstName` check is deliberately untouched —
+// widening it is a separate pass Alex deferred.)
+export function profileHasData(p: Partial<UserProfile> | undefined | null): boolean {
+  if (!p) return false;
+  return !!p.firstName || p.goalType != null || p.heightCm != null || p.weightKg != null || p.age != null;
+}
+
 // The single test for "does this template belong to the plan?". Plan
 // templates are always minted as `tpl-plan-…` (buildTemplatesFromPlan); the
 // demo seeds (exact ids in SEED_TEMPLATES) act as a plan too. Anything else is

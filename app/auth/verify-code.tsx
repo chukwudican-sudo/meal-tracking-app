@@ -1,10 +1,12 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { router } from 'expo-router';
+import { useEffect, useState } from 'react';
 import { KeyboardAvoidingView, Platform, StyleSheet, TouchableOpacity, View } from 'react-native';
 
 import { EmailCodeVerification } from '@/components/auth/EmailCodeVerification';
 import { Screen } from '@/components/Screen';
 import { COLORS } from '@/constants/theme';
+import { getPendingCredentials } from '@/lib/pendingCredentials';
 import { useMealStore } from '@/store/useMealStore';
 import { useToastStore } from '@/store/useToastStore';
 
@@ -13,7 +15,24 @@ import { useToastStore } from '@/store/useToastStore';
 // Dismissing without verifying is fine — pendingEmailVerification keeps the
 // offline-first access it already granted.
 export default function VerifyCodeScreen() {
-  const email = useMealStore(s => s.profile.email) ?? '';
+  const storedEmail = useMealStore(s => s.profile.email) ?? '';
+  // Codes go to the address the account was created with (kept with the
+  // pending signup credentials), not the profile copy, which older builds let
+  // users edit in Settings.
+  const [signupEmail, setSignupEmail] = useState<string | null>(null);
+  // Hold the code UI until the lookup settles so Resend/Verify can't fire on
+  // the stale address first.
+  const [emailReady, setEmailReady] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    void getPendingCredentials().then(c => {
+      if (!alive) return;
+      if (c?.email) setSignupEmail(c.email);
+      setEmailReady(true);
+    });
+    return () => { alive = false; };
+  }, []);
+  const email = signupEmail ?? storedEmail;
   const showToast = useToastStore(s => s.showToast);
 
   const dismiss = () => {
@@ -40,7 +59,7 @@ export default function VerifyCodeScreen() {
           </TouchableOpacity>
         </View>
         <View style={styles.body}>
-          <EmailCodeVerification email={email} onVerified={handleVerified} />
+          {emailReady ? <EmailCodeVerification email={email} onVerified={handleVerified} /> : null}
         </View>
       </KeyboardAvoidingView>
     </Screen>

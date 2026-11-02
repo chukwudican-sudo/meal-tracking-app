@@ -451,6 +451,23 @@ export async function serverNow(): Promise<string> {
   }
 }
 
+// Just the profile fields profileHasData reads, for the first-login restore
+// decision. null when there's no users row yet. Throws on error or after 10s so
+// a failed read can't be mistaken for "new account" and can't hang the login.
+export async function fetchServerProfile(userId: string): Promise<ServerSnapshot['profile'] | null> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 10_000);
+  try {
+    const { data, error } = await supabase
+      .from('users').select('first_name, goal_type, height_value, current_weight_value, age')
+      .eq('id', userId).abortSignal(ctrl.signal).maybeSingle();
+    throwIf(error, 'users.select');
+    return data ? M.usersRowToProfileGoals(data).profile : null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // Returns true when the user has no server-side data yet (fresh account).
 export async function serverIsEmpty(userId: string): Promise<boolean> {
   const { count, error } = await supabase

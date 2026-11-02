@@ -2,7 +2,7 @@ import { router } from 'expo-router';
 import { useState } from 'react';
 import { StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
-import { FormPage, FormSection } from '@/components/profile/FormPage';
+import { FormPage, FormSection, useIsDirty } from '@/components/profile/FormPage';
 import { COLORS } from '@/constants/theme';
 import { NUTRIENT_META } from '@/constants/nutrients';
 import { useMealStore } from '@/store/useMealStore';
@@ -32,6 +32,15 @@ export default function NutritionGoalsScreen() {
     return base;
   });
 
+  // Order-free for tracked (untick + retick isn't a change); targets only for
+  // tracked nutrients, since only those are saved.
+  const trackedSorted = [...tracked].sort();
+  const dirty = useIsDirty({
+    macros: [calories, protein, carbs, fats, water].map(v => v.trim()),
+    tracked: trackedSorted,
+    targets: trackedSorted.map(k => (targets[k] ?? '').trim()),
+  });
+
   const parseInt0 = (raw: string): number | null => {
     const n = Number(raw.trim());
     if (!Number.isInteger(n) || n < 0) return null;
@@ -50,7 +59,7 @@ export default function NutritionGoalsScreen() {
     const w  = parseInt0(water);
     if (c == null || p == null || cb == null || f == null || w == null) {
       showToast('Use whole numbers (0 or higher) for all targets.');
-      return;
+      return false;
     }
 
     // Collect optional secondary targets only for tracked nutrients with a value.
@@ -61,7 +70,7 @@ export default function NutritionGoalsScreen() {
       const n = parseInt0(raw);
       if (n == null) {
         showToast('Use whole numbers (0 or higher) for nutrient targets.');
-        return;
+        return false;
       }
       secondaryTargets[key] = n;
     }
@@ -86,6 +95,7 @@ export default function NutritionGoalsScreen() {
       title="Nutrition Goals"
       saveLabel="Save"
       onSave={handleSave}
+      dirty={dirty}
     >
       {goals.isCalculated ? (
         <View style={styles.banner}>

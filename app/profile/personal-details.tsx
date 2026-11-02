@@ -2,7 +2,7 @@ import { router } from 'expo-router';
 import { useMemo, useState } from 'react';
 import { StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
-import { FormPage, FormSection, RadioRow } from '@/components/profile/FormPage';
+import { FormPage, FormSection, RadioRow, useIsDirty } from '@/components/profile/FormPage';
 import { MealSlotModal } from '@/components/plans/MealSlotModal';
 import { COLORS } from '@/constants/theme';
 import {
@@ -56,6 +56,11 @@ export default function PersonalDetailsScreen() {
   const [gender, setGender] = useState<Gender | undefined>(profile.gender);
   const [activity, setActivity] = useState<ActivityLevel | undefined>(profile.activityLevel);
   const [slotsModalVisible, setSlotsModalVisible] = useState(false);
+  // Meal slots save from their own modal, so they aren't part of this.
+  const dirty = useIsDirty({
+    firstName: firstName.trim(), age: age.trim(), heightStr: heightStr.trim(), weightStr: weightStr.trim(),
+    gender, activity,
+  });
 
   // Summary string for the meal slots row, e.g. "5 active · skipped: 0".
   const activeSlotCount = profile.mealSlots.filter(s => !s.skipped).length;
@@ -99,6 +104,7 @@ export default function PersonalDetailsScreen() {
       saveLabel="Save"
       onSave={handleSave}
       saveDisabled={!canSave}
+      dirty={dirty}
     >
       <FormSection>
         <Field label="First name">

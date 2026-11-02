@@ -50,6 +50,20 @@ Nothing here is approved for building yet — per the working rules, discuss and
   plus Undo on every swap.
 - ~~Barcode logged per-100g as one serving~~ — now per serving (or labelled 100 g/ml), kJ fallback, 10s timeout,
   untrusted-data validation, product saved as the meal's item.
+- ~~Fresh-install login wiped the profile (Oct 30)~~ — `claim` mode deleted the server profile from the pull and
+  uploaded DEFAULT_PROFILE/GOALS over it. Now a `restore` mode: decided before change capture starts, when the
+  server profile has data (`profileHasData`) and the phone's doesn't; clears the demo seeds, applies the server copy.
+  Signup still claims. If that profile check fails (offline/10s timeout) login errors and the next app launch retries
+  (same as a failed pull — re-running reconcile mid-session isn't safe). Needs a reinstall test on device.
+  Known, pre-existing, not fixed: (a) 'switch' still wipes a verify-later signup made on a phone another account
+  used; (b) a first login while offline skips the claim upload; (c) a nameless account (Apple/Google) restores but
+  the login gate still needs `firstName` (the deferred gate pass); (d) an old edited `profile.email` isn't healed.
+- ~~Settings email was editable but never changed the login email~~ — now read-only (account email); verification
+  codes use the signup email from the pending credentials. Changing email needs Supabase's confirm flow (later).
+- ~~Recipe redesign (Oct 30)~~ — see CLAUDE.md "Recipes".
+- **Barcode fallback (18f) findings:** USDA FoodData Central works with 14-digit padded GTINs (`00` + UPC-12) and
+  returns per-100 values + serving size, but covers US products only — Alex's Diet Coke (Canada, 067000…) isn't in
+  either OFF or USDA. Deferred (Alex chose to skip for now); Food label covers misses.
 - ~~AI history~~ — `ai_events` table (migration `20261022010000`, pushed to dev) records every scan/fix for analysis.
 - ~~Paywall hidden behind modals~~ — scan-limit paywall from Scan / AI describe / Kitchen scan opened behind the RN
   Modal. Fixed with `PaywallModalHost`; after purchase the scan retries on the same photo. Verified on the iPhone.
@@ -108,6 +122,8 @@ Still open:
 18d. **"Missed" doesn't sync** (server only stores is_completed) — on another device/reinstall past missed meals show
     as not eaten. Needs a status column.
 18e. Single-device assumption: ending a plan on one phone doesn't remove it on another (pull ignores a null pointer).
+    Also: deletes are hard deletes and delta pulls only return updated rows, so a record deleted on one device stays
+    on another and can be re-uploaded if edited there (all synced tables). Fix needs tombstones (`deleted_at`).
 18h. **Remove recipes you made / clear Recent (later, Alex Oct 30):** Custom Recipe now saves every result to Recent
     and nothing can be removed. Build safely: a recipe used in a plan must not be deleted silently (plan restarts
     would fall back to made-up nutrition via fallbackNutrition).

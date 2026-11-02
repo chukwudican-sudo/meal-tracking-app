@@ -1,11 +1,8 @@
-import { router } from 'expo-router';
-import { useState } from 'react';
-import { Alert, StyleSheet, Switch, Text, TouchableOpacity } from 'react-native';
+import { StyleSheet, Switch, Text, TouchableOpacity } from 'react-native';
 
 import { FormPage, FormSection, RadioRow } from '@/components/profile/FormPage';
 import { COLORS } from '@/constants/theme';
 import { useMealStore } from '@/store/useMealStore';
-import { useToastStore } from '@/store/useToastStore';
 
 const PREFERENCES = ['No food preferences', 'Vegetarian', 'Vegan', 'Pescetarian'] as const;
 
@@ -24,70 +21,42 @@ const ALLERGIES = [
 export default function DietaryScreen() {
   const profile = useMealStore(s => s.profile);
   const updateProfile = useMealStore(s => s.updateProfile);
-  const templates = useMealStore(s => s.templates);
-  const showToast = useToastStore(s => s.showToast);
+  const hasPlan = useMealStore(s => s.templates.length > 0);
 
-  // Map current store state into local edit state.
-  const initialPreference = (() => {
-    const current = profile.dietaryRestrictions?.[0];
-    if (!current) return PREFERENCES[0];
-    const match = PREFERENCES.find(p => p.toLowerCase() === current.toLowerCase());
-    return match ?? PREFERENCES[0];
-  })();
+  // Saved on each tap, like iOS Settings — no Save button. Read straight from
+  // the store so what's shown is always what's saved.
+  const current = profile.dietaryRestrictions?.[0];
+  const preference: string =
+    (current && PREFERENCES.find(p => p.toLowerCase() === current.toLowerCase())) || PREFERENCES[0];
+  const allergies = new Set<string>(profile.allergies ?? []);
+  if (allergies.size === 0) allergies.add('No allergies');
 
-  const [preference, setPreference] = useState<string>(initialPreference);
-  const [allergies, setAllergies] = useState<Set<string>>(() => {
-    const set = new Set<string>(profile.allergies ?? []);
-    if (set.size === 0) set.add('No allergies');
-    return set;
-  });
+  const setPreference = (p: string) => {
+    updateProfile({ dietaryRestrictions: p === 'No food preferences' ? [] : [p] });
+  };
 
   const toggleAllergy = (name: string) => {
-    const next = new Set(allergies);
+    // From the store, not this render: two quick taps must both stick.
+    const next = new Set<string>(useMealStore.getState().profile.allergies ?? []);
     if (name === 'No allergies') {
       next.clear();
-      next.add('No allergies');
-      setAllergies(next);
-      return;
+    } else if (next.has(name)) {
+      next.delete(name);
+    } else {
+      next.add(name);
     }
-    if (next.has(name)) next.delete(name);
-    else { next.add(name); next.delete('No allergies'); }
-    if (next.size === 0) next.add('No allergies');
-    setAllergies(next);
-  };
-
-  const persist = () => {
-    const restrictions = preference === 'No food preferences' ? [] : [preference];
-    const allergyList = Array.from(allergies).filter(a => a !== 'No allergies');
-    updateProfile({
-      dietaryRestrictions: restrictions,
-      allergies: allergyList,
-    });
-    showToast('Preferences updated');
-    router.back();
-  };
-
-  const handleSave = () => {
-    if (templates.length > 0) {
-      Alert.alert(
-        'Heads up',
-        'Changing your food or allergy preferences may affect your current plan. Sure you want to continue?',
-        [
-          { text: 'Keep Preferences', style: 'cancel' },
-          { text: 'Change Preferences', style: 'destructive', onPress: persist },
-        ]
-      );
-      return;
-    }
-    persist();
+    next.delete('No allergies');
+    updateProfile({ allergies: Array.from(next) });
   };
 
   return (
-    <FormPage
-      title="Dietary & Allergies"
-      saveLabel="Save"
-      onSave={handleSave}
-    >
+    <FormPage title="Dietary & Allergies">
+      {hasPlan ? (
+        <Text style={styles.planNote}>
+          Changes may affect your current plan.
+        </Text>
+      ) : null}
+
       <FormSection label="FOOD PREFERENCES">
         {PREFERENCES.map((p) => (
           <RadioRow
@@ -147,6 +116,12 @@ const styles = StyleSheet.create({
     borderTopColor: COLORS.border,
   },
   toggleLabel: { color: COLORS.text, fontSize: 15, flex: 1 },
+  planNote: {
+    color: COLORS.orange,
+    fontSize: 13,
+    paddingHorizontal: 4,
+    marginBottom: 12,
+  },
   footnote: {
     color: COLORS.textSecondary,
     fontSize: 12,

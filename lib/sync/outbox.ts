@@ -110,6 +110,16 @@ class Outbox {
     return this.items.filter(it => !it.deadLetter && it.nextAttemptAt <= now);
   }
 
+  // Drop any pending op for one record without sending it.
+  discard(entityKey: string): void {
+    const before = this.items.length;
+    this.items = this.items.filter(it => it.entityKey !== entityKey);
+    if (this.items.length !== before) {
+      this.schedulePersist();
+      this.changeListener?.();
+    }
+  }
+
   dirtyKeys(): Set<string> {
     return new Set(this.items.filter(it => !it.deadLetter).map(it => it.entityKey));
   }

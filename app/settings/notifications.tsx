@@ -1,31 +1,24 @@
-import { router } from 'expo-router';
-import { useState } from 'react';
 import { StyleSheet, Switch, Text, TouchableOpacity, View } from 'react-native';
 
 import { FormPage, FormSection } from '@/components/profile/FormPage';
 import { COLORS } from '@/constants/theme';
 import type { RemindMinutes } from '@/store/types';
 import { useMealStore } from '@/store/useMealStore';
-import { useToastStore } from '@/store/useToastStore';
 
 const OPTIONS: RemindMinutes[] = [5, 10, 15, 30];
 
 export default function NotificationsScreen() {
   const profile = useMealStore(s => s.profile);
   const updateProfile = useMealStore(s => s.updateProfile);
-  const showToast = useToastStore(s => s.showToast);
 
-  const [enabled, setEnabled] = useState<boolean>(profile.mealRemindersEnabled ?? true);
-  const [minutes, setMinutes] = useState<RemindMinutes>(profile.remindMinutesBefore ?? 15);
-
-  const handleSave = () => {
-    updateProfile({ mealRemindersEnabled: enabled, remindMinutesBefore: minutes });
-    showToast('Notification settings saved');
-    router.back();
-  };
+  // Saved on each tap, like iOS Settings — no Save button.
+  const enabled = profile.mealRemindersEnabled ?? true;
+  const minutes: RemindMinutes = profile.remindMinutesBefore ?? 15;
+  const setEnabled = (v: boolean) => updateProfile({ mealRemindersEnabled: v });
+  const setMinutes = (v: RemindMinutes) => updateProfile({ remindMinutesBefore: v });
 
   return (
-    <FormPage title="Notifications" saveLabel="Save" onSave={handleSave}>
+    <FormPage title="Notifications">
       <FormSection label="MEAL REMINDERS">
         <View style={styles.row}>
           <View style={{ flex: 1 }}>

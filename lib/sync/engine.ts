@@ -5,12 +5,12 @@
 // signing in as a different user resets local data and pulls the new account's.
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useMealStore } from '@/store/useMealStore';
+import { profileHasData, useMealStore } from '@/store/useMealStore';
 import { supabase } from '@/lib/supabase';
 import { outbox } from './outbox';
 import { projector } from './projector';
-import { pullSince, pushItem, serverNow } from './repository';
-import type { SyncTable } from './types';
+import { fetchServerProfile, pullSince, pushItem, serverNow } from './repository';
+import { entityKey, type SyncTable } from './types';
 
 const LAST_USER_KEY = 'sync:lastUserId';
 // Upper bound on how long we'll wait before re-draining while writes are still
@@ -54,7 +54,9 @@ export interface SyncStatus {
   stuck: boolean;
 }
 
-type Mode = 'claim' | 'same' | 'switch';
+// 'restore' = a first login on this install ('claim') where the server already
+// has the account's data and the phone has none (see reconcile).
+type Mode = 'claim' | 'restore' | 'same' | 'switch';
 
 class SyncEngine {
   private userId: string | null = null;
@@ -149,9 +151,8 @@ class SyncEngine {
     // FULL pull rather than an incremental one. A delta pull can legitimately
     // return nothing when the server hasn't changed since the last sync, which
     // would otherwise leave the wiped cache empty forever (missing profile +
-    // blank tabs). Clearing sync:lastUserId instead would flip mode to 'claim',
-    // which protects the (now-empty) local data and re-uploads it over the good
-    // server copy — the opposite of what we want.
+    // blank tabs). (Clearing sync:lastUserId would make it a first login
+    // again; reconcile then restores from the server when local is empty.)
     if (this.userId) {
       try {
         await AsyncStorage.removeItem(cursorKey(this.userId));
@@ -183,11 +184,37 @@ class SyncEngine {
     try {
       this.setStatus('syncing');
       const lastUserId = await AsyncStorage.getItem(LAST_USER_KEY);
-      const mode: Mode = !lastUserId ? 'claim' : lastUserId === userId ? 'same' : 'switch';
+      let mode: Mode = !lastUserId ? 'claim' : lastUserId === userId ? 'same' : 'switch';
+
+      // First login on this install with real data already on the server and
+      // none entered here (a login on a fresh install / reinstall): restore —
+      // the server copy wins. Before, 'claim' dropped it and uploaded the
+      // default profile/goals over it (wiped real profiles until Oct 30). A
+      // brand-new account's row is empty, so signup still claims as before —
+      // decided by the server data, not by when onboarding saves its answers.
+      // Decided BEFORE change capture starts, like 'switch', so the wipe below
+      // is never captured as deletes/uploads.
+      let profileCheckError: string | null = null;
+      if (mode === 'claim' && this.online && !profileHasData(useMealStore.getState().profile)) {
+        try {
+          const serverProfile = await fetchServerProfile(userId);
+          // Re-check local: the store may have changed during the round trip.
+          if (profileHasData(serverProfile) && !profileHasData(useMealStore.getState().profile)) {
+            mode = 'restore';
+          }
+        } catch (e: any) {
+          profileCheckError = e?.message ?? 'profile check failed';
+        }
+        // Signed out (or switched) during the round trip: this reconcile is stale.
+        if (this.userId !== userId) return;
+      }
 
       // A different account on this install must not push the previous user's
-      // local cache; wipe local user data and pull the new account fresh.
-      if (mode === 'switch') {
+      // local cache; wipe local user data and pull the new account fresh. On
+      // restore the phone holds only the first-launch demo seeds: clear them so
+      // they don't mix into the real account and hydrateActivePlanIfNeeded can
+      // rebuild the real plan.
+      if (mode === 'switch' || mode === 'restore') {
         useMealStore.getState().resetUserData();
       }
 
@@ -204,6 +231,12 @@ class SyncEngine {
       }
 
       projector.start(); // baseline = current (post-reset) state, begin capturing
+
+      // Couldn't tell restore from claim: never guess (a wrong 'claim' uploads
+      // defaults over a real profile). Stop here with capture running, so edits
+      // in this session still sync — same as a failed pull; LAST_USER_KEY stays
+      // unset, so the next launch decides again.
+      if (profileCheckError) throw new Error(`profile check: ${profileCheckError}`);
 
       if (this.online) {
         // A full pull is required whenever we can't trust an incremental cursor:
@@ -231,6 +264,11 @@ class SyncEngine {
           delete snap.profile;
           delete snap.goals;
         }
+        // A profile write still queued from an earlier first login that was
+        // cut short holds only defaults (restore needs an empty local
+        // profile): drop it so it can't keep the reset profile here or
+        // overwrite the real one on the server.
+        if (mode === 'restore') outbox.discard(entityKey.usersSelf());
         useMealStore.getState().applyServerSnapshot(snap, outbox.dirtyKeys());
         projector.rebaseline(); // applied server data must not echo back
 

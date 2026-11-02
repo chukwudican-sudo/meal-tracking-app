@@ -193,11 +193,26 @@ These come straight from months of his feedback. Violating them is the #1 thing 
   Save = `saveCustomizedPlan`: premade → user's own copy "My <name>" (UUID, unique name), then re-applies from today.
   Placeholder slots `EMPTY_SLOT`/`REMOVED_SLOT` (`constants/planSlots.ts`) are never meals. The active plan is still
   matched **by name** (`activePlanName`) — known limitation.
+- **Recipes:** one recipe page (`app/recipe/[id]`) for every recipe — `NutritionTiles` (big calorie tile + macro
+  tiles, also on the full page), key ingredients (main foods first), footer Fix | View Full Recipe (Fix only on the
+  user's own recipes, `isOwnRecipe`; built-in ones are reference content). Custom Recipe goes straight there: the idea
+  call (`generate-recipe-concept`, free scans) returns ingredients, `addCustomRecipe` saves it to Recent (never merged by
+  name). View Full Recipe writes steps from exactly those ingredients (`generate-recipe-steps`, Pro; server overwrites
+  the returned list with the input). Fix = `useRecipeFix` → `fix-recipe` (free scans; no steps yet → ingredients/macros
+  only; never renames). Fix memory is `recipeFixHistory` (local, not synced). Free users see ingredients + step 1.
+  Swaps (picker + "Use this recipe") go through `lib/recipeSwap.ts#applyRecipeSwap`, which returns its Undo.
+- **Sync, first login on an install (`claim`):** if the server already has real profile data (`profileHasData`: name
+  or any onboarding answer) and the phone has none, it RESTORES (demo seeds cleared, server wins, nothing local
+  uploaded over it); otherwise (new account) local data is uploaded as before. Decided by server data, not onboarding timing (signup gets a session before answers are saved).
+  Never upload local defaults over a server profile — that wiped real profiles before Oct 30.
+- **Settings/profile forms (`components/profile/FormPage`):** switches and choices save on tap (no button); typed
+  forms pass `dirty` (`useIsDirty`) → green **Save** top-right, grey until changed, "Discard changes?" on leaving
+  unsaved. `onSave` returns `false` when validation refuses. Only Feedback keeps a bottom button (Submit).
 - **External data is untrusted** (Open Food Facts barcode lookups, AI output): validate numbers (finite, ≥0, capped),
   cap string lengths, timeouts on every network call.
 - Comments: match the surrounding density; the codebase explains *why* (constraints, past bugs), not *what*.
 
-## 7. Current state (as of Oct 28, 2026)
+## 7. Current state (as of Oct 30, 2026)
 
 **Built and working (dev):** onboarding + email/password auth (6-digit code verification, "verify later" allowed),
 offline-first sync of profile/meals/weight/recipes/grocery/plans, Home (rings, tick-off, Added tags, sync icon, verify

@@ -2,9 +2,10 @@ import { router } from 'expo-router';
 import { useState } from 'react';
 import { StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
-import { FormPage, FormSection } from '@/components/profile/FormPage';
+import { FormPage, FormSection, useIsDirty } from '@/components/profile/FormPage';
 import { COLORS } from '@/constants/theme';
 import type { WeightUnit } from '@/store/types';
+import { useAuth } from '@/lib/auth';
 import { useMealStore } from '@/store/useMealStore';
 import { useToastStore } from '@/store/useToastStore';
 
@@ -13,9 +14,15 @@ export default function AccountSettingsScreen() {
   const updateProfile = useMealStore(s => s.updateProfile);
   const showToast = useToastStore(s => s.showToast);
 
-  const [email, setEmail]         = useState(profile.email ?? '');
+  // Read-only: this is the login email. Editing it here never changed the
+  // account's email (only a stored copy), and verification codes then went to
+  // the edited address. Changing it needs Supabase's confirm-new-email flow.
+  const { user } = useAuth();
+  const email = user?.email ?? profile.email ?? '';
   const [firstName, setFirstName] = useState(profile.firstName ?? profile.name ?? '');
   const [lastName, setLastName]   = useState(profile.lastName ?? '');
+
+  const dirty = useIsDirty({ firstName: firstName.trim(), lastName: lastName.trim() });
 
   const unit = profile.weightUnit ?? 'lbs';
 
@@ -26,7 +33,6 @@ export default function AccountSettingsScreen() {
 
   const handleSave = () => {
     updateProfile({
-      email: email.trim() || undefined,
       firstName: firstName.trim() || undefined,
       lastName: lastName.trim() || undefined,
       name: firstName.trim() || profile.name,
@@ -43,18 +49,11 @@ export default function AccountSettingsScreen() {
       title="Account Settings"
       saveLabel="Save"
       onSave={handleSave}
+      dirty={dirty}
     >
       <FormSection label="IDENTITY">
         <Field label="Email">
-          <TextInput
-            value={email}
-            onChangeText={setEmail}
-            placeholder="alex@example.com"
-            placeholderTextColor={COLORS.textMuted}
-            keyboardType="email-address"
-            autoCapitalize="none"
-            style={styles.input}
-          />
+          <Text style={[styles.input, styles.readOnly]} selectable>{email || 'Not signed in'}</Text>
         </Field>
         <Field label="First name">
           <TextInput
@@ -148,6 +147,7 @@ const styles = StyleSheet.create({
     borderTopColor: COLORS.border,
   },
   fieldLabel: { color: COLORS.textSecondary, fontSize: 12, fontWeight: '600', marginBottom: 6 },
+  readOnly: { color: COLORS.textSecondary },
   input: {
     backgroundColor: COLORS.elevated,
     color: COLORS.text,
