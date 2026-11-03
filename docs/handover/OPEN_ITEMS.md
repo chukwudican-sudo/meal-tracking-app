@@ -162,10 +162,17 @@ Still open:
     `app/meal/[id].tsx`, `app/modal.tsx`, `app/auth/callback.tsx` once no old signup links can be outstanding
     (password reset uses `app/auth/reset.tsx`, not callback — re-check before deleting).
 
+- **Notifications (built Nov 3, needs the new dev build to test):** meal reminders (d7b4786) + bell inbox with push.
+  Live steps: `db push` (migration 20261103010000_inbox_push), `ANNOUNCE_SECRET` secret + same value in `.env`,
+  deploy `send-announcement --no-verify-jwt`, then `eas build` (it asks to set up the Apple push key). Send with
+  `node scripts/send-announcement.mjs [--dry-run] "Title" "Message"`. Known, not done for v1: Expo push *receipts*
+  aren't fetched (uninstalled phones are only removed when a ticket says DeviceNotRegistered); two sends of the same
+  text at the very same moment can both go out (the 30-min duplicate check isn't atomic); a "Updates from Macrotri"
+  on/off switch separate from reminders; production needs its own secret + deploy.
+
 ## E. Deferred product features (ideas Alex has mentioned; not specced enough to build)
 
-Cook Mode (guided cooking, timers, chef avatar) · meal reminder notifications (`expo-notifications` not installed;
-settings UI exists, default 15 min before) · Find Your Plan guided questions + "Try Build My Plan instead" bridge ·
+Cook Mode (guided cooking, timers, chef avatar) · Find Your Plan guided questions + "Try Build My Plan instead" bridge ·
 post-onboarding "build your plan" popup polish · onboarding visual design pass · Report Food backend · Feedback backend ·
 Export Data · Language · Data Consent · calorie filter in recipe lists · juicing / more meal categories · budget and
 regional grocery pricing · cart history · configurable grocery refresh day · kitchen search + quantities · seasoning

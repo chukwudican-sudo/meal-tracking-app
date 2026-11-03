@@ -468,6 +468,11 @@ verify_jwt = true
 enabled = true
 verify_jwt = false
 
+# Called by Alex (scripts/send-announcement.mjs) with ANNOUNCE_SECRET, not a user JWT.
+[functions.send-announcement]
+enabled = true
+verify_jwt = false
+
 # Permanently deletes the calling user's own Supabase auth account (and,
 # transitively, all of their app data via existing ON DELETE CASCADE
 # foreign keys). verify_jwt = true (default) so only a genuinely

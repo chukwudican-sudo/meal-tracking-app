@@ -1,16 +1,20 @@
+import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 import { COLORS } from '@/constants/theme';
+import { selectUnreadCount, useInboxStore } from '@/store/useInboxStore';
 
 interface Props {
   color?: string;
-  // Optional unread badge count. Hidden when 0/undefined.
+  // Overrides the inbox's own unread count (tests / previews). Hidden at 0.
   unreadCount?: number;
 }
 
 export function NotificationIcon({ color = COLORS.textSecondary, unreadCount }: Props) {
-  const showBadge = !!unreadCount && unreadCount > 0;
+  const inboxUnread = useInboxStore(selectUnreadCount);
+  const count = unreadCount ?? inboxUnread;
+  const showBadge = count > 0;
   return (
     <TouchableOpacity
       onPress={() => router.push('/notifications')}
@@ -18,11 +22,11 @@ export function NotificationIcon({ color = COLORS.textSecondary, unreadCount }: 
       style={styles.wrap}
       activeOpacity={0.7}
     >
-      <Text style={[styles.icon, { color }]}>🔔</Text>
+      <Ionicons name="notifications-outline" size={20} color={color} />
       {showBadge && (
         <View style={styles.badge}>
           <Text style={styles.badgeText}>
-            {unreadCount! > 99 ? '99+' : unreadCount}
+            {count > 9 ? '9+' : count}
           </Text>
         </View>
       )}
@@ -36,10 +40,6 @@ const styles = StyleSheet.create({
     height: 32,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  icon: {
-    fontSize: 18,
-    lineHeight: 22,
   },
   badge: {
     position: 'absolute',

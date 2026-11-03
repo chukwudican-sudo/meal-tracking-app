@@ -11,6 +11,7 @@ import { UndoSnackbarHost } from '@/components/UndoSnackbarHost';
 import { AuthProvider } from '@/lib/auth';
 import { SyncProvider } from '@/lib/sync/SyncProvider';
 import { ReminderSync } from '@/lib/notifications/ReminderSync';
+import { PushSync } from '@/lib/notifications/PushSync';
 import { configurePurchases } from '@/lib/purchases';
 
 export const unstable_settings = {
@@ -45,6 +46,7 @@ export default function RootLayout() {
         <AuthProvider>
         <SyncProvider>
         <ReminderSync />
+        <PushSync />
         <View style={{ flex: 1 }}>
           <Stack>
             <Stack.Screen name="(tabs)"        options={{ headerShown: false }} />

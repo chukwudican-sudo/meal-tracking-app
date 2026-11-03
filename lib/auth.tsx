@@ -16,6 +16,7 @@ import { AppState } from 'react-native';
 import * as Linking from 'expo-linking';
 import type { AuthError, Session, User } from '@supabase/supabase-js';
 
+import { allowPushRegistration, unregisterPushToken } from '@/lib/notifications/push';
 import { supabase } from './supabase';
 import { useMealStore } from '@/store/useMealStore';
 import { syncPurchasesIdentity } from './purchases';
@@ -125,7 +126,11 @@ export async function verifySignupOtp(email: string, token: string): Promise<Aut
 }
 
 export async function signOut(): Promise<AuthResult> {
+  // While the session is still valid: stop pushes to this phone (best effort).
+  await unregisterPushToken();
   const { error } = await supabase.auth.signOut();
+  // Still signed in after all: let this phone register for pushes again.
+  if (error) allowPushRegistration();
   return { error: error ? error.message : null };
 }
 
