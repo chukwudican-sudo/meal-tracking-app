@@ -358,6 +358,11 @@ export function isPlanTemplate(t: Pick<MealTemplate, 'id'>): boolean {
   return t.id.startsWith('tpl-plan-') || SEED_TEMPLATES.some(s => s.id === t.id);
 }
 
+// The first-launch demo meals (exact ids) — never the user's own food.
+export function isSeedTemplate(t: Pick<MealTemplate, 'id'>): boolean {
+  return SEED_TEMPLATES.some(s => s.id === t.id);
+}
+
 // Recipes the user made (Custom Recipe / AI / manual) can be fixed; the
 // app's built-in recipes ('premade') are reference content and can't.
 export function isOwnRecipe(r: Pick<SavedRecipe, 'source'>): boolean {

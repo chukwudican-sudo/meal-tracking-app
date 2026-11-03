@@ -35,6 +35,7 @@ import { COLORS } from '@/constants/theme';
 import { signInWithEmail, signUpWithEmail, useAuth } from '@/lib/auth';
 import { engine } from '@/lib/sync/engine';
 import type { ActivityLevel, GoalType, NutrientKey } from '@/store/types';
+import { requestReminderPermission } from '@/lib/notifications/reminders';
 import { useMealStore } from '@/store/useMealStore';
 
 
@@ -539,7 +540,16 @@ export default function OnboardingScreen() {
       case 'notifications':
         return (
           <NotificationStep
-            onAllow={() => { patch({ notificationsAllowed: true }); go(1); }}
+            onAllow={async () => {
+              // The real iOS prompt; reminders only run if it's allowed.
+              // A failed request isn't a yes; only a build without notification
+              // support at all ('unavailable', returned not thrown) is.
+              const result = await requestReminderPermission().catch(() => 'undetermined' as const);
+              // 'unavailable' = this build has no notification support yet:
+              // keep the user's yes, so reminders turn on once it does.
+              patch({ notificationsAllowed: result === 'granted' || result === 'unavailable' });
+              go(1);
+            }}
             onSkip={() => { patch({ notificationsAllowed: false }); go(1); }}
           />
         );
@@ -956,7 +966,14 @@ function NutritionResultStep({ calories, onNext }: { calories: number; onNext: (
   );
 }
 
-function NotificationStep({ onAllow, onSkip }: { onAllow: () => void; onSkip: () => void }) {
+function NotificationStep({ onAllow, onSkip }: { onAllow: () => Promise<void>; onSkip: () => void }) {
+  // The iOS prompt takes a moment to appear: one tap only.
+  const [asking, setAsking] = useState(false);
+  const allow = () => {
+    if (asking) return;
+    setAsking(true);
+    void onAllow().catch(() => setAsking(false));
+  };
   return (
     <View style={[styles.body, styles.centered]}>
       <View style={{ flex: 1 }} />
@@ -964,8 +981,8 @@ function NotificationStep({ onAllow, onSkip }: { onAllow: () => void; onSkip: ()
       <Text style={[styles.bigTitle, { marginTop: 20 }]}>Stay on track with meal reminders.</Text>
       <Text style={styles.bodyText}>Timely reminders help you stay consistent and hit your targets.</Text>
       <View style={{ flex: 1 }} />
-      <PrimaryButton label="Allow notifications" onPress={onAllow} />
-      <TouchableOpacity onPress={onSkip} style={styles.textLink}>
+      <PrimaryButton label="Allow notifications" onPress={allow} disabled={asking} />
+      <TouchableOpacity onPress={onSkip} disabled={asking} style={styles.textLink}>
         <Text style={styles.textLinkText}>Not now</Text>
       </TouchableOpacity>
     </View>
