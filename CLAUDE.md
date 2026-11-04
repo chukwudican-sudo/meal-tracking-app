@@ -56,7 +56,8 @@ npx expo start --dev-client --tunnel # only when phone + Mac can't see each othe
 
 - The repo root is **nested**: `MEALTRACKINGAPP/meal-app/meal-app`. Running Metro from the outer `meal-app` folder fails /
   serves a stale bundle — this has caused "my fix isn't showing" confusion before.
-- New dev build: `npx eas build --profile development --platform ios` (or `npx expo run:ios` if Xcode is installed — it
+- New dev build: `npx eas-cli@latest build --profile development --platform ios` (plain `npx eas` fetches an
+  unrelated npm package and fails; Alex runs it in his own terminal — it asks for Apple login/2FA) (or `npx expo run:ios` if Xcode is installed — it
   wasn't as of June). Needed whenever a native module/plugin/app.json native field changes.
 - Checks before calling anything done: `npx tsc --noEmit` and `npm run lint`.
   **Known pre-existing tsc errors (3, ignore unless fixing them on purpose):** `app/profile.tsx:64` (Alert.prompt param

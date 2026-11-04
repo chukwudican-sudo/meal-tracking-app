@@ -27,6 +27,7 @@ import { useMealStore } from '@/store/useMealStore';
 import { useToastStore } from '@/store/useToastStore';
 import { PaywallModalHost } from '@/components/paywall/PaywallModalHost';
 import { ToastHost } from '@/components/ToastHost';
+import { useCloseOnOverlayReset } from '@/lib/overlays';
 
 interface Props {
   visible: boolean;
@@ -73,6 +74,8 @@ export function KitchenScanModal({ visible, onClose }: Props) {
     reset();
     onClose();
   };
+  // A tapped notification opens its page above this modal (lib/overlays).
+  useCloseOnOverlayReset(visible, close);
 
   const takePhoto = async () => {
     if (photos.length >= MAX_PHOTOS || processingPhoto) return;

@@ -7,6 +7,7 @@ import { useEffect, useRef } from 'react';
 import { AppState } from 'react-native';
 
 import { useAuth } from '@/lib/auth';
+import { closeOverlays } from '@/lib/overlays';
 import { useInboxStore } from '@/store/useInboxStore';
 import { useMealStore } from '@/store/useMealStore';
 import { allowPushRegistration, ANNOUNCEMENT_TYPE, registerPushToken } from './push';
@@ -19,6 +20,8 @@ let lastOpenedId: string | null = null;
 function openInboxFor(id: string) {
   if (id === lastOpenedId) return;
   lastOpenedId = id;
+  // Close any full-screen pop-up first, or the inbox opens behind it.
+  closeOverlays();
   setTimeout(() => {
     try {
       // navigate, not push: already in the inbox means stay there.

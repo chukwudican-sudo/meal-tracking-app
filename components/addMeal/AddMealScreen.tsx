@@ -20,6 +20,7 @@ import { ScanTab } from './ScanTab';
 import { AITab } from './AITab';
 import { ManualTab } from './ManualTab';
 import { SearchTab } from './SearchTab';
+import { useCloseOnOverlayReset } from '@/lib/overlays';
 import { MealDraftCard } from './MealDraftCard';
 import { FixResultScreen } from './FixResultScreen';
 import { DisclaimerScreen } from './DisclaimerScreen';
@@ -77,6 +78,9 @@ export function AddMealScreen({ visible, date, onClose }: Props) {
     setActiveTab('ai');
     onClose();
   }
+
+  // A tapped notification opens its page above this modal (lib/overlays).
+  useCloseOnOverlayReset(visible, handleClose);
 
   function handleSaved() {
     if (pending?.librarySourceId) {
