@@ -1,16 +1,19 @@
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { COLORS } from '@/constants/theme';
 import type { MealEntry } from '@/store/types';
+import { displayMealStatus } from '@/store/useMealStore';
 
 interface MealCardProps {
   entry: MealEntry;
+  date: string; // YYYY-MM-DD the card is shown on (missed is worked out from it)
   onToggle: () => void;
   onOpenDetail: () => void;
 }
 
-export function MealCard({ entry, onToggle, onOpenDetail }: MealCardProps) {
-  const isCompleted = entry.status === 'completed';
-  const isMissed    = entry.status === 'missed';
+export function MealCard({ entry, date, onToggle, onOpenDetail }: MealCardProps) {
+  const status      = displayMealStatus(entry, date);
+  const isCompleted = status === 'completed';
+  const isMissed    = status === 'missed';
 
   // Completed: thin green border all around. Missed: red left bar only. Pending: none.
   const borderStyle = isCompleted

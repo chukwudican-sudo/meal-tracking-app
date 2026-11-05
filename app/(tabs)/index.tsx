@@ -281,6 +281,7 @@ export default function HomeScreen() {
             <MealCard
               key={entry.id}
               entry={entry}
+              date={viewingDate}
               onToggle={() => toggleMealStatus(viewingDate, entry.id)}
               onOpenDetail={() => openMealEditSession(viewingDate, 'home', entry)}
             />

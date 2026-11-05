@@ -319,6 +319,24 @@ export function initialMealStatus(date: string, time: string, now: Date = new Da
   return mins === null || mins <= now.getHours() * 60 + now.getMinutes() ? 'completed' : 'pending';
 }
 
+// What a meal shows as. A planned meal (not the user's own) still unticked
+// after its time is "missed" — worked out here, not stored: the stored flag
+// was only ever set for today while the app was open, so days the app wasn't
+// opened, and every past day after a reinstall (the server keeps only eaten /
+// not eaten), showed skipped meals as merely unticked.
+export function displayMealStatus(
+  meal: Pick<MealEntry, 'status' | 'isAdHoc' | 'time'>,
+  date: string,
+  now: Date = new Date(),
+): MealStatus {
+  if (meal.status !== 'pending' || meal.isAdHoc) return meal.status;
+  const today = toIsoDate(now);
+  if (date < today) return 'missed';
+  if (date > today) return 'pending';
+  const mins = toMinutesFromHHMM(meal.time);
+  return mins !== null && mins <= now.getHours() * 60 + now.getMinutes() ? 'missed' : 'pending';
+}
+
 // The user's own meals after today (their meals on future days, recipes
 // scheduled on unopened days, own repeating meals) — what re-applying a plan
 // would replace, excluding the plan's own meals.
@@ -845,15 +863,11 @@ export const useMealStore = create<AppStore>()(
           const log = state.logs[targetDate];
           if (!log) return state;
 
-          const nowMinutes = now.getHours() * 60 + now.getMinutes();
           let changed = false;
 
           const nextMeals = log.meals.map(meal => {
-            // Only planned meals can be "missed"; an unticked meal the user
-            // added just means "not eaten".
-            if (meal.status !== 'pending' || meal.isAdHoc) return meal;
-            const mealMinutes = toMinutesFromHHMM(meal.time);
-            if (mealMinutes === null || mealMinutes > nowMinutes) return meal;
+            // Same rule as the display (only planned meals can be "missed").
+            if (meal.status !== 'pending' || displayMealStatus(meal, targetDate, now) !== 'missed') return meal;
             changed = true;
             return { ...meal, status: 'missed' as const };
           });

@@ -185,6 +185,8 @@ These come straight from months of his feedback. Violating them is the #1 thing 
 - **Meal ownership & status (one rule each, in `store/useMealStore.ts`):** `initialMealStatus(date, time)` — a meal the
   user adds for now/earlier/a past day is `completed` (counts at once), later/future is `pending` (planned).
   `isAdHoc` = the user's own meal (never auto-"missed", kept by plan changes, excluded from the heatmap's plan score).
+  "Missed" is shown via `displayMealStatus(meal, date)` (planned + unticked + time passed), not trusted from storage
+  (the server keeps only eaten / not eaten); stats only ever count `completed`.
   `isPlanTemplate(t)` (`tpl-plan-…` or the seed ids) tells plan templates from the user's own (scheduled recipes,
   draft-card repeating meals `tpl-${Date.now()}` — never match seeds by pattern). `isUserOwnedMeal` = what plan
   activation / End plan keep. Groceries (Planned Ingredients) only come from **planned** meals + the plan.
