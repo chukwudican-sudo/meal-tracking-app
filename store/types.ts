@@ -337,6 +337,9 @@ export interface ServerSnapshot {
   // flag back to the local name-based pointer.
   plans?: MealPlan[];
   activePlanName?: string;
+  // users.active_plan_name as stored (full pulls only; null = empty). Lets a
+  // full pull upload the local pointer when the server's copy differs.
+  usersActivePlanName?: string | null;
 }
 
 // ─── Zustand store shape ──────────────────────────────────────────────────────

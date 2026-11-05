@@ -56,7 +56,7 @@ function usersHash(state: AppStore): string {
     p.email, p.firstName, p.name, p.gender, p.birthday, p.age, p.heightCm,
     p.weightKg, p.targetWeightKg, p.goalType, p.activityLevel, p.paceLbsPerWeek,
     p.dietaryRestrictions, p.allergies, p.trackedNutrients, p.goalDate,
-    p.notificationsAllowed,
+    p.notificationsAllowed, p.activePlanName,
     g.dailyCalories, g.protein, g.carbs, g.fats, g.waterTargetCups,
   ]);
 }
@@ -117,6 +117,7 @@ class Projector {
   private grocery = new Map<string, GrocerySnap>();
   private plans = new Map<string, PlanSnap>();
   private usersHashValue = '';
+  private applying = false;
 
   start(): void {
     this.rebaseline();
@@ -128,6 +129,21 @@ class Projector {
   stop(): void {
     this.unsub?.();
     this.unsub = null;
+  }
+
+  // Apply server data without capturing it as edits. Zustand notifies
+  // subscribers synchronously inside set(), so a rebaseline afterwards is too
+  // late: every pulled record had already been queued for upload again (a
+  // fresh-install restore re-sent ~150 rows, Nov 4). The baseline then moves
+  // to the applied state, so only later real edits are captured.
+  applyWithoutCapture(apply: () => void): void {
+    this.applying = true;
+    try {
+      apply();
+    } finally {
+      this.applying = false;
+      this.rebaseline();
+    }
   }
 
   // Reset the baseline to current state without enqueuing (used after applying a
@@ -192,6 +208,13 @@ class Projector {
       if (!serverGroceryKeys.has(key)) this.upsertGrocery(key, snap);
     });
 
+    // Accounts from before users.active_plan_name existed (or a pointer never
+    // uploaded): send it once, or a reinstall can't bring the plan back.
+    if (snapshot.usersActivePlanName !== undefined) {
+      const local = s.profile.activePlanName?.trim().slice(0, 200) || null;
+      if (local !== snapshot.usersActivePlanName) this.upsertUsers();
+    }
+
     const serverPlanIds = new Set((snapshot.plans ?? []).map(pl => pl.id));
     buildPlans(s).forEach(snap => {
       if (!serverPlanIds.has(snap.plan.id)) this.upsertPlan(snap);
@@ -201,7 +224,7 @@ class Projector {
   }
 
   private onChange(state: AppStore): void {
-    if (!outbox.isActive) return;
+    if (!outbox.isActive || this.applying) return;
 
     if (state.logs !== this.prevLogsRef || state.profile !== this.prevProfileRef) {
       this.diffMeals(state);

@@ -263,14 +263,17 @@ class SyncEngine {
           // clobber them — they get uploaded by enqueueAll below.
           delete snap.profile;
           delete snap.goals;
+          delete snap.activePlanName;
         }
         // A profile write still queued from an earlier first login that was
         // cut short holds only defaults (restore needs an empty local
         // profile): drop it so it can't keep the reset profile here or
         // overwrite the real one on the server.
         if (mode === 'restore') outbox.discard(entityKey.usersSelf());
-        useMealStore.getState().applyServerSnapshot(snap, outbox.dirtyKeys());
-        projector.rebaseline(); // applied server data must not echo back
+        // Applied server data must not echo back as uploads.
+        projector.applyWithoutCapture(() =>
+          useMealStore.getState().applyServerSnapshot(snap, outbox.dirtyKeys()),
+        );
 
         if (mode === 'claim') {
           // First time this device's local data is tied to the account: upload it.

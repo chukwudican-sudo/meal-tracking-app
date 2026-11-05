@@ -170,6 +170,13 @@ Still open:
   text at the very same moment can both go out (the 30-min duplicate check isn't atomic); a "Updates from Macrotri"
   on/off switch separate from reminders; production needs its own secret + deploy.
 
+- **Active Explore plan restored after reinstall (Nov 5):** `users.active_plan_name` (migration 20261105010000) +
+  full-pull fallback; and pulled data no longer echoes back as uploads (`projector.applyWithoutCapture`, was ~150
+  re-uploads per fresh login). Known, left for the "track the active plan by id" item: the pointer now lives in two
+  places (plans.is_active + users column); an old build on a second phone can leave the column stale; switching
+  built->premade can briefly disagree if the plans upload fails after the users upload; after a reinstall
+  `goalsBeforePlan` (local only) is gone, so End plan keeps the plan's targets.
+
 ## E. Deferred product features (ideas Alex has mentioned; not specced enough to build)
 
 Cook Mode (guided cooking, timers, chef avatar) · Find Your Plan guided questions + "Try Build My Plan instead" bridge ·

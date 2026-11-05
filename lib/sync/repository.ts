@@ -206,6 +206,7 @@ export async function pullSince(userId: string, since: string | null): Promise<S
   // when a login pull drags — e.g. to tell a flaky network from a heavy table.
   const perf: Record<string, { ms: number; rows: number }> = {};
   const pullStart = Date.now();
+  let usersActivePlanName: string | null = null;
 
   // users (profile + goals) — omitted from the snapshot when unchanged in a delta.
   {
@@ -218,6 +219,8 @@ export async function pullSince(userId: string, since: string | null): Promise<S
       const { profile, goals } = M.usersRowToProfileGoals(data);
       snapshot.profile = profile;
       snapshot.goals = goals;
+      usersActivePlanName = typeof data.active_plan_name === 'string' ? data.active_plan_name : null;
+      if (since == null) snapshot.usersActivePlanName = usersActivePlanName;
     }
     perf.users = { ms: Date.now() - s, rows: data ? 1 : 0 };
   }
@@ -392,6 +395,15 @@ export async function pullSince(userId: string, since: string | null): Promise<S
     // fetched here is current.
     const activeRow = planRows.find(p => p.is_active);
     if (activeRow) snapshot.activePlanName = activeRow.name;
+    // An Explore plan has no synced row: fall back to the users column, but
+    // only on a full pull (a delta can omit the users row or the plan rows,
+    // and must not resurrect a pointer the user just changed).
+    // Only for a name no synced plan has — a built plan's own row (active or
+    // not) is the truth for it.
+    else if (
+      since == null && usersActivePlanName
+      && !planRows.some(r => r.name === usersActivePlanName)
+    ) snapshot.activePlanName = usersActivePlanName;
     perf.plans = { ms: Date.now() - s, rows: planRows.length };
   }
 

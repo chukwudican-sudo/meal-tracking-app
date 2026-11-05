@@ -59,6 +59,9 @@ export function profileToUsersRow(
       goals.waterTargetCups != null ? cupsToLiters(goals.waterTargetCups) : null,
     goal_date: profile.goalDate ?? null,
     notification_permission: profile.notificationsAllowed ?? false,
+    // Explore plans never sync as rows, so this is the only server record of
+    // which one is running (restored on a fresh install).
+    active_plan_name: profile.activePlanName?.trim().slice(0, 200) || null,
     // NOTE: free_scans_remaining and subscription_* are trigger-protected on
     // the server and must never be sent from the client.
   };

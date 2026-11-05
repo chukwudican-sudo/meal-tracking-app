@@ -2152,7 +2152,8 @@ export const useMealStore = create<AppStore>()(
           // in the outbox (any dirty plan key means the user just changed plans).
           let nextProfile = profile;
           const anyPlanDirty = Array.from(dirtyKeys).some(k => k.startsWith('plans:'));
-          if (snapshot.activePlanName != null && !anyPlanDirty) {
+          // A premade-plan switch is queued only as the users row.
+          if (snapshot.activePlanName != null && !anyPlanDirty && !usersDirty) {
             nextProfile = { ...nextProfile, activePlanName: snapshot.activePlanName };
           }
 
