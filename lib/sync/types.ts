@@ -14,7 +14,9 @@ export type SyncTable =
   | 'kitchen_items'
   | 'cart_items'
   | 'planned_ingredients'
-  | 'plans';
+  | 'plans'
+  | 'progress_daily'   // water per day
+  | 'meal_templates';  // the user's own repeating meals / scheduled recipes
 
 export type OutboxOp = 'upsert' | 'delete';
 
@@ -48,6 +50,8 @@ export const entityKey = {
   weightLog: (date: string) => `weight_logs:${date}`,
   savedRecipe: (savedRecipeId: string) => `saved_recipes:${savedRecipeId}`,
   plan: (planId: string) => `plans:${planId}`,
+  water: (date: string) => `progress_daily:${date}`,
+  template: (templateId: string) => `meal_templates:${templateId}`,
   // Grocery keys are table-scoped so a section move (delete-old + upsert-new)
   // produces two distinct keys that both survive outbox coalescing.
   grocery: (table: SyncTable, groceryKey: string) => `${table}:${groceryKey}`,

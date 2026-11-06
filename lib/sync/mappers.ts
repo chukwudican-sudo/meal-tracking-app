@@ -11,7 +11,10 @@ import type {
   Ingredient,
   MealEntry,
   MealPlan,
+  MealSlot,
+  MealTemplate,
   NutrientKey,
+  NutrientValues,
   PlanDayMeal,
   RecipeCategory,
   RecipeDifficulty,
@@ -69,6 +72,15 @@ export function profileToUsersRow(
     // '' (not null) = "no plan": other phones end theirs on seeing it; null
     // only means never written (see repository pullSince).
     active_plan_name: activePlanWire(profile.activePlanName),
+    // Settings (Nov 6). Read back null-safe: null = an older build never
+    // wrote them, so the phone keeps its own.
+    // '' (not null) when cleared, so the clear reaches other phones.
+    last_name: profile.lastName != null ? profile.lastName.trim().slice(0, 100) : null,
+    weight_unit: profile.weightUnit ?? null,
+    meal_slots: profile.mealSlots ?? null,
+    meal_reminders_enabled: profile.mealRemindersEnabled ?? null,
+    remind_minutes_before: profile.remindMinutesBefore ?? null,
+    secondary_targets: goals.secondaryTargets ?? null,
     // NOTE: free_scans_remaining and subscription_* are trigger-protected on
     // the server and must never be sent from the client.
   };
@@ -95,6 +107,11 @@ export function usersRowToProfileGoals(row: Record<string, any>): {
     trackedNutrients: (row.secondary_nutrient_priorities ?? []) as NutrientKey[],
     goalDate: row.goal_date ?? null,
     notificationsAllowed: row.notification_permission ?? undefined,
+    lastName: typeof row.last_name === 'string' ? row.last_name : undefined,
+    weightUnit: row.weight_unit === 'kg' || row.weight_unit === 'lbs' ? row.weight_unit : undefined,
+    mealSlots: parseMealSlots(row.meal_slots),
+    mealRemindersEnabled: typeof row.meal_reminders_enabled === 'boolean' ? row.meal_reminders_enabled : undefined,
+    remindMinutesBefore: REMIND_MINUTES.has(row.remind_minutes_before) ? row.remind_minutes_before : undefined,
   };
   // Use undefined (not 0) for missing targets so a near-empty server row never
   // zeroes out locally-computed goals during the merge (stripUndefined skips them).
@@ -105,8 +122,40 @@ export function usersRowToProfileGoals(row: Record<string, any>): {
     fats: numOrUndef(row.fats_target_grams),
     waterTargetCups:
       row.water_target_liters != null ? Math.round(litersToCups(row.water_target_liters)) : undefined,
+    // {} = all targets cleared; null/absent = never written.
+    secondaryTargets: parseNutrients(row.secondary_targets) ?? (isPlainObject(row.secondary_targets) ? {} : undefined),
   };
   return { profile, goals };
+}
+
+const REMIND_MINUTES = new Set<unknown>([5, 10, 15, 30]);
+
+// jsonb comes back as whatever was stored: keep only well-formed slots, and
+// treat an empty/broken list as "unknown" so the phone keeps its own.
+function parseMealSlots(v: unknown): MealSlot[] | undefined {
+  if (!Array.isArray(v)) return undefined;
+  const slots = v
+    .filter(
+      (s): s is MealSlot =>
+        !!s && typeof s.id === 'string' && typeof s.name === 'string'
+        && typeof s.time === 'string' && /^\d{2}:\d{2}$/.test(s.time),
+    )
+    .map(s => ({ id: s.id, name: s.name.slice(0, 60), time: s.time, skipped: s.skipped === true }));
+  return slots.length > 0 ? slots : undefined;
+}
+
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return !!v && typeof v === 'object' && !Array.isArray(v);
+}
+
+// Secondary nutrient amounts/targets: finite, non-negative numbers only.
+function parseNutrients(v: unknown): NutrientValues | undefined {
+  if (!isPlainObject(v)) return undefined;
+  const out: NutrientValues = {};
+  for (const [k, n] of Object.entries(v as Record<string, unknown>)) {
+    if (typeof n === 'number' && Number.isFinite(n) && n >= 0) out[k as NutrientKey] = n;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
 }
 
 // ─── Meal logs (+ ingredients) ─────────────────────────────────────────────
@@ -139,6 +188,7 @@ export function mealEntryToRows(
     is_ad_hoc: entry.isAdHoc ?? false,
     image_url: entry.photoUri ?? null,
     health_rating: null,
+    nutrients: entry.nutrients && Object.keys(entry.nutrients).length > 0 ? entry.nutrients : null,
   };
   const ingredients = (entry.ingredients ?? []).map((ing, idx) => ({
     id: newId(),
@@ -192,8 +242,59 @@ export function rowToMealEntry(
     isAdHoc: row.is_ad_hoc ?? undefined,
     servings: numOrUndef(row.servings),
     photoUri: row.image_url ?? undefined,
+    nutrients: parseNutrients(row.nutrients),
   };
   return { date: row.date, entry };
+}
+
+// ─── Daily water (progress_daily) ──────────────────────────────────────────
+// Only water_consumed (ml) is written; the table's other totals are unused.
+
+export function waterToRow(userId: string, date: string, ml: number): Record<string, unknown> {
+  return { user_id: userId, date, water_consumed: Math.max(0, Math.round(ml)) };
+}
+
+export function rowToWater(row: Record<string, any>): { date: string; ml: number } | null {
+  const ml = Number(row.water_consumed);
+  if (typeof row.date !== 'string' || !Number.isFinite(ml) || ml < 0) return null;
+  return { date: row.date, ml: Math.min(ml, 20_000) };
+}
+
+// ─── The user's own meal templates (repeating meals, scheduled recipes) ────
+
+export function templateToRow(userId: string, t: MealTemplate): Record<string, unknown> {
+  return { user_id: userId, id: t.id, data: t };
+}
+
+const RECURRENCE_TYPES = new Set(['once', 'daily', 'weekly', 'monthly']);
+
+export function rowToTemplate(row: Record<string, any>): MealTemplate | null {
+  const d = row.data;
+  if (
+    !isPlainObject(d) || typeof row.id !== 'string' || typeof d.name !== 'string'
+    || typeof d.time !== 'string' || !isPlainObject(d.recurrence)
+    || !RECURRENCE_TYPES.has(d.recurrence.type as string)
+  ) return null;
+  const r = d.recurrence as Record<string, unknown>;
+  // Shapes isTemplateApplicableOnDate relies on.
+  if (r.type === 'once' && typeof r.date !== 'string') return null;
+  if (r.type === 'weekly' && !(Array.isArray(r.days) && r.days.every(n => typeof n === 'number'))) return null;
+  if (r.type === 'monthly' && typeof r.day !== 'number') return null;
+  if (r.excludeDates !== undefined && !Array.isArray(r.excludeDates)) return null;
+  const macros = isPlainObject(d.macros) ? d.macros : {};
+  return {
+    ...(d as unknown as MealTemplate),
+    id: row.id,
+    calories: numOrZero(d.calories),
+    ingredients: Array.isArray(d.ingredients)
+      ? d.ingredients.filter((i): i is Ingredient => isPlainObject(i) && typeof i.name === 'string')
+      : [],
+    macros: {
+      protein: numOrZero(macros.protein),
+      carbs: numOrZero(macros.carbs),
+      fats: numOrZero(macros.fats),
+    },
+  };
 }
 
 // ─── Weight logs ───────────────────────────────────────────────────────────

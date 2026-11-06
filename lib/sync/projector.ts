@@ -5,8 +5,10 @@
 // subsequent change emits the delta. Reference checks keep unrelated updates
 // cheap; per-record content hashes avoid spurious writes.
 
-import { useMealStore } from '@/store/useMealStore';
-import type { AppStore, GroceryItem, MealEntry, MealPlan, SavedRecipe, ServerSnapshot } from '@/store/types';
+import { isPlanTemplate, useMealStore } from '@/store/useMealStore';
+import type {
+  AppStore, GroceryItem, MealEntry, MealPlan, MealTemplate, SavedRecipe, ServerSnapshot,
+} from '@/store/types';
 import { outbox } from './outbox';
 import { entityKey } from './types';
 import { activePlanWire, sectionToTable } from './mappers';
@@ -17,6 +19,7 @@ interface WeightSnap { hash: string }
 interface SavedSnap { hash: string; sr: SavedRecipe }
 interface GrocerySnap { hash: string; table: SyncTable; name: string; item: GroceryItem }
 interface PlanSnap { hash: string; plan: MealPlan; isActive: boolean }
+interface TemplateSnap { hash: string; template: MealTemplate }
 
 function slotNameFor(state: AppStore, entry: MealEntry): string | null {
   if (!entry.slotId) return entry.category ?? null;
@@ -27,7 +30,7 @@ function mealHash(entry: MealEntry): string {
   return JSON.stringify([
     entry.name, entry.time, entry.slotId, entry.calories,
     entry.macros?.protein, entry.macros?.carbs, entry.macros?.fats,
-    entry.status, entry.servings, entry.photoUri,
+    entry.status, entry.servings, entry.photoUri, entry.nutrients,
     (entry.ingredients ?? []).map(i => [i.name, i.quantity, i.unit, i.calories]),
   ]);
 }
@@ -57,7 +60,8 @@ function usersHash(state: AppStore): string {
     p.weightKg, p.targetWeightKg, p.goalType, p.activityLevel, p.paceLbsPerWeek,
     p.dietaryRestrictions, p.allergies, p.trackedNutrients, p.goalDate,
     p.notificationsAllowed, p.activePlanName,
-    g.dailyCalories, g.protein, g.carbs, g.fats, g.waterTargetCups,
+    p.lastName, p.weightUnit, p.mealSlots, p.mealRemindersEnabled, p.remindMinutesBefore,
+    g.dailyCalories, g.protein, g.carbs, g.fats, g.waterTargetCups, g.secondaryTargets,
   ]);
 }
 
@@ -100,6 +104,25 @@ function buildPlans(state: AppStore): Map<string, PlanSnap> {
   return map;
 }
 
+// Water per date (ml). Days holding the first-launch demo meals are skipped:
+// their sample water isn't the user's.
+function buildWater(state: AppStore): Map<string, number> {
+  const map = new Map<string, number>();
+  for (const [date, log] of Object.entries(state.logs)) {
+    if (!log || !(log.waterMl > 0) || log.meals.some(m => m.seed)) continue;
+    map.set(date, log.waterMl);
+  }
+  return map;
+}
+// Only the user's own templates; a plan rebuilds its own.
+function buildTemplates(state: AppStore): Map<string, TemplateSnap> {
+  const map = new Map<string, TemplateSnap>();
+  state.templates.forEach(t => {
+    if (!isPlanTemplate(t)) map.set(t.id, { hash: JSON.stringify(t), template: t });
+  });
+  return map;
+}
+
 class Projector {
   private unsub: (() => void) | null = null;
   private prevLogsRef: unknown = null;
@@ -109,6 +132,7 @@ class Projector {
   private prevProfileRef: unknown = null;
   private prevGoalsRef: unknown = null;
   private prevSavedPlansRef: unknown = null;
+  private prevTemplatesRef: unknown = null;
   private prevActivePlanName: string | undefined = undefined;
 
   private meals = new Map<string, MealSnap>();
@@ -116,6 +140,8 @@ class Projector {
   private saved = new Map<string, SavedSnap>();
   private grocery = new Map<string, GrocerySnap>();
   private plans = new Map<string, PlanSnap>();
+  private water = new Map<string, number>();
+  private templates = new Map<string, TemplateSnap>();
   private usersHashValue = '';
   private applying = false;
 
@@ -155,6 +181,8 @@ class Projector {
     this.saved = buildSaved(s);
     this.grocery = buildGrocery(s);
     this.plans = buildPlans(s);
+    this.water = buildWater(s);
+    this.templates = buildTemplates(s);
     this.usersHashValue = usersHash(s);
     this.prevLogsRef = s.logs;
     this.prevWeightRef = s.weightLog;
@@ -163,6 +191,7 @@ class Projector {
     this.prevProfileRef = s.profile;
     this.prevGoalsRef = s.goals;
     this.prevSavedPlansRef = s.savedPlans;
+    this.prevTemplatesRef = s.templates;
     this.prevActivePlanName = s.profile.activePlanName;
   }
 
@@ -174,7 +203,24 @@ class Projector {
     buildSaved(s).forEach((snap) => this.upsertSaved(snap.sr));
     buildGrocery(s).forEach((snap, key) => this.upsertGrocery(key, snap));
     buildPlans(s).forEach((snap) => this.upsertPlan(snap));
+    buildWater(s).forEach((ml, date) => this.upsertWater(date, ml));
+    buildTemplates(s).forEach(snap => this.upsertTemplate(snap.template));
     this.upsertUsers();
+    this.rebaseline();
+  }
+
+  // One-time upload of what this phone already had before settings, water,
+  // own templates and secondary nutrients started syncing (Nov 6): the
+  // baseline already holds them, so they'd otherwise only go up when next
+  // edited. Run once per account per install, by the engine.
+  enqueueSyncUpgradeBackfill(): void {
+    const s = useMealStore.getState();
+    this.upsertUsers();
+    buildWater(s).forEach((ml, date) => this.upsertWater(date, ml));
+    buildTemplates(s).forEach(snap => this.upsertTemplate(snap.template));
+    buildMeals(s).forEach((snap, id) => {
+      if (snap.entry.nutrients && Object.keys(snap.entry.nutrients).length > 0) this.upsertMeal(id, snap);
+    });
     this.rebaseline();
   }
 
@@ -220,6 +266,15 @@ class Projector {
       if (!serverPlanIds.has(snap.plan.id)) this.upsertPlan(snap);
     });
 
+    const serverWater = snapshot.waterByDate ?? {};
+    buildWater(s).forEach((ml, date) => {
+      if (!(date in serverWater)) this.upsertWater(date, ml);
+    });
+    const serverTemplateIds = new Set((snapshot.templates ?? []).map(t => t.id));
+    buildTemplates(s).forEach(snap => {
+      if (!serverTemplateIds.has(snap.template.id)) this.upsertTemplate(snap.template);
+    });
+
     this.rebaseline();
   }
 
@@ -228,7 +283,12 @@ class Projector {
 
     if (state.logs !== this.prevLogsRef || state.profile !== this.prevProfileRef) {
       this.diffMeals(state);
+      if (state.logs !== this.prevLogsRef) this.diffWater(state);
       this.prevLogsRef = state.logs;
+    }
+    if (state.templates !== this.prevTemplatesRef) {
+      this.diffTemplates(state);
+      this.prevTemplatesRef = state.templates;
     }
     if (state.weightLog !== this.prevWeightRef) {
       this.diffWeights(state);
@@ -273,6 +333,31 @@ class Projector {
       }
     });
     this.meals = curr;
+  }
+
+  private diffWater(state: AppStore): void {
+    const curr = buildWater(state);
+    curr.forEach((ml, date) => {
+      if (this.water.get(date) !== ml) this.upsertWater(date, ml);
+    });
+    // Back to 0 (or the day removed): write 0 — water has no delete.
+    this.water.forEach((_ml, date) => {
+      if (!curr.has(date)) this.upsertWater(date, 0);
+    });
+    this.water = curr;
+  }
+
+  private diffTemplates(state: AppStore): void {
+    const curr = buildTemplates(state);
+    curr.forEach((snap, id) => {
+      if (this.templates.get(id)?.hash !== snap.hash) this.upsertTemplate(snap.template);
+    });
+    this.templates.forEach((_snap, id) => {
+      if (!curr.has(id)) {
+        outbox.enqueue({ table: 'meal_templates', op: 'delete', entityKey: entityKey.template(id), payload: { templateId: id } });
+      }
+    });
+    this.templates = curr;
   }
 
   private diffWeights(state: AppStore): void {
@@ -359,6 +444,14 @@ class Projector {
     outbox.enqueue({
       table: 'plans', op: 'upsert', entityKey: entityKey.plan(snap.plan.id),
       payload: { plan: snap.plan, isActive: snap.isActive },
+    });
+  }
+  private upsertWater(date: string, ml: number): void {
+    outbox.enqueue({ table: 'progress_daily', op: 'upsert', entityKey: entityKey.water(date), payload: { date, ml } });
+  }
+  private upsertTemplate(template: MealTemplate): void {
+    outbox.enqueue({
+      table: 'meal_templates', op: 'upsert', entityKey: entityKey.template(template.id), payload: { template },
     });
   }
   private upsertUsers(): void {

@@ -343,6 +343,9 @@ export interface ServerSnapshot {
   // users.active_plan_name as stored (full pulls only; '' = no plan, null =
   // never written). Lets a full pull upload the local pointer when it differs.
   usersActivePlanName?: string | null;
+  // Water (ml) per date, and the user's own templates (never plan ones).
+  waterByDate?: Record<string, number>;
+  templates?: MealTemplate[];
 }
 
 // ─── Zustand store shape ──────────────────────────────────────────────────────

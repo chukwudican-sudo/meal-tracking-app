@@ -158,8 +158,16 @@ Still open:
     20) before calling `generate-plan-shortlist` — a user who picks more loses the extras without being told.
 29. Re-test `generate-recipe-concept` anti-embellishment (it used to add ingredients the user never mentioned).
 30. `public.users.email` doesn't follow an email change in Auth.
-31. Sync limits: no tombstones for some deletes (deleted on one device can reappear from another),
-    `progress_daily` / water totals aren't synced.
+31. Sync limits: no tombstones for deletes (deleted on one device can reappear from another — now includes the user's
+    own repeating meals / scheduled recipes in `meal_templates`). Meal photos sync only as the phone's local file path
+    (broken on another phone/reinstall) — upload to Storage is a planned pass. Plan meals opened on two phones before
+    either syncs can still double up (own-template meals use a stable id per template+day, plan meals don't). A demo
+    day's sample 500 ml water would upload if the user deletes all of that day's demo meals.
+31b. **More data syncs (Nov 6, migration 20261106010000):** users.last_name / weight_unit / meal_slots /
+    meal_reminders_enabled / remind_minutes_before / secondary_targets (null = never written, keep local), water per
+    day in `progress_daily.water_consumed`, own templates in `meal_templates` (jsonb, PK user_id+id), and
+    `meal_logs.nutrients`. One-time upload per account per install (`sync:upgrade-nov6:<uid>`, 'same' mode only;
+    that pull keeps this phone's settings over the server's).
 32. `supabase/config.toml` has drifted from the live dashboard (auth block) — either update it or note it's unused.
 33. 3 pre-existing tsc errors (`app/profile.tsx:64`, `hooks/useRecipeActions.ts:100,119`).
 34. Dead code to delete (confirm first): `components/EditMealScreen.tsx`, `components/DayDetailModal.tsx`,

@@ -34,12 +34,18 @@ const TABLE_DRAIN_PRIORITY: Record<SyncTable, number> = {
   kitchen_items: 1,
   cart_items: 1,
   planned_ingredients: 1,
+  progress_daily: 1,
+  meal_templates: 1,
   plans: 2,
 };
 
 // Per-user delta high-water-mark: the server timestamp captured before the last
 // successful pull. Next launch/login only fetches rows changed after it.
 const cursorKey = (userId: string): string => `sync:lastPulledAt:${userId}`;
+
+// Set once this install has uploaded the data that only started syncing on
+// Nov 6 (settings, water, own templates, secondary nutrients) for an account.
+const upgradeKey = (userId: string): string => `sync:upgrade-nov6:${userId}`;
 
 export type SyncStatusValue = 'idle' | 'syncing' | 'offline' | 'error';
 
@@ -271,6 +277,20 @@ class SyncEngine {
         // profile): drop it so it can't keep the reset profile here or
         // overwrite the real one on the server.
         if (mode === 'restore') outbox.discard(entityKey.usersSelf());
+        // First pull with the Nov 6 sync on an install that already held
+        // settings locally: this phone's settings win (uploaded just below).
+        // The server's may be another phone's untouched defaults.
+        const upgrading = mode === 'same' && !(await AsyncStorage.getItem(upgradeKey(userId)));
+        if (upgrading) {
+          if (snap.profile) {
+            delete snap.profile.lastName;
+            delete snap.profile.weightUnit;
+            delete snap.profile.mealSlots;
+            delete snap.profile.mealRemindersEnabled;
+            delete snap.profile.remindMinutesBefore;
+          }
+          if (snap.goals) delete snap.goals.secondaryTargets;
+        }
         // Applied server data must not echo back as uploads.
         projector.applyWithoutCapture(() =>
           useMealStore.getState().applyServerSnapshot(snap, outbox.dirtyKeys()),
@@ -288,6 +308,12 @@ class SyncEngine {
           projector.enqueueMissing(snap);
         }
         // Delta pulls re-enqueue nothing: local edits are already captured live.
+
+        // An install that was syncing before settings/water/own templates did
+        // holds them only locally: upload them once. Claim already uploaded
+        // everything, and restore/switch start from the server's copy.
+        if (upgrading) projector.enqueueSyncUpgradeBackfill();
+        await AsyncStorage.setItem(upgradeKey(userId), '1');
 
         // Advance the cursor only after a successful pull + apply.
         await AsyncStorage.setItem(cursorKey(userId), stamp);

@@ -32,7 +32,7 @@ import { isPlaceholderSlot } from '@/constants/planSlots';
 import { PLAN_SEED } from '@/constants/planSeed';
 import { DEFAULT_TRACKED_NUTRIENTS } from '@/constants/nutrients';
 import { classifyIngredient, normalizeIngredientName } from '@/constants/ingredientCategories';
-import { newId, isUuid } from '@/lib/sync/uuid';
+import { newId, isUuid, stableId } from '@/lib/sync/uuid';
 import { entityKey, isGroceryKeyDirty } from '@/lib/sync/types';
 
 // ─── Date helpers ─────────────────────────────────────────────────────────────
@@ -395,6 +395,30 @@ export function isSeedTemplate(t: Pick<MealTemplate, 'id'>): boolean {
 // app's built-in recipes ('premade') are reference content and can't.
 export function isOwnRecipe(r: Pick<SavedRecipe, 'source'>): boolean {
   return r.source !== 'premade';
+}
+
+// The meals templates put on a day that has no log yet. A meal from the
+// user's own template gets a stable id per (template, day), so two phones
+// opening the same day sync one row, not two copies.
+function mealsFromTemplates(templates: MealTemplate[], date: string): MealEntry[] {
+  return templates
+    .filter(t => isTemplateApplicableOnDate(t, date))
+    .map(t => {
+      const own = !isPlanTemplate(t);
+      return {
+        id:          own ? stableId(`tpl-meal|${t.id}|${date}`) : newId(),
+        name:        t.name,
+        time:        t.time,
+        calories:    t.calories,
+        ingredients: t.ingredients,
+        macros:      t.macros,
+        status:      'pending' as const,
+        templateId:  t.id,
+        // Built from the user's own template (scheduled recipe / repeating
+        // meal): theirs, not the plan's — for heatmap, activation, swaps.
+        ...(own ? { isAdHoc: true } : {}),
+      };
+    });
 }
 
 // One rule for "this meal is the user's, keep it" (plan activation + end).
@@ -952,21 +976,8 @@ export const useMealStore = create<AppStore>()(
       resolveDayFromTemplates: (date) => {
         set(state => {
           if (state.logs[date]) return state;  // already has entries — skip
-          const applicable = state.templates.filter(t => isTemplateApplicableOnDate(t, date));
-          if (applicable.length === 0) return state;
-          const meals: MealEntry[] = applicable.map(t => ({
-            id:          newId(),
-            name:        t.name,
-            time:        t.time,
-            calories:    t.calories,
-            ingredients: t.ingredients,
-            macros:      t.macros,
-            status:      'pending',
-            templateId:  t.id,
-            // Built from the user's own template (scheduled recipe / repeating
-            // meal): theirs, not the plan's — for heatmap, activation, swaps.
-            ...(isPlanTemplate(t) ? {} : { isAdHoc: true }),
-          }));
+          const meals = mealsFromTemplates(state.templates, date);
+          if (meals.length === 0) return state;
           return {
             logs: {
               ...state.logs,
@@ -1759,7 +1770,9 @@ export const useMealStore = create<AppStore>()(
           : state.goals;
 
         set({
-          templates: nextTemplates,
+          // The user's own templates stay (they sync now; dropping them here
+          // would delete them on the server too).
+          templates: [...state.templates.filter(t => !isPlanTemplate(t)), ...nextTemplates],
           goals: nextGoals,
           logs: {
             ...state.logs,
@@ -2220,7 +2233,7 @@ export const useMealStore = create<AppStore>()(
             grocery = { ...state.grocery, items };
           }
 
-          // Logs — union per date by meal id; keep local water + local-only meals.
+          // Logs — union per date by meal id; keep local-only meals.
           let logs = base.logs;
           if (snapshot.logsByDate) {
             logs = { ...base.logs };
@@ -2247,14 +2260,42 @@ export const useMealStore = create<AppStore>()(
             savedPlans = Array.from(byId.values());
           }
 
+          // The user's own templates (repeating meals, scheduled recipes) —
+          // union by id; server wins unless queued here. Never plan templates.
+          let templates = base.templates;
+          if (snapshot.templates && snapshot.templates.length > 0) {
+            const byId = new Map(base.templates.map(t => [t.id, t]));
+            snapshot.templates.forEach(t => {
+              if (!isPlanTemplate(t) && !dirtyKeys.has(entityKey.template(t.id))) byId.set(t.id, t);
+            });
+            templates = Array.from(byId.values());
+          }
+
+          // Water per day — server wins unless this phone's change is queued.
+          // A day with no log yet is created with its template meals, as
+          // opening it would (an empty log would stop them ever filling in).
+          if (snapshot.waterByDate) {
+            for (const [date, ml] of Object.entries(snapshot.waterByDate)) {
+              if (dirtyKeys.has(entityKey.water(date))) continue;
+              const log = logs[date];
+              if (log) {
+                if (log.waterMl === ml) continue;
+              } else if (ml === 0) {
+                continue; // no day to create for "no water"
+              }
+              if (logs === base.logs) logs = { ...base.logs };
+              logs[date] = { ...(log ?? { date, meals: mealsFromTemplates(templates, date) }), waterMl: ml };
+            }
+          }
+
           if (renamedOnly) {
             return {
               profile: { ...profile, activePlanName: serverName ?? undefined },
-              goals, weightLog, savedRecipes, grocery, logs, savedPlans,
+              goals, weightLog, savedRecipes, grocery, logs, savedPlans, templates,
             };
           }
           if (!planChanged) {
-            return { profile, goals, weightLog, savedRecipes, grocery, logs, savedPlans };
+            return { profile, goals, weightLog, savedRecipes, grocery, logs, savedPlans, templates };
           }
           // Goals arrive with the users row (the other phone already restored
           // or set them). A switched-to plan is rebuilt by the engine's
@@ -2267,7 +2308,7 @@ export const useMealStore = create<AppStore>()(
             grocery,
             logs,
             savedPlans,
-            templates: base.templates,
+            templates,
             customizeDraft: null,
             goalsBeforePlan,
           };

@@ -9,6 +9,7 @@ import type {
   GroceryItem,
   MealEntry,
   MealPlan,
+  MealTemplate,
   SavedRecipe,
   UserGoals,
   UserProfile,
@@ -187,6 +188,30 @@ export async function pushItem(userId: string, item: OutboxItem): Promise<void> 
         .from(item.table)
         .upsert(row, { onConflict: 'user_id,ingredient_name' });
       throwIf(error, `${item.table}.upsert`);
+      return;
+    }
+
+    case 'progress_daily': {
+      // Water only ever changes (0 = none), so there is no delete.
+      const row = M.waterToRow(userId, p.date as string, p.ml as number);
+      const { error } = await supabase.from('progress_daily').upsert(row, { onConflict: 'user_id,date' });
+      throwIf(error, 'progress_daily.upsert');
+      return;
+    }
+
+    case 'meal_templates': {
+      if (item.op === 'delete') {
+        const { error } = await supabase
+          .from('meal_templates')
+          .delete()
+          .eq('user_id', userId)
+          .eq('id', p.templateId);
+        throwIf(error, 'meal_templates.delete');
+        return;
+      }
+      const row = M.templateToRow(userId, p.template as MealTemplate);
+      const { error } = await supabase.from('meal_templates').upsert(row, { onConflict: 'user_id,id' });
+      throwIf(error, 'meal_templates.upsert');
       return;
     }
   }
@@ -433,6 +458,27 @@ export async function pullSince(userId: string, since: string | null): Promise<S
     ];
     snapshot.groceryItems = items;
     perf.grocery = { ms: Date.now() - s, rows: items.length };
+  }
+
+  // water per day (progress_daily) + the user's own meal templates
+  {
+    const s = Date.now();
+    const wq = supabase.from('progress_daily').select('date, water_consumed').eq('user_id', userId);
+    const tq = supabase.from('meal_templates').select('id, data').eq('user_id', userId);
+    const [{ data: water, error: wErr }, { data: tpls, error: tErr }] = await Promise.all([
+      since != null ? wq.gt('updated_at', since) : wq,
+      since != null ? tq.gt('updated_at', since) : tq,
+    ]);
+    throwIf(wErr, 'progress_daily.select');
+    throwIf(tErr, 'meal_templates.select');
+    const waterByDate: Record<string, number> = {};
+    (water ?? []).forEach(r => {
+      const w = M.rowToWater(r);
+      if (w) waterByDate[w.date] = w.ml;
+    });
+    snapshot.waterByDate = waterByDate;
+    snapshot.templates = (tpls ?? []).map(M.rowToTemplate).filter((t): t is MealTemplate => t !== null);
+    perf.water_templates = { ms: Date.now() - s, rows: (water ?? []).length + (tpls ?? []).length };
   }
 
   // One structured summary per pull: total time, mode, per-table ms + row counts,
