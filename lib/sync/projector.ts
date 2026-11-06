@@ -9,7 +9,7 @@ import { useMealStore } from '@/store/useMealStore';
 import type { AppStore, GroceryItem, MealEntry, MealPlan, SavedRecipe, ServerSnapshot } from '@/store/types';
 import { outbox } from './outbox';
 import { entityKey } from './types';
-import { sectionToTable } from './mappers';
+import { activePlanWire, sectionToTable } from './mappers';
 import type { SyncTable } from './types';
 
 interface MealSnap { hash: string; date: string; entry: MealEntry; slotName: string | null }
@@ -211,8 +211,8 @@ class Projector {
     // Accounts from before users.active_plan_name existed (or a pointer never
     // uploaded): send it once, or a reinstall can't bring the plan back.
     if (snapshot.usersActivePlanName !== undefined) {
-      const local = s.profile.activePlanName?.trim().slice(0, 200) || null;
-      if (local !== snapshot.usersActivePlanName) this.upsertUsers();
+      // Also rewrites a never-written null as '' when no plan is running.
+      if (activePlanWire(s.profile.activePlanName) !== snapshot.usersActivePlanName) this.upsertUsers();
     }
 
     const serverPlanIds = new Set((snapshot.plans ?? []).map(pl => pl.id));

@@ -376,6 +376,16 @@ export function isPlanTemplate(t: Pick<MealTemplate, 'id'>): boolean {
   return t.id.startsWith('tpl-plan-') || SEED_TEMPLATES.some(s => s.id === t.id);
 }
 
+// The active plan is matched by name, so two plans with one name get mixed
+// up (which is current, which a reinstall restores). Every new or renamed
+// plan takes a name no saved or Explore plan has: "My Plan — Nov 6 (2)".
+export function uniquePlanName(base: string, plans: Pick<MealPlan, 'name'>[]): string {
+  const taken = new Set(plans.map(p => p.name));
+  let name = base;
+  for (let n = 2; taken.has(name); n++) name = `${base} (${n})`;
+  return name;
+}
+
 // The first-launch demo meals (exact ids) — never the user's own food.
 export function isSeedTemplate(t: Pick<MealTemplate, 'id'>): boolean {
   return SEED_TEMPLATES.some(s => s.id === t.id);
@@ -390,6 +400,32 @@ export function isOwnRecipe(r: Pick<SavedRecipe, 'source'>): boolean {
 // One rule for "this meal is the user's, keep it" (plan activation + end).
 function isUserOwnedMeal(m: MealEntry, ownTemplateIds: Set<string>): boolean {
   return !!m.isAdHoc || m.status === 'completed' || (!!m.templateId && ownTemplateIds.has(m.templateId));
+}
+
+// The plan's part of the schedule, removed from today on: its templates go,
+// and from today on only what the user owns stays (meals they added, anything
+// eaten, meals from their own templates). Past days are history. Shared by
+// endPlan and by a pull that says the plan ended/changed on another phone;
+// `keepMeal` lets the latter keep meals with a write still queued.
+function withoutPlanFromToday(
+  templates: MealTemplate[],
+  logs: Record<string, DailyLog>,
+  today: string,
+  keepMeal: (m: MealEntry) => boolean = () => false,
+): { templates: MealTemplate[]; logs: Record<string, DailyLog> } {
+  const keptTemplates = templates.filter(t => !isPlanTemplate(t));
+  const keptTemplateIds = new Set(keptTemplates.map(t => t.id));
+  const nextLogs: Record<string, DailyLog> = {};
+  Object.entries(logs).forEach(([d, log]) => {
+    if (d < today) {
+      nextLogs[d] = log;
+      return;
+    }
+    const keep = log.meals.filter(m => isUserOwnedMeal(m, keptTemplateIds) || keepMeal(m));
+    if (d > today && keep.length === 0) return;
+    nextLogs[d] = { ...log, meals: keep };
+  });
+  return { templates: keptTemplates, logs: nextLogs };
 }
 
 // Meals on days after today — the ones activating a new plan replaces.
@@ -1648,28 +1684,12 @@ export const useMealStore = create<AppStore>()(
         const state = get();
         const today = toIsoDate(new Date());
 
-        // The user's own templates (scheduled recipes, repeating meals) stay;
-        // the plan's go.
-        const keptTemplates = state.templates.filter(t => !isPlanTemplate(t));
-        const keptTemplateIds = new Set(keptTemplates.map(t => t.id));
-
-        // Past days are history. From today on keep only what the user owns:
-        // meals they added (isAdHoc), anything already eaten, and meals built
-        // from their own templates. Plan meals — including slots filled from
-        // Day Detail — go with the plan.
-        const logs: Record<string, DailyLog> = {};
-        Object.entries(state.logs).forEach(([d, log]) => {
-          if (d < today) {
-            logs[d] = log;
-            return;
-          }
-          const keep = log.meals.filter(m => isUserOwnedMeal(m, keptTemplateIds));
-          if (d > today && keep.length === 0) return;
-          logs[d] = { ...log, meals: keep };
-        });
+        // The user's own templates and meals stay; the plan's go — including
+        // slots filled from Day Detail.
+        const { templates, logs } = withoutPlanFromToday(state.templates, state.logs, today);
 
         set({
-          templates: keptTemplates,
+          templates,
           logs,
           // Clearing the pointer makes the projector re-push every saved plan
           // with is_active=false, so login's hydrateActivePlanIfNeeded can't
@@ -1693,7 +1713,10 @@ export const useMealStore = create<AppStore>()(
         const state = get();
         const activeName = state.profile.activePlanName;
         if (!activeName) return;
-        if (state.templates.length > 0) return; // a plan is already live; leave it
+        // A plan is already live; leave it. (Only plan templates count: the
+        // user's own scheduled recipes must not block rebuilding a plan that
+        // another phone switched to.)
+        if (state.templates.some(isPlanTemplate)) return;
 
         const plan =
           state.savedPlans.find(p => p.name === activeName) ??
@@ -1816,7 +1839,8 @@ export const useMealStore = create<AppStore>()(
         const plan: MealPlan = {
           // UUID so the local id doubles as the server plans.id primary key.
           id: newId(),
-          name,
+          // "Save current plan" passes the active plan's own name.
+          name: uniquePlanName(name, [...state.savedPlans, ...state.plans]),
           description: undefined,
           disclaimer: undefined,
           category: undefined,
@@ -1830,11 +1854,19 @@ export const useMealStore = create<AppStore>()(
       },
 
       renameSavedPlan: (id, name) => {
-        set(state => ({
-          savedPlans: state.savedPlans.map(p =>
-            p.id === id ? { ...p, name } : p,
-          ),
-        }));
+        set(state => {
+          const plan = state.savedPlans.find(p => p.id === id);
+          if (!plan || plan.name === name) return {};
+          const others = [...state.savedPlans.filter(p => p.id !== id), ...state.plans];
+          const unique = uniquePlanName(name, others);
+          // The pointer is the name: renaming the running plan must carry it,
+          // or the plan stops being "current" (and syncs as inactive).
+          const wasActive = state.profile.activePlanName === plan.name;
+          return {
+            savedPlans: state.savedPlans.map(p => (p.id === id ? { ...p, name: unique } : p)),
+            ...(wasActive ? { profile: { ...state.profile, activePlanName: unique } } : {}),
+          };
+        });
       },
 
       removeSavedPlan: (id) => {
@@ -1857,11 +1889,7 @@ export const useMealStore = create<AppStore>()(
           // Premade: read-only seed content. Save the edits as the user's own
           // plan (UUID id so it syncs; unique name since the active plan is
           // matched by name).
-          // Unique across saved AND premade plans (the active plan is matched by name).
-          const taken = new Set([...state.savedPlans, ...state.plans].map(p => p.name));
-          const base = `My ${draft.name}`;
-          let name = base;
-          for (let n = 2; taken.has(name); n++) name = `${base} ${n}`;
+          const name = uniquePlanName(`My ${draft.name}`, [...state.savedPlans, ...state.plans]);
           applied = { ...draft, id: newId(), name, source: 'user', savedAt: new Date().toISOString() };
           set({ savedPlans: [applied, ...state.savedPlans] });
         }
@@ -2090,8 +2118,66 @@ export const useMealStore = create<AppStore>()(
 
       // ── Cloud sync merge ───────────────────────────────────────────────────
       applyServerSnapshot: (snapshot, dirtyKeys) => {
+        let planChanged = false;
         set(state => {
           const usersDirty = dirtyKeys.has(entityKey.usersSelf());
+          const today = toIsoDate(new Date());
+
+          // Active plan — follow the server when another phone ended or
+          // switched it, but never over a local change still queued (any
+          // dirty plan key or the users row = the user just changed plans
+          // here). serverName: a name, null = no plan, undefined = no news.
+          const anyPlanDirty = Array.from(dirtyKeys).some(k => k.startsWith('plans:'));
+          const serverName =
+            snapshot.activePlanName ?? (snapshot.activePlanEnded ? null : undefined);
+          const localName = state.profile.activePlanName || null;
+          const pointerNews =
+            !anyPlanDirty && !usersDirty && serverName !== undefined && serverName !== localName;
+          const findPlan = (name: string | null) =>
+            name == null
+              ? undefined
+              : (snapshot.plans ?? []).find(p => p.name === name) ??
+                state.savedPlans.find(p => p.name === name) ??
+                state.plans.find(p => p.name === name);
+          const serverPlan = findPlan(serverName ?? null);
+          const localPlan = findPlan(localName);
+          // Same plan under a new name (renamed on the other phone): only the
+          // pointer moves; the running plan and its meals stay as they are.
+          const renamedOnly = pointerNews && !!serverPlan && serverPlan.id === localPlan?.id;
+          planChanged = pointerNews && !renamedOnly;
+          // The old plan's meals go from today on, like endPlan — before the
+          // pulled meals merge in, so a switched-to plan's synced meals stay.
+          // A pull can't see deleted rows, so each phone clears its own copies.
+          // A switch also empties future days, as activatePlan does on the
+          // other phone (or they'd never get the new plan's meals). Meals with
+          // a write still queued are kept (never drop unsynced data).
+          const isDirtyMeal = (m: MealEntry) => dirtyKeys.has(entityKey.mealLog(m.id));
+          let base = { templates: state.templates, logs: state.logs };
+          if (planChanged && localName) {
+            base = withoutPlanFromToday(state.templates, state.logs, today, isDirtyMeal);
+          }
+          if (planChanged && serverName) {
+            const logsNow: Record<string, DailyLog> = {};
+            Object.entries(base.logs).forEach(([d, log]) => {
+              if (d <= today) {
+                logsNow[d] = log;
+                return;
+              }
+              const keep = log.meals.filter(isDirtyMeal);
+              if (keep.length > 0) logsNow[d] = { ...log, meals: keep };
+            });
+            base = { ...base, logs: logsNow };
+          }
+          // Own goals while a plan with targets runs (endPlan restores them).
+          // The pulled goals may already be the new plan's targets, so save
+          // this phone's goals from before the merge — unless this is a
+          // restore (reset profile: its goals are only defaults).
+          const goalsBeforePlan =
+            serverName === null || (serverPlan && !serverPlan.targets)
+              ? null
+              : serverPlan?.targets && profileHasData(state.profile)
+                ? state.goalsBeforePlan ?? state.goals
+                : state.goalsBeforePlan;
 
           const profile =
             snapshot.profile && !usersDirty
@@ -2135,9 +2221,9 @@ export const useMealStore = create<AppStore>()(
           }
 
           // Logs — union per date by meal id; keep local water + local-only meals.
-          let logs = state.logs;
+          let logs = base.logs;
           if (snapshot.logsByDate) {
-            logs = { ...state.logs };
+            logs = { ...base.logs };
             for (const [date, meals] of Object.entries(snapshot.logsByDate)) {
               const byId = new Map((logs[date]?.meals ?? []).map(m => [m.id, m]));
               meals.forEach(m => {
@@ -2161,18 +2247,32 @@ export const useMealStore = create<AppStore>()(
             savedPlans = Array.from(byId.values());
           }
 
-          // Active-plan pointer — mirror the server is_active flag onto the local
-          // name-based pointer, but never clobber a local activation still pending
-          // in the outbox (any dirty plan key means the user just changed plans).
-          let nextProfile = profile;
-          const anyPlanDirty = Array.from(dirtyKeys).some(k => k.startsWith('plans:'));
-          // A premade-plan switch is queued only as the users row.
-          if (snapshot.activePlanName != null && !anyPlanDirty && !usersDirty) {
-            nextProfile = { ...nextProfile, activePlanName: snapshot.activePlanName };
+          if (renamedOnly) {
+            return {
+              profile: { ...profile, activePlanName: serverName ?? undefined },
+              goals, weightLog, savedRecipes, grocery, logs, savedPlans,
+            };
           }
-
-          return { profile: nextProfile, goals, weightLog, savedRecipes, grocery, logs, savedPlans };
+          if (!planChanged) {
+            return { profile, goals, weightLog, savedRecipes, grocery, logs, savedPlans };
+          }
+          // Goals arrive with the users row (the other phone already restored
+          // or set them). A switched-to plan is rebuilt by the engine's
+          // hydrateActivePlanIfNeeded right after this merge.
+          return {
+            profile: { ...profile, activePlanName: serverName ?? undefined },
+            goals,
+            weightLog,
+            savedRecipes,
+            grocery,
+            logs,
+            savedPlans,
+            templates: base.templates,
+            customizeDraft: null,
+            goalsBeforePlan,
+          };
         });
+        if (planChanged) get().refreshGroceryWeek(mondayOfWeek(toIsoDate(new Date())));
         get().recalcStreak();
       },
     }),

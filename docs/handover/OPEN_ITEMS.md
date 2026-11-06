@@ -117,11 +117,17 @@ Still open:
     **and "user content used for analytics"** — the `ai_events` log).
 18b. **AI history privacy** (before launch): privacy-policy line ("we use your AI inputs to improve accuracy"), and a
     scheduled clean-up deleting `ai_events` rows older than 90 days (pg_cron).
-18c. **Active plan is identified by name** (`activePlanName`) — two plans with the same name confuse isCurrent /
-    login restore. Store an id instead (touches sync: `plans.is_active`).
+18c. **Active plan is identified by name** (`activePlanName`). Since Nov 6 every new/renamed plan gets a unique name
+    (`uniquePlanName`, "My Plan — Nov 6 (2)"), so this is safe going forward; two older duplicates still exist on the
+    test account ("My Plan — Jul 28"). An id-based pointer was judged not worth the risk once names are unique.
 18d. **"Missed" doesn't sync** (server only stores is_completed) — on another device/reinstall past missed meals show
     as not eaten. Needs a status column.
-18e. Single-device assumption: ending a plan on one phone doesn't remove it on another (pull ignores a null pointer).
+18e. **Plan follows across phones (Nov 6):** on its next launch pull a phone follows the server pointer —
+    `users.active_plan_name` is `''` for "no plan" (null = never written: the scan counter and RevenueCat webhook also
+    bump the users row). End → clears the plan from today on (like endPlan); switch → also empties future days and
+    the engine's hydrate rebuilds the new plan; rename (same plan id) → pointer only. Known limit: the pointer is
+    last-write-wins with the whole profile row, so a phone still open on the old plan that then saves any profile
+    change puts its plan back on the server (same as every other profile field). Pulls only run at launch/login.
     Also: deletes are hard deletes and delta pulls only return updated rows, so a record deleted on one device stays
     on another and can be re-uploaded if edited there (all synced tables). Fix needs tombstones (`deleted_at`).
 18h. **Remove recipes you made / clear Recent (later, Alex Oct 30):** Custom Recipe now saves every result to Recent
@@ -152,8 +158,7 @@ Still open:
     20) before calling `generate-plan-shortlist` — a user who picks more loses the extras without being told.
 29. Re-test `generate-recipe-concept` anti-embellishment (it used to add ingredients the user never mentioned).
 30. `public.users.email` doesn't follow an email change in Auth.
-31. Sync limits: no tombstones for some deletes (deleted on one device can reappear from another), premade active plan
-    doesn't roam between devices, renaming the active plan doesn't update `activePlanName` everywhere,
+31. Sync limits: no tombstones for some deletes (deleted on one device can reappear from another),
     `progress_daily` / water totals aren't synced.
 32. `supabase/config.toml` has drifted from the live dashboard (auth block) — either update it or note it's unused.
 33. 3 pre-existing tsc errors (`app/profile.tsx:64`, `hooks/useRecipeActions.ts:100,119`).

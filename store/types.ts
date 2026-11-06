@@ -337,8 +337,11 @@ export interface ServerSnapshot {
   // flag back to the local name-based pointer.
   plans?: MealPlan[];
   activePlanName?: string;
-  // users.active_plan_name as stored (full pulls only; null = empty). Lets a
-  // full pull upload the local pointer when the server's copy differs.
+  // The server says no plan is running (another phone ended it): '' in
+  // users.active_plan_name. Not set for null, which only means "never written".
+  activePlanEnded?: boolean;
+  // users.active_plan_name as stored (full pulls only; '' = no plan, null =
+  // never written). Lets a full pull upload the local pointer when it differs.
   usersActivePlanName?: string | null;
 }
 

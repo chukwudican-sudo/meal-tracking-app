@@ -28,7 +28,7 @@ import { generateMealSuggestions } from '@/ai/generateMealSuggestions';
 import { generatePlanShortlist } from '@/ai/generatePlanShortlist';
 import { openPaywall } from '@/lib/paywall';
 import { useEntitlementStore } from '@/store/useEntitlementStore';
-import { useMealStore } from '@/store/useMealStore';
+import { uniquePlanName, useMealStore } from '@/store/useMealStore';
 import { useToastStore } from '@/store/useToastStore';
 import { confirmPlanActivation } from '@/lib/planActivation';
 import { PLAN_PICK_LIMITS } from '@/constants/planPicks';
@@ -365,6 +365,8 @@ export default function BuildPlanScreen() {
   const recipes = useMealStore(s => s.recipes);
   const activatePlan = useMealStore(s => s.activatePlan);
   const saveCurrentPlanAs = useMealStore(s => s.saveCurrentPlanAs);
+  const savedPlans = useMealStore(s => s.savedPlans);
+  const catalogPlans = useMealStore(s => s.plans);
   const ensureRecipeSaved = useMealStore(s => s.ensureRecipeSaved);
   const goals = useMealStore(s => s.goals);
   const planAvoidFoods = useMealStore(s => s.planAvoidFoods);
@@ -1857,9 +1859,13 @@ export default function BuildPlanScreen() {
       );
 
       // Auto-save to Saved Plans (matches spec: every Build My Plan run saves).
-      useMealStore.setState(state => ({ savedPlans: [plan, ...state.savedPlans] }));
-      activatePlan(plan);
-      showToast(`${plan.name} activated`);
+      // Named here, after "Save current plan" may have added one: a second
+      // build on the same day becomes "My Plan — Nov 6 (2)".
+      const state = useMealStore.getState();
+      const named = { ...plan, name: uniquePlanName(plan.name, [...state.savedPlans, ...state.plans]) };
+      useMealStore.setState(s => ({ savedPlans: [named, ...s.savedPlans] }));
+      activatePlan(named);
+      showToast(`${named.name} activated`);
       router.dismissAll();
     };
 
@@ -2282,7 +2288,7 @@ export default function BuildPlanScreen() {
         {/* Plan name + daily target — mirrors the plan detail page header. */}
         <View style={styles.planNameCard}>
           <Text style={styles.planNameLabel}>YOUR PLAN</Text>
-          <Text style={styles.planNameText}>{autoPlanName()}</Text>
+          <Text style={styles.planNameText}>{uniquePlanName(autoPlanName(), [...savedPlans, ...catalogPlans])}</Text>
           <Text style={styles.planNameSub}>
             {activeSlots.length} meal {activeSlots.length === 1 ? 'type' : 'types'} · 7 days
           </Text>

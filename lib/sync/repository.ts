@@ -395,15 +395,19 @@ export async function pullSince(userId: string, since: string | null): Promise<S
     // fetched here is current.
     const activeRow = planRows.find(p => p.is_active);
     if (activeRow) snapshot.activePlanName = activeRow.name;
-    // An Explore plan has no synced row: fall back to the users column, but
-    // only on a full pull (a delta can omit the users row or the plan rows,
-    // and must not resurrect a pointer the user just changed).
-    // Only for a name no synced plan has — a built plan's own row (active or
-    // not) is the truth for it.
-    else if (
-      since == null && usersActivePlanName
-      && !planRows.some(r => r.name === usersActivePlanName)
-    ) snapshot.activePlanName = usersActivePlanName;
+    // An Explore plan has no synced row: fall back to the users column. It is
+    // rewritten with every profile upload, and every plan change uploads the
+    // profile, so when the users row is in the pull (full, or changed since
+    // the cursor) the column is the latest pointer.
+    // Only for a name no synced plan in this pull has — a built plan's own
+    // row (active or not) is the truth for it.
+    else if (usersActivePlanName && !planRows.some(r => r.name === usersActivePlanName)) {
+      snapshot.activePlanName = usersActivePlanName;
+    }
+    // '' = a phone ended its plan (or never had one). null is NOT that: the
+    // free-scan counter and the RevenueCat webhook also update the users row,
+    // and an account from before the column existed holds null there.
+    else if (usersActivePlanName === '') snapshot.activePlanEnded = true;
     perf.plans = { ms: Date.now() - s, rows: planRows.length };
   }
 

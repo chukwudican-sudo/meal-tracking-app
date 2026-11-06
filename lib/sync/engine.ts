@@ -264,6 +264,7 @@ class SyncEngine {
           delete snap.profile;
           delete snap.goals;
           delete snap.activePlanName;
+          delete snap.activePlanEnded;
         }
         // A profile write still queued from an earlier first login that was
         // cut short holds only defaults (restore needs an empty local

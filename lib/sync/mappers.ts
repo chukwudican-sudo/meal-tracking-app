@@ -27,6 +27,11 @@ import type { SyncTable } from './types';
 
 // ─── Users (profile + goals) ───────────────────────────────────────────────
 
+// users.active_plan_name as written: the plan's name, or '' for no plan.
+export function activePlanWire(name: string | undefined): string {
+  return name?.trim().slice(0, 200) ?? '';
+}
+
 export function profileToUsersRow(
   userId: string,
   profile: UserProfile,
@@ -61,7 +66,9 @@ export function profileToUsersRow(
     notification_permission: profile.notificationsAllowed ?? false,
     // Explore plans never sync as rows, so this is the only server record of
     // which one is running (restored on a fresh install).
-    active_plan_name: profile.activePlanName?.trim().slice(0, 200) || null,
+    // '' (not null) = "no plan": other phones end theirs on seeing it; null
+    // only means never written (see repository pullSince).
+    active_plan_name: activePlanWire(profile.activePlanName),
     // NOTE: free_scans_remaining and subscription_* are trigger-protected on
     // the server and must never be sent from the client.
   };
