@@ -346,6 +346,10 @@ export interface ServerSnapshot {
   // Water (ml) per date, and the user's own templates (never plan ones).
   waterByDate?: Record<string, number>;
   templates?: MealTemplate[];
+  // Items deleted on another phone since the cursor (delta pulls only), by
+  // table and the key the app knows them by (meal id, weight day, ingredient
+  // name, …). Applied before the rows above, so a re-created item stays.
+  deletions?: { table: string; key: string }[];
 }
 
 // ─── Zustand store shape ──────────────────────────────────────────────────────

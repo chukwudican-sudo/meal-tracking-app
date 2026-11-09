@@ -158,8 +158,9 @@ Still open:
     20) before calling `generate-plan-shortlist` — a user who picks more loses the extras without being told.
 29. Re-test `generate-recipe-concept` anti-embellishment (it used to add ingredients the user never mentioned).
 30. `public.users.email` doesn't follow an email change in Auth.
-31. Sync limits: no tombstones for deletes (deleted on one device can reappear from another — now includes the user's
-    own repeating meals / scheduled recipes in `meal_templates`). Meal photos sync only as the phone's local file path
+31. Sync limits: deletes now reach other phones (Nov 9, `sync_deletions`: an AFTER DELETE trigger on the 8 synced
+    tables writes a note; delta pulls remove those items before merging, queued local edits win; notes kept 180 days, so
+    a phone unopened longer can keep stale items). Meal photos sync only as the phone's local file path
     (broken on another phone/reinstall) — upload to Storage is a planned pass. Plan meals opened on two phones before
     either syncs can still double up (own-template meals use a stable id per template+day, plan meals don't). A demo
     day's sample 500 ml water would upload if the user deletes all of that day's demo meals.

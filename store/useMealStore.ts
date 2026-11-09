@@ -421,6 +421,70 @@ function mealsFromTemplates(templates: MealTemplate[], date: string): MealEntry[
     });
 }
 
+// Items another phone deleted (sync_deletions notes on a delta pull) are
+// removed here before the pulled rows merge, so an item deleted and then
+// re-created (same Kitchen name, same weight day) correctly stays. An item
+// with a write still queued on this phone is kept: its upload wins, and
+// unsynced data is never dropped.
+const GROCERY_TABLE_BY_SECTION: Partial<Record<GroceryItem['section'], string>> = {
+  kitchen: 'kitchen_items',
+  cart: 'cart_items',
+  planned: 'planned_ingredients',
+};
+
+function withoutDeleted(
+  state: AppStore,
+  deletions: { table: string; key: string }[] | undefined,
+  dirtyKeys: Set<string>,
+): AppStore {
+  if (!deletions || deletions.length === 0) return state;
+  const keys = (table: string) => new Set(deletions.filter(d => d.table === table).map(d => d.key));
+  const meals = keys('meal_logs');
+  const weights = keys('weight_logs');
+  const saved = keys('saved_recipes');
+  const plans = keys('plans');
+  const tpls = keys('meal_templates');
+  const groceryByTable: Record<string, Set<string>> = {};
+  ['kitchen_items', 'cart_items', 'planned_ingredients'].forEach(t => {
+    groceryByTable[t] = new Set(Array.from(keys(t)).map(normalizeIngredientName));
+  });
+
+  let logs = state.logs;
+  if (meals.size > 0) {
+    logs = {};
+    for (const [date, log] of Object.entries(state.logs)) {
+      const kept = log.meals.filter(m => !meals.has(m.id) || dirtyKeys.has(entityKey.mealLog(m.id)));
+      logs[date] = kept.length === log.meals.length ? log : { ...log, meals: kept };
+    }
+  }
+  const weightLog = weights.size > 0
+    ? state.weightLog.filter(w => !weights.has(w.date) || dirtyKeys.has(entityKey.weightLog(w.date)))
+    : state.weightLog;
+  const savedRecipes = saved.size > 0
+    ? state.savedRecipes.filter(r => !saved.has(r.id) || dirtyKeys.has(entityKey.savedRecipe(r.id)))
+    : state.savedRecipes;
+  const savedPlans = plans.size > 0
+    ? state.savedPlans.filter(p => !plans.has(p.id) || dirtyKeys.has(entityKey.plan(p.id)))
+    : state.savedPlans;
+  const templates = tpls.size > 0
+    ? state.templates.filter(t => isPlanTemplate(t) || !tpls.has(t.id) || dirtyKeys.has(entityKey.template(t.id)))
+    : state.templates;
+  let grocery = state.grocery;
+  const anyGrocery = Object.values(groceryByTable).some(set => set.size > 0);
+  if (anyGrocery) {
+    const items: Record<string, GroceryItem> = {};
+    for (const [key, item] of Object.entries(state.grocery.items)) {
+      // Only when it's still in the section it was deleted from: a move
+      // (Cart → Kitchen) deletes from the old table and re-adds in the new.
+      const table = GROCERY_TABLE_BY_SECTION[item.section];
+      const gone = !!table && groceryByTable[table].has(key) && !isGroceryKeyDirty(dirtyKeys, key);
+      if (!gone) items[key] = item;
+    }
+    grocery = { ...state.grocery, items };
+  }
+  return { ...state, logs, weightLog, savedRecipes, savedPlans, templates, grocery };
+}
+
 // One rule for "this meal is the user's, keep it" (plan activation + end).
 function isUserOwnedMeal(m: MealEntry, ownTemplateIds: Set<string>): boolean {
   return !!m.isAdHoc || m.status === 'completed' || (!!m.templateId && ownTemplateIds.has(m.templateId));
@@ -2132,7 +2196,8 @@ export const useMealStore = create<AppStore>()(
       // ── Cloud sync merge ───────────────────────────────────────────────────
       applyServerSnapshot: (snapshot, dirtyKeys) => {
         let planChanged = false;
-        set(state => {
+        set(current => {
+          const state = withoutDeleted(current, snapshot.deletions, dirtyKeys);
           const usersDirty = dirtyKeys.has(entityKey.usersSelf());
           const today = toIsoDate(new Date());
 
@@ -2160,7 +2225,8 @@ export const useMealStore = create<AppStore>()(
           planChanged = pointerNews && !renamedOnly;
           // The old plan's meals go from today on, like endPlan — before the
           // pulled meals merge in, so a switched-to plan's synced meals stay.
-          // A pull can't see deleted rows, so each phone clears its own copies.
+          // Each phone clears its own copies (sync_deletions only names rows
+          // deleted outright, not a plan's meals that never synced here).
           // A switch also empties future days, as activatePlan does on the
           // other phone (or they'd never get the new plan's meals). Meals with
           // a write still queued are kept (never drop unsynced data).

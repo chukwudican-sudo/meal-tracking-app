@@ -481,6 +481,34 @@ export async function pullSince(userId: string, since: string | null): Promise<S
     perf.water_templates = { ms: Date.now() - s, rows: (water ?? []).length + (tpls ?? []).length };
   }
 
+  // Deletion notes (sync_deletions, filled by a trigger on every delete).
+  // Only deltas need them: a full pull is the whole server state already.
+  // Paged: the API returns at most 1000 rows a request, and a phone offline
+  // for weeks can have more (ending a plan deletes many future meals).
+  if (since != null) {
+    const s = Date.now();
+    const PAGE = 1000;
+    const deletions: { table: string; key: string }[] = [];
+    for (let from = 0; ; from += PAGE) {
+      const { data, error } = await supabase
+        .from('sync_deletions')
+        .select('table_name, entity_key')
+        .eq('user_id', userId)
+        .gt('deleted_at', since)
+        .order('id', { ascending: true })
+        .range(from, from + PAGE - 1);
+      throwIf(error, 'sync_deletions.select');
+      (data ?? []).forEach(r => {
+        if (typeof r.table_name === 'string' && typeof r.entity_key === 'string') {
+          deletions.push({ table: r.table_name, key: r.entity_key });
+        }
+      });
+      if ((data ?? []).length < PAGE || from >= 50 * PAGE) break; // hard stop, never loops forever
+    }
+    snapshot.deletions = deletions;
+    perf.deletions = { ms: Date.now() - s, rows: deletions.length };
+  }
+
   // One structured summary per pull: total time, mode, per-table ms + row counts,
   // whether a profile came back, and the resolved active plan. This is the line
   // to check first if a login pull is slow or returns unexpectedly empty data.
