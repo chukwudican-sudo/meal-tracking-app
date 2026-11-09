@@ -27,6 +27,7 @@ import { rateMealGrade } from '@/utils/mealRating';
 import { AIError, aiErrorMessage } from '@/ai/aiEdgeClient';
 import { fixMeal } from '@/ai/fixMeal';
 import { openPaywall } from '@/lib/paywall';
+import { BackButton, HEADER_SIDE } from '@/components/PageHeader';
 import { PaywallModalHost } from '@/components/paywall/PaywallModalHost';
 import { ToastHost } from '@/components/ToastHost';
 import { useMealStore } from '@/store/useMealStore';
@@ -347,11 +348,14 @@ export function MealDetailModal() {
         <Pressable style={styles.card} onPress={() => menuOpen && setMenuOpen(false)}>
           {/* Header */}
           <View style={styles.header}>
-            <TouchableOpacity onPress={handleDismiss} hitSlop={10}>
-              <Ionicons name="chevron-back" size={26} color={COLORS.text} />
-            </TouchableOpacity>
+            <BackButton onPress={handleDismiss} />
             <Text style={styles.headerTitle}>Nutrition</Text>
-            <TouchableOpacity onPress={() => { setMenuOpen(v => !v); setPhotoSubmenu(false); }} hitSlop={10}>
+            <TouchableOpacity
+              onPress={() => { setMenuOpen(v => !v); setPhotoSubmenu(false); }}
+              hitSlop={10}
+              style={styles.headerSide}
+              accessibilityLabel="More options"
+            >
               <Ionicons name="ellipsis-horizontal" size={24} color={COLORS.text} />
             </TouchableOpacity>
           </View>
@@ -682,6 +686,8 @@ const styles = StyleSheet.create({
 
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   headerTitle: { color: COLORS.text, fontSize: 17, fontWeight: '700' },
+  // Same width as the back button so the title sits centred.
+  headerSide: { width: HEADER_SIDE, height: HEADER_SIDE, alignItems: 'flex-end', justifyContent: 'center' },
 
   scrollBody: { paddingBottom: 8 },
 

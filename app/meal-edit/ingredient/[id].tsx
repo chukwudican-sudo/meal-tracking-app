@@ -12,6 +12,7 @@ import {
 import { router, useLocalSearchParams } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
 
+import { PageHeader } from '@/components/PageHeader';
 import { Screen } from '@/components/Screen';
 import { COLORS } from '@/constants/theme';
 import { getNutrientMeta } from '@/constants/nutrients';
@@ -212,34 +213,26 @@ function MacroTile({
 
 function Header({ title, onDelete, onDone }: { title: string; onDelete: () => void; onDone: () => void }) {
   return (
-    <View style={styles.header}>
-      <TouchableOpacity onPress={() => router.back()} hitSlop={10}>
-        <Ionicons name="chevron-back" size={26} color={COLORS.text} />
-      </TouchableOpacity>
-      <Text style={styles.headerTitle} numberOfLines={1}>{title}</Text>
-      <View style={styles.headerRight}>
-        <TouchableOpacity onPress={onDelete} hitSlop={10}>
-          <Ionicons name="trash-outline" size={22} color={COLORS.red} />
-        </TouchableOpacity>
-        <TouchableOpacity onPress={onDone} hitSlop={10}>
-          <Text style={styles.headerDone}>Done</Text>
-        </TouchableOpacity>
-      </View>
-    </View>
+    <PageHeader
+      title={title}
+      wideSides
+      style={styles.headerBorder}
+      right={
+        <View style={styles.headerRight}>
+          <TouchableOpacity onPress={onDelete} hitSlop={10}>
+            <Ionicons name="trash-outline" size={22} color={COLORS.red} />
+          </TouchableOpacity>
+          <TouchableOpacity onPress={onDone} hitSlop={10}>
+            <Text style={styles.headerDone}>Done</Text>
+          </TouchableOpacity>
+        </View>
+      }
+    />
   );
 }
 
 const styles = StyleSheet.create({
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: COLORS.border,
-  },
-  headerTitle: { color: COLORS.text, fontSize: 17, fontWeight: '700', flex: 1, textAlign: 'center' },
+  headerBorder: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: COLORS.border },
   headerRight: { flexDirection: 'row', alignItems: 'center', gap: 16 },
   headerDone: { color: COLORS.green, fontSize: 15, fontWeight: '700' },
 

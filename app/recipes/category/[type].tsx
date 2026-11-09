@@ -1,6 +1,7 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { useMemo } from 'react';
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { PageHeader } from '@/components/PageHeader';
 import { Screen } from '@/components/Screen';
 
 import { RecipeCard } from '@/components/recipes/RecipeCard';
@@ -34,13 +35,7 @@ export default function RecipeCategoryScreen() {
 
   return (
     <Screen edges={['top', 'bottom']}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={handleBack} style={styles.backBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-          <Text style={styles.backArrow}>←</Text>
-        </TouchableOpacity>
-        <Text style={styles.title}>{category ?? 'Recipes'}</Text>
-        <View style={styles.backBtn} />
-      </View>
+      <PageHeader style={styles.header} title={category ?? 'Recipes'} onBack={handleBack} />
 
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
         {!category ? (
@@ -73,19 +68,7 @@ export default function RecipeCategoryScreen() {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: COLORS.bg },
 
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 12,
-    paddingTop: 6,
-    paddingBottom: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: COLORS.border,
-  },
-  backBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  backArrow: { color: COLORS.text, fontSize: 22, fontWeight: '600' },
-  title: { flex: 1, color: COLORS.text, fontSize: 18, fontWeight: '700', textAlign: 'center' },
+  header: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: COLORS.border },
 
   scroll: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 40 },
   empty: { padding: 32, alignItems: 'center' },

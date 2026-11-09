@@ -17,6 +17,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { PageHeader } from '@/components/PageHeader';
 import { RecipeCard } from '@/components/recipes/RecipeCard';
 import { COLORS } from '@/constants/theme';
 import { toRecipeInputFromSaved, useRecipeActions } from '@/hooks/useRecipeActions';
@@ -236,13 +237,7 @@ export function SavedRecipesView({ mode, context, swapFilter = 'All', onBeforeNa
     <View style={styles.container}>
       {/* Title header (hidden when embedded) */}
       {mode === 'full' && title ? (
-        <View style={styles.header}>
-          <TouchableOpacity onPress={handleBack} style={styles.iconBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-            <Text style={styles.backArrow}>←</Text>
-          </TouchableOpacity>
-          <Text style={styles.title} numberOfLines={1}>{title}</Text>
-          <View style={styles.iconBtn} />
-        </View>
+        <PageHeader title={title} onBack={handleBack} />
       ) : null}
 
       {/* Search row + filter icon */}
@@ -416,18 +411,6 @@ function SavedList({ pageWidth, recipes, newRecipeIds, emptyMessage, showAdd, on
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.bg },
-
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 12,
-    paddingTop: 6,
-    paddingBottom: 4,
-  },
-  iconBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  backArrow: { color: COLORS.text, fontSize: 22, fontWeight: '600' },
-  title: { flex: 1, color: COLORS.text, fontSize: 18, fontWeight: '700', textAlign: 'center' },
 
   searchRow: {
     flexDirection: 'row',

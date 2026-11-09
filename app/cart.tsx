@@ -12,6 +12,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { BackButton } from '@/components/PageHeader';
 import { Screen } from '@/components/Screen';
 
 import { COLORS } from '@/constants/theme';
@@ -124,13 +125,7 @@ export default function CartScreen() {
     <Screen edges={['top', 'bottom']}>
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity
-          onPress={handleBack}
-          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-          style={styles.backBtn}
-        >
-          <Text style={styles.backArrow}>←</Text>
-        </TouchableOpacity>
+        <BackButton onPress={handleBack} />
         <View style={styles.headerCenter}>
           <Text style={styles.title}>Cart</Text>
           {cart.length > 0 && (
@@ -353,11 +348,6 @@ const styles = StyleSheet.create({
     height: 40,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  backArrow: {
-    color: COLORS.text,
-    fontSize: 22,
-    fontWeight: '600',
   },
   headerCenter: {
     flex: 1,

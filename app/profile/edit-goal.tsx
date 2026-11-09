@@ -9,6 +9,8 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import Ionicons from '@expo/vector-icons/Ionicons';
+import { PageHeader } from '@/components/PageHeader';
 import { Screen } from '@/components/Screen';
 
 import { COLORS } from '@/constants/theme';
@@ -175,15 +177,16 @@ export default function EditGoalScreen() {
 
   return (
     <Screen edges={['top', 'bottom']}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={handleBack} style={styles.iconBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-          <Text style={styles.backArrow}>←</Text>
-        </TouchableOpacity>
-        <Text style={styles.title}>Edit Goal</Text>
-        <TouchableOpacity onPress={handleClose} style={styles.iconBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-          <Text style={styles.closeBtn}>✕</Text>
-        </TouchableOpacity>
-      </View>
+      <PageHeader
+        title="Edit Goal"
+        onBack={handleBack}
+        style={styles.header}
+        right={
+          <TouchableOpacity onPress={handleClose} style={styles.iconBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+            <Ionicons name="close" size={20} color={COLORS.textSecondary} />
+          </TouchableOpacity>
+        }
+      />
 
       {/* Progress dots */}
       <View style={styles.progressRow}>
@@ -422,20 +425,8 @@ function paceHint(p: GoalPace): string {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: COLORS.bg },
 
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 12,
-    paddingTop: 6,
-    paddingBottom: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: COLORS.border,
-  },
+  header: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: COLORS.border },
   iconBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  backArrow: { color: COLORS.text, fontSize: 22, fontWeight: '600' },
-  closeBtn: { color: COLORS.textSecondary, fontSize: 18 },
-  title: { color: COLORS.text, fontSize: 18, fontWeight: '700' },
 
   progressRow: {
     flexDirection: 'row',

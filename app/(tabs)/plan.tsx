@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import { Screen } from '@/components/Screen';
 import { router, useFocusEffect } from 'expo-router';
+import Ionicons from '@expo/vector-icons/Ionicons';
 
 import { COLORS } from '@/constants/theme';
 import { isTemplateApplicableOnDate, toIsoDate, useMealStore } from '@/store/useMealStore';
@@ -182,11 +183,19 @@ export default function PlanScreen() {
             </Text>
           </View>
           <View style={styles.monthNavRow}>
-            <TouchableOpacity onPress={() => setMiniMonthAnchor(shiftMonth(miniMonthAnchor, -1))}>
-              <Text style={styles.yearNav}>←</Text>
+            <TouchableOpacity
+              onPress={() => setMiniMonthAnchor(shiftMonth(miniMonthAnchor, -1))}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              accessibilityLabel="Previous month"
+            >
+              <Ionicons name="chevron-back" size={18} color={COLORS.text} />
             </TouchableOpacity>
-            <TouchableOpacity onPress={() => setMiniMonthAnchor(shiftMonth(miniMonthAnchor, 1))}>
-              <Text style={styles.yearNav}>→</Text>
+            <TouchableOpacity
+              onPress={() => setMiniMonthAnchor(shiftMonth(miniMonthAnchor, 1))}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              accessibilityLabel="Next month"
+            >
+              <Ionicons name="chevron-forward" size={18} color={COLORS.text} />
             </TouchableOpacity>
           </View>
           <View style={styles.miniWeekLabels}>
@@ -296,7 +305,6 @@ const styles = StyleSheet.create({
   sectionHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
   sectionTitle: { color: COLORS.text, fontWeight: '700', fontSize: 14 },
   muted: { color: COLORS.textSecondary, fontSize: 12 },
-  yearNav: { color: COLORS.text, fontSize: 16, fontWeight: '600', paddingHorizontal: 4 },
   monthNavRow: { flexDirection: 'row', justifyContent: 'flex-end', gap: 12, marginBottom: 8 },
   miniWeekLabels: { flexDirection: 'row', marginBottom: 4 },
   miniWeekLabel: { flex: 1, color: COLORS.textSecondary, fontSize: 10, textAlign: 'center' },

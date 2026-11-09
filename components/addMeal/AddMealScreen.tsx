@@ -24,6 +24,7 @@ import { useCloseOnOverlayReset } from '@/lib/overlays';
 import { MealDraftCard } from './MealDraftCard';
 import { FixResultScreen } from './FixResultScreen';
 import { DisclaimerScreen } from './DisclaimerScreen';
+import { PageHeader } from '@/components/PageHeader';
 import { PaywallModalHost } from '@/components/paywall/PaywallModalHost';
 import { ToastHost } from '@/components/ToastHost';
 import type { MealEntry } from '@/store/types';
@@ -50,6 +51,10 @@ interface PendingDraft {
 export function AddMealScreen({ visible, date, onClose }: Props) {
   const insets = useSafeAreaInsets();
   const [activeTab, setActiveTab] = useState<TabId>('ai');
+  // Manual: the "+" screen or the form. Lifted here so the one header's back
+  // arrow steps form → "+" screen → close (no second header in the form).
+  const [manualFormOpen, setManualFormOpen] = useState(false);
+  const onManualForm = activeTab === 'manual' && manualFormOpen;
   const [pending, setPending] = useState<PendingDraft | null>(null);
   const [showFix, setShowFix] = useState(false);
   const [showDisclaimer, setShowDisclaimer] = useState(false);
@@ -76,11 +81,22 @@ export function AddMealScreen({ visible, date, onClose }: Props) {
     setShowFix(false);
     setShowDisclaimer(false);
     setActiveTab('ai');
+    setManualFormOpen(false);
     onClose();
   }
 
   // A tapped notification opens its page above this modal (lib/overlays).
   useCloseOnOverlayReset(visible, handleClose);
+
+  function handleBack() {
+    if (onManualForm) setManualFormOpen(false);
+    else handleClose();
+  }
+
+  function switchTab(tab: TabId) {
+    setManualFormOpen(false);
+    setActiveTab(tab);
+  }
 
   function handleSaved() {
     if (pending?.librarySourceId) {
@@ -99,24 +115,32 @@ export function AddMealScreen({ visible, date, onClose }: Props) {
   }
 
   return (
-    <Modal visible={visible} animationType="slide" presentationStyle="fullScreen" onRequestClose={handleClose}>
+    <Modal visible={visible} animationType="slide" presentationStyle="fullScreen" onRequestClose={handleBack}>
       {/* The Scan tab is a full-bleed camera with its own close/help buttons,
           so it skips the safe-area padding and this header. */}
       <View style={[styles.full, { paddingTop: activeTab === 'scan' ? 0 : insets.top }]}>
         {/* Top header */}
         {activeTab !== 'scan' && (
-          <View style={styles.header}>
-            <TouchableOpacity onPress={handleClose} hitSlop={12}>
-              <Text style={styles.headerBack}>←</Text>
-            </TouchableOpacity>
-            <View style={styles.headerCenter}>
-              <Text style={styles.headerLogo}>{APP_LOGO}</Text>
-              <Text style={styles.headerTitle}>{APP_NAME}</Text>
-            </View>
-            <TouchableOpacity onPress={() => setShowDisclaimer(true)} hitSlop={12}>
-              <Text style={styles.headerMore}>•••</Text>
-            </TouchableOpacity>
-          </View>
+          <PageHeader
+            style={styles.header}
+            onBack={handleBack}
+            title={onManualForm ? 'New meal' : undefined}
+            center={onManualForm ? undefined : (
+              <View style={styles.headerCenter}>
+                <Text style={styles.headerLogo}>{APP_LOGO}</Text>
+                <Text style={styles.headerTitle}>{APP_NAME}</Text>
+              </View>
+            )}
+            right={
+              <TouchableOpacity
+                onPress={() => setShowDisclaimer(true)}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                accessibilityLabel="About these estimates"
+              >
+                <Ionicons name="ellipsis-horizontal" size={22} color={COLORS.text} />
+              </TouchableOpacity>
+            }
+          />
         )}
 
         {/* Active tab content */}
@@ -154,7 +178,7 @@ export function AddMealScreen({ visible, date, onClose }: Props) {
             <AITab context={context} date={date} onLogged={handleClose} />
           )}
           {activeTab === 'manual' && (
-            <ManualTab date={date} onCreated={handleClose} />
+            <ManualTab date={date} onCreated={handleClose} formOpen={manualFormOpen} onFormOpenChange={setManualFormOpen} />
           )}
           {activeTab === 'search' && (
             <SearchTab onClose={handleClose} />
@@ -163,10 +187,10 @@ export function AddMealScreen({ visible, date, onClose }: Props) {
 
         {/* Bottom tab bar */}
         <View style={[styles.tabBar, { paddingBottom: Math.max(insets.bottom, 14) }]}>
-          <TabButton id="scan"   active={activeTab === 'scan'}   onPress={setActiveTab} icon="scan-outline"     label="Scan" />
-          <TabButton id="ai"     active={activeTab === 'ai'}     onPress={setActiveTab} icon="sparkles-outline" label="AI" />
-          <TabButton id="manual" active={activeTab === 'manual'} onPress={setActiveTab} icon="add"              label="Manual" />
-          <TabButton id="search" active={activeTab === 'search'} onPress={setActiveTab} icon="search"           label="Search" />
+          <TabButton id="scan"   active={activeTab === 'scan'}   onPress={switchTab} icon="scan-outline"     label="Scan" />
+          <TabButton id="ai"     active={activeTab === 'ai'}     onPress={switchTab} icon="sparkles-outline" label="AI" />
+          <TabButton id="manual" active={activeTab === 'manual'} onPress={switchTab} icon="add"              label="Manual" />
+          <TabButton id="search" active={activeTab === 'search'} onPress={switchTab} icon="search"           label="Search" />
         </View>
 
         {/* Draft card overlay */}
@@ -233,20 +257,10 @@ function TabButton({
 
 const styles = StyleSheet.create({
   full: { flex: 1, backgroundColor: COLORS.bg },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
-  },
-  headerBack: { color: COLORS.text, fontSize: 22, width: 30 },
+  header: { borderBottomWidth: 1, borderBottomColor: COLORS.border },
   headerCenter: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   headerLogo: { fontSize: 20 },
   headerTitle: { color: COLORS.text, fontSize: 17, fontWeight: '700' },
-  headerMore: { color: COLORS.text, fontSize: 18, width: 30, textAlign: 'right' },
   tabContent: { flex: 1 },
   tabBar: {
     flexDirection: 'row',

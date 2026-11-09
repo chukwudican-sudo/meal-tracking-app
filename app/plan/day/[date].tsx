@@ -7,7 +7,9 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { BackButton, PageHeader } from '@/components/PageHeader';
 import { Screen } from '@/components/Screen';
 import { router, useLocalSearchParams } from 'expo-router';
 
@@ -197,11 +199,7 @@ export default function DayDetailScreen() {
   if (!date) {
     return (
       <Screen edges={['top', 'bottom']}>
-        <View style={styles.header}>
-          <BackButton />
-          <Text style={styles.headerTitle}>Day not found</Text>
-          <View style={styles.headerSide} />
-        </View>
+        <PageHeader style={styles.pageHeader} title="Day not found" onBack={goBack} />
       </Screen>
     );
   }
@@ -209,7 +207,7 @@ export default function DayDetailScreen() {
   return (
     <Screen edges={['top', 'bottom']}>
       <View style={styles.header}>
-        <BackButton />
+        <BackButton onPress={goBack} />
         <View style={{ flex: 1 }}>
           <Text style={styles.headerTitle} numberOfLines={1}>{heading.title}</Text>
           <Text style={styles.headerSubtitle} numberOfLines={1}>{heading.subtitle}</Text>
@@ -278,7 +276,7 @@ export default function DayDetailScreen() {
                   </View>
                 </TouchableOpacity>
                 <TouchableOpacity onPress={() => handleRemove(meal)} style={styles.removeBtn} hitSlop={8}>
-                  <Text style={styles.removeBtnText}>✕</Text>
+                  <Ionicons name="close" size={14} color={COLORS.textSecondary} />
                 </TouchableOpacity>
               </View>
             ))}
@@ -339,7 +337,7 @@ function SlotBlock({
             </TouchableOpacity>
             {onRemove ? (
               <TouchableOpacity onPress={onRemove} style={styles.removeBtn} hitSlop={8}>
-                <Text style={styles.removeBtnText}>✕</Text>
+                <Ionicons name="close" size={14} color={COLORS.textSecondary} />
               </TouchableOpacity>
             ) : null}
           </View>
@@ -363,16 +361,9 @@ function MacroPill({ label, value, color }: { label: string; value: number; colo
   );
 }
 
-function BackButton() {
-  return (
-    <TouchableOpacity
-      onPress={() => (router.canGoBack() ? router.back() : router.replace('/(tabs)/plan'))}
-      style={styles.headerSide}
-      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-    >
-      <Text style={styles.headerBackText}>←</Text>
-    </TouchableOpacity>
-  );
+function goBack() {
+  if (router.canGoBack()) router.back();
+  else router.replace('/(tabs)/plan');
 }
 
 const styles = StyleSheet.create({
@@ -385,7 +376,7 @@ const styles = StyleSheet.create({
     borderBottomColor: COLORS.border,
   },
   headerSide: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  headerBackText: { color: COLORS.text, fontSize: 22, fontWeight: '600' },
+  pageHeader: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: COLORS.border },
   headerTitle: { color: COLORS.text, fontSize: 18, fontWeight: '700', textAlign: 'center' },
   headerSubtitle: { color: COLORS.textSecondary, fontSize: 12, textAlign: 'center', marginTop: 2 },
 

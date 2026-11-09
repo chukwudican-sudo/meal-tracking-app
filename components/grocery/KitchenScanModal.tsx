@@ -187,7 +187,7 @@ export function KitchenScanModal({ visible, onClose }: Props) {
       <View style={[styles.overlay, { paddingTop: insets.top + 8, paddingBottom: Math.max(insets.bottom, 12) }]}>
         <View style={styles.header}>
           <TouchableOpacity onPress={close} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }} style={styles.headerBtn}>
-            <Text style={styles.headerClose}>✕</Text>
+            <Ionicons name="close" size={20} color={COLORS.textSecondary} />
           </TouchableOpacity>
           <Text style={styles.title}>
             {step === 'review' ? 'Review ingredients' : 'Scan your kitchen'}
@@ -284,7 +284,7 @@ export function KitchenScanModal({ visible, onClose }: Props) {
                         onPress={() => setPhotos(prev => prev.filter((_, idx) => idx !== i))}
                         hitSlop={8}
                       >
-                        <Text style={styles.thumbRemoveText}>✕</Text>
+                        <Ionicons name="close" size={14} color={'#fff'} />
                       </Pressable>
                     </View>
                   ))}

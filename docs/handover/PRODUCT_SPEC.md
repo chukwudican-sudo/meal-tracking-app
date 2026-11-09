@@ -64,9 +64,13 @@ Home (from Day Detail / Customize, meals go to that day/slot instead and you sta
 - **AI (Describe):** live nutrition card (starts at 0) + estimated ingredients + text/voice input. Loop: describe →
   submit (`estimate-nutrition`) → review → refine (`fix-meal`) → Log. Nutrition/ingredients are **not manually
   editable** here — corrections go through text/voice. Its spinner is tiny (open item).
-- **Manual:** landing page (big "+", "Create a new meal", "Enter nutrition details manually") → `MealForm` (back arrow,
-  name, iOS wheel time, calories, P/C/F, ingredients, meal-type chips Breakfast/Snacks/Lunch/Dinner) → big **"Log Meal"**.
-  Zero AI. Auto-saves to Recent (`source:'manual'`, always free).
+- **Manual:** landing page (big "+", "Create a new meal", "Enter nutrition details manually") → `MealForm` restyled Nov 8
+  (header "New meal"; NAME box; MEAL TYPE tiles Breakfast/Lunch/Dinner/Snack with icons — required, and picking one
+  moves the time to that meal slot's time unless the user already set it — today only ever back to the slot,
+  never later than now, so a meal just eaten still counts at once; TIME row with iOS wheel; NUTRITION = wide
+  centred Calories tile + Protein/Carbs/Fats tiles; optional ingredients) → **"Log Meal"**, grey until name, type,
+  calories and all 3 macros are filled (0 counts). Fully manual: no AI, no auto-calculation, no mismatch warnings
+  (Alex: "that's why it's called manual"). Auto-saves to Recent (`source:'manual'`, always free).
 - **Search:** embeds the unified recipe page (`SavedRecipesView`, context `search-tab`): default tab **Recent**, cards have
   "+" (adds to Today, toast "Added to Today" + undo), screen stays open to add several.
 - Superseded: Open Food Facts database search, Database|Library toggle, "Chef" assistant naming, star icon.

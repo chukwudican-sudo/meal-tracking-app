@@ -9,6 +9,7 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { Screen } from '@/components/Screen';
 import { router, useLocalSearchParams } from 'expo-router';
 
@@ -181,7 +182,7 @@ export default function MealEditorScreen() {
         <View style={styles.header}>
           <Text style={styles.title}>{isEditing ? 'Edit meal' : 'Add meal'}</Text>
           <TouchableOpacity onPress={() => router.back()} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-            <Text style={styles.closeBtn}>✕</Text>
+            <Ionicons name="close" size={18} color={COLORS.textSecondary} />
           </TouchableOpacity>
         </View>
 

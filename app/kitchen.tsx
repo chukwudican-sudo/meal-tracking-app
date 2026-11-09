@@ -13,6 +13,7 @@ import {
 
 import { CartIcon } from '@/components/CartIcon';
 import { KitchenScanModal } from '@/components/grocery/KitchenScanModal';
+import { PageHeader } from '@/components/PageHeader';
 import { Screen } from '@/components/Screen';
 import { CATEGORY_DOT, CATEGORY_ORDER } from '@/constants/ingredientCategories';
 import { COLORS } from '@/constants/theme';
@@ -95,18 +96,7 @@ export default function KitchenScreen() {
 
   return (
     <Screen edges={['top', 'bottom']}>
-      <View style={styles.header}>
-        <TouchableOpacity
-          onPress={handleBack}
-          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-          style={styles.headerBtn}
-          activeOpacity={0.7}
-        >
-          <Ionicons name="chevron-back" size={26} color={COLORS.text} />
-        </TouchableOpacity>
-        <Text style={styles.title}>My kitchen</Text>
-        <CartIcon />
-      </View>
+      <PageHeader title="My kitchen" onBack={handleBack} right={<CartIcon />} style={styles.header} />
 
       <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
         {isEmpty ? (
@@ -192,18 +182,7 @@ export default function KitchenScreen() {
 }
 
 const styles = StyleSheet.create({
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 12,
-    paddingTop: 6,
-    paddingBottom: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: COLORS.border,
-  },
-  headerBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  title: { flex: 1, color: COLORS.text, fontSize: 18, fontWeight: '700', textAlign: 'center' },
+  header: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: COLORS.border },
 
   body: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 48 },
 

@@ -11,6 +11,7 @@ import {
   View,
 } from 'react-native';
 
+import { PageHeader } from '@/components/PageHeader';
 import { Screen } from '@/components/Screen';
 import { COLORS } from '@/constants/theme';
 import type { GroceryItem, IngredientCategory } from '@/store/types';
@@ -92,17 +93,10 @@ export default function PlannedIngredientsScreen() {
 
   return (
     <Screen edges={['top', 'bottom']}>
-      <View style={styles.header}>
-        <TouchableOpacity
-          onPress={() => (router.canGoBack() ? router.back() : router.replace('/(tabs)/plan'))}
-          style={styles.iconBtn}
-          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-        >
-          <Text style={styles.backArrow}>←</Text>
-        </TouchableOpacity>
-        <Text style={styles.title} numberOfLines={1}>Planned Ingredients</Text>
-        <View style={styles.iconBtn} />
-      </View>
+      <PageHeader
+        title="Planned Ingredients"
+        onBack={() => (router.canGoBack() ? router.back() : router.replace('/(tabs)/plan'))}
+      />
 
       <View style={styles.searchRow}>
         <View style={styles.searchBox}>
@@ -195,17 +189,6 @@ export default function PlannedIngredientsScreen() {
 }
 
 const styles = StyleSheet.create({
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 12,
-    paddingTop: 6,
-    paddingBottom: 4,
-  },
-  iconBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  backArrow: { color: COLORS.text, fontSize: 22, fontWeight: '600' },
-  title: { flex: 1, color: COLORS.text, fontSize: 18, fontWeight: '700', textAlign: 'center' },
 
   searchRow: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 4 },
   searchBox: {

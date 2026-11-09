@@ -1,4 +1,3 @@
-import Ionicons from '@expo/vector-icons/Ionicons';
 import { router } from 'expo-router';
 import { useState } from 'react';
 import {
@@ -13,6 +12,7 @@ import {
 } from 'react-native';
 
 import { EmailCodeVerification } from '@/components/auth/EmailCodeVerification';
+import { PageHeader } from '@/components/PageHeader';
 import { Screen } from '@/components/Screen';
 import { COLORS } from '@/constants/theme';
 import { sendPasswordReset, signOut, updatePassword } from '@/lib/auth';
@@ -125,15 +125,7 @@ export default function ForgotPasswordScreen() {
   return (
     <Screen edges={['top', 'bottom']}>
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <View style={styles.topBar}>
-          <TouchableOpacity
-            onPress={handleBack}
-            style={styles.backBtn}
-            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-          >
-            <Ionicons name="arrow-back" size={20} color={COLORS.text} />
-          </TouchableOpacity>
-        </View>
+        <PageHeader onBack={handleBack} />
 
         {step === 'email' && (
           <View style={styles.body}>
@@ -230,8 +222,6 @@ export default function ForgotPasswordScreen() {
 }
 
 const styles = StyleSheet.create({
-  topBar: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingTop: 6, paddingBottom: 10 },
-  backBtn: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center' },
   body: { flexGrow: 1, flex: 1, paddingHorizontal: 20, paddingTop: 12, paddingBottom: 20 },
   codeBody: { justifyContent: 'center' },
   title: { color: COLORS.text, fontSize: 26, fontWeight: '700', lineHeight: 32 },

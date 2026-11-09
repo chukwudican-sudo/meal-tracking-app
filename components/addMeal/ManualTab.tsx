@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { router } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -13,19 +12,21 @@ import type { MealEntry } from '@/store/types';
 interface Props {
   date: string;
   onCreated: () => void;
+  // "+" screen vs form, owned by AddMealScreen so its header's back arrow can
+  // step back from the form.
+  formOpen: boolean;
+  onFormOpenChange: (open: boolean) => void;
 }
 
 // Pure-manual entry: starts on a landing page, then opens the simplified meal
 // form. Logging adds the meal to the day, auto-saves it to Recently Added
 // (savedRecipes, source 'manual'), and returns the user to the Home tab.
-export function ManualTab({ date, onCreated }: Props) {
+export function ManualTab({ date, onCreated, formOpen, onFormOpenChange }: Props) {
   const addMealToDay = useMealStore(s => s.addMealToDay);
   const removeMealFromDay = useMealStore(s => s.removeMealFromDay);
   const ensureRecipeSaved = useMealStore(s => s.ensureRecipeSaved);
   const ingestMidWeekIngredients = useMealStore(s => s.ingestMidWeekIngredients);
   const showUndo = useUndoStore(s => s.showUndo);
-
-  const [mode, setMode] = useState<'landing' | 'form'>('landing');
 
   function handleSubmit(values: MealFormValues) {
     // Must be a UUID: meal_logs.id is a uuid column, so a non-uuid id makes the
@@ -66,10 +67,10 @@ export function ManualTab({ date, onCreated }: Props) {
     router.navigate('/(tabs)');
   }
 
-  if (mode === 'landing') {
+  if (!formOpen) {
     return (
       <View style={styles.landing}>
-        <TouchableOpacity style={styles.landingTap} onPress={() => setMode('form')} activeOpacity={0.85}>
+        <TouchableOpacity style={styles.landingTap} onPress={() => onFormOpenChange(true)} activeOpacity={0.85}>
           <View style={styles.plusCircle}>
             <Ionicons name="add" size={44} color={COLORS.green} />
           </View>
@@ -82,9 +83,11 @@ export function ManualTab({ date, onCreated }: Props) {
 
   return (
     <MealForm
+      date={date}
       primaryLabel="Log Meal"
       showMealType
-      onBack={() => setMode('landing')}
+      showHeader={false}
+      onBack={() => onFormOpenChange(false)}
       onSubmit={handleSubmit}
     />
   );

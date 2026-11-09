@@ -15,6 +15,7 @@ import { AIError } from '@/ai/aiEdgeClient';
 import { suggestKitchenRecipes } from '@/ai/suggestKitchenRecipes';
 import type { RecipeConcept } from '@/ai/types';
 import { KitchenScanModal } from '@/components/grocery/KitchenScanModal';
+import { PageHeader } from '@/components/PageHeader';
 import { ProgressiveLoader } from '@/components/ProgressiveLoader';
 import { Screen } from '@/components/Screen';
 import { RecipeCard } from '@/components/recipes/RecipeCard';
@@ -217,13 +218,7 @@ export default function WhatCanIMakeScreen() {
 
   return (
     <Screen edges={['top', 'bottom']}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={handleBack} style={styles.backBtn} activeOpacity={0.7}>
-          <Ionicons name="arrow-back" size={16} color="#cccccc" />
-        </TouchableOpacity>
-        <Text style={styles.title}>What can I make?</Text>
-        <View style={styles.backBtn} />
-      </View>
+      <PageHeader title="What can I make?" onBack={handleBack} style={styles.headerBorder} />
 
       {/* ── Kitchen Overview ─────────────────────────────────────────────── */}
       {phase === 'overview' ? (
@@ -349,25 +344,7 @@ export default function WhatCanIMakeScreen() {
 }
 
 const styles = StyleSheet.create({
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingTop: 6,
-    paddingBottom: 12,
-    borderBottomWidth: 0.5,
-    borderBottomColor: 'rgba(255,255,255,0.08)',
-  },
-  backBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  title: { flex: 1, color: '#ffffff', fontSize: 16, fontWeight: '500', textAlign: 'center' },
+  headerBorder: { borderBottomWidth: 0.5, borderBottomColor: 'rgba(255,255,255,0.08)' },
 
   body: { paddingHorizontal: 20, paddingTop: 20, paddingBottom: 40 },
 

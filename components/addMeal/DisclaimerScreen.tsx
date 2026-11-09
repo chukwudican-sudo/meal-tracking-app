@@ -1,4 +1,5 @@
 import { Modal, View, Text, ScrollView, TouchableOpacity, StyleSheet } from 'react-native';
+import Ionicons from '@expo/vector-icons/Ionicons';
 
 import { COLORS } from '@/constants/theme';
 import { APP_NAME } from '@/constants/app';
@@ -15,7 +16,7 @@ export function DisclaimerScreen({ visible, onClose }: Props) {
         <View style={styles.header}>
           <Text style={styles.title}>Health & AI disclaimer</Text>
           <TouchableOpacity onPress={onClose} hitSlop={12}>
-            <Text style={styles.close}>✕</Text>
+            <Ionicons name="close" size={20} color={COLORS.textSecondary} />
           </TouchableOpacity>
         </View>
 

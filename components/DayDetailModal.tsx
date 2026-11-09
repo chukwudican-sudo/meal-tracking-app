@@ -8,6 +8,7 @@ import {
   ScrollView,
   Pressable,
 } from 'react-native';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { BlurView } from 'expo-blur';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -78,7 +79,7 @@ export function DayDetailModal({ date, onClose }: Props) {
                 <Text style={styles.dateSub}>{date ? formatDateRel(date) : ''}</Text>
               </View>
               <TouchableOpacity onPress={onClose} hitSlop={12} style={styles.closeBtn}>
-                <Text style={styles.closeBtnText}>✕</Text>
+                <Ionicons name="close" size={16} color={COLORS.text} />
               </TouchableOpacity>
             </View>
 
@@ -199,7 +200,7 @@ function MealRow({
         </View>
       </TouchableOpacity>
       <TouchableOpacity onPress={onDelete} style={mealStyles.deleteBtn} hitSlop={8}>
-        <Text style={mealStyles.deleteText}>✕</Text>
+        <Ionicons name="close" size={14} color={COLORS.textSecondary} />
       </TouchableOpacity>
     </View>
   );

@@ -12,6 +12,7 @@ import {
   View,
 } from 'react-native';
 
+import { PageHeader } from '@/components/PageHeader';
 import { Screen } from '@/components/Screen';
 import { COLORS } from '@/constants/theme';
 
@@ -82,21 +83,17 @@ export function FormPage({
         style={{ flex: 1 }}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        <View style={styles.header}>
-          <TouchableOpacity
-            onPress={handleBack}
-            style={[styles.iconBtn, headerSave && styles.sideWide, headerSave && styles.backBtnWide]}
-            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-            activeOpacity={0.7}
-          >
-            <Text style={styles.backArrow}>←</Text>
-          </TouchableOpacity>
-          <Text style={styles.title} numberOfLines={1}>{title}</Text>
-          {headerSave ? (
+        <PageHeader
+          title={title}
+          onBack={handleBack}
+          style={styles.header}
+          // Both sides widen so the title stays centred next to "Save".
+          wideSides={headerSave}
+          right={headerSave ? (
             <TouchableOpacity
               onPress={handleSave}
               disabled={!headerSaveEnabled}
-              style={[styles.iconBtn, styles.sideWide, styles.headerSaveBtn]}
+              style={styles.headerSaveBtn}
               hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
               activeOpacity={0.7}
             >
@@ -104,10 +101,8 @@ export function FormPage({
                 {saveLabel}
               </Text>
             </TouchableOpacity>
-          ) : (
-            <View style={styles.iconBtn}>{rightAction}</View>
-          )}
-        </View>
+          ) : rightAction}
+        />
 
         {topSlot}
 
@@ -173,25 +168,10 @@ export function RadioRow({
 }
 
 const styles = StyleSheet.create({
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 12,
-    paddingTop: 6,
-    paddingBottom: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: COLORS.border,
-  },
-  iconBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  // Both sides match so the title stays centred next to "Save".
-  sideWide: { width: 56 },
-  backBtnWide: { alignItems: 'flex-start', paddingLeft: 9 }, // arrow stays where it was
-  headerSaveBtn: { alignItems: 'flex-end' },
+  header: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: COLORS.border },
+  headerSaveBtn: { height: 40, alignItems: 'flex-end', justifyContent: 'center' },
   headerSaveText: { color: COLORS.green, fontSize: 16, fontWeight: '700' },
   headerSaveTextOff: { color: COLORS.textMuted },
-  backArrow: { color: COLORS.text, fontSize: 22, fontWeight: '600' },
-  title: { flex: 1, color: COLORS.text, fontSize: 18, fontWeight: '700', textAlign: 'center' },
 
   scroll: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 32 },
 

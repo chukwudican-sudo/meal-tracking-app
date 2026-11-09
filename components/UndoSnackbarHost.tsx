@@ -1,4 +1,5 @@
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { COLORS } from '@/constants/theme';
@@ -40,7 +41,7 @@ export function UndoSnackbarHost() {
           style={styles.closeButton}
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
         >
-          <Text style={styles.closeText}>✕</Text>
+          <Ionicons name="close" size={16} color={COLORS.textSecondary} />
         </TouchableOpacity>
       </View>
     </View>

@@ -19,6 +19,7 @@ import { EmailCodeVerification } from '@/components/auth/EmailCodeVerification';
 import { HeightPicker, type HeightUnit } from '@/components/onboarding/HeightPicker';
 import { Slider } from '@/components/onboarding/Slider';
 import { WeightPicker, type WeightUnitChoice } from '@/components/onboarding/WeightPicker';
+import { BackButton, HEADER_SIDE } from '@/components/PageHeader';
 import { ProgressRing } from '@/components/ProgressRing';
 import { Screen } from '@/components/Screen';
 import { APP_NAME } from '@/constants/app';
@@ -246,9 +247,7 @@ export default function OnboardingScreen() {
       {/* Progress + back */}
       <View style={styles.topBar}>
         {!noBack ? (
-          <TouchableOpacity onPress={() => go(-1)} style={styles.backBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-            <Ionicons name="arrow-back" size={20} color={COLORS.text} />
-          </TouchableOpacity>
+          <BackButton onPress={() => go(-1)} />
         ) : (
           <View style={styles.backBtn} />
         )}
@@ -1067,9 +1066,7 @@ function LoginView({
   return (
     <Screen edges={['top', 'bottom']}>
       <View style={styles.topBar}>
-        <TouchableOpacity onPress={onBack} style={styles.backBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-          <Ionicons name="arrow-back" size={20} color={COLORS.text} />
-        </TouchableOpacity>
+        <BackButton onPress={onBack} />
         <View style={{ flex: 1 }} />
         <View style={styles.backBtn} />
       </View>
@@ -1179,7 +1176,8 @@ function nutrientForLabel(label: string): NutrientKey {
 
 const styles = StyleSheet.create({
   topBar: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 20, paddingTop: 6, paddingBottom: 10 },
-  backBtn: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center' },
+  // Same size as BackButton, so the progress bar stays centred with or without it.
+  backBtn: { width: HEADER_SIDE, height: HEADER_SIDE },
   progressTrack: { flex: 1, height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.1)', overflow: 'hidden' },
   progressFill: { height: '100%', backgroundColor: COLORS.green, borderRadius: 2 },
 

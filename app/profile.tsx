@@ -7,6 +7,8 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import Ionicons from '@expo/vector-icons/Ionicons';
+import { PageHeader } from '@/components/PageHeader';
 import { Screen } from '@/components/Screen';
 
 import { APP_NAME } from '@/constants/app';
@@ -87,25 +89,21 @@ export default function ProfileScreen() {
 
   return (
     <Screen edges={['top', 'bottom']}>
-      <View style={styles.header}>
-        <TouchableOpacity
-          onPress={handleBack}
-          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-          style={styles.iconBtn}
-          activeOpacity={0.7}
-        >
-          <Text style={styles.backArrow}>←</Text>
-        </TouchableOpacity>
-        <Text style={styles.title}>Profile</Text>
-        <TouchableOpacity
-          onPress={() => router.push('/settings')}
-          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-          style={styles.iconBtn}
-          activeOpacity={0.7}
-        >
-          <Text style={styles.gearIcon}>⚙</Text>
-        </TouchableOpacity>
-      </View>
+      <PageHeader
+        title="Profile"
+        onBack={handleBack}
+        style={styles.header}
+        right={
+          <TouchableOpacity
+            onPress={() => router.push('/settings')}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            style={styles.iconBtn}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="settings-outline" size={24} color={COLORS.text} />
+          </TouchableOpacity>
+        }
+      />
 
       <ScrollView contentContainerStyle={styles.scroll}>
         {/* User info card */}
@@ -211,20 +209,8 @@ function NavRow({ label, onPress }: { label: string; onPress: () => void }) {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: COLORS.bg },
 
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 12,
-    paddingTop: 6,
-    paddingBottom: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: COLORS.border,
-  },
+  header: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: COLORS.border },
   iconBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  backArrow: { color: COLORS.text, fontSize: 22, fontWeight: '600' },
-  gearIcon: { color: COLORS.text, fontSize: 20 },
-  title: { fontSize: 18, fontWeight: '700', color: COLORS.text },
 
   scroll: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 40, gap: 12 },
 

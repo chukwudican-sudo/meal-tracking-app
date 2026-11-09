@@ -16,6 +16,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AIError, aiErrorMessage } from '@/ai/aiEdgeClient';
 import { generateRecipeConcept } from '@/ai/generateRecipeConcept';
 import type { RecipeConcept as Concept } from '@/ai/types';
+import { PageHeader } from '@/components/PageHeader';
 import { ProgressiveLoader } from '@/components/ProgressiveLoader';
 import { Screen } from '@/components/Screen';
 import { COLORS } from '@/constants/theme';
@@ -122,13 +123,7 @@ export default function CustomRecipeScreen() {
 
   return (
     <Screen edges={['top', 'bottom']}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={handleBack} style={styles.iconBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-          <Text style={styles.backArrow}>←</Text>
-        </TouchableOpacity>
-        <Text style={styles.title} numberOfLines={1}>Custom Recipe</Text>
-        <View style={styles.iconBtn} />
-      </View>
+      <PageHeader title="Custom Recipe" onBack={handleBack} style={styles.headerBorder} />
 
       {stage === 'mealType' ? (
         <MealTypeScreen
@@ -265,19 +260,7 @@ function DescribeScreen({
 const styles = StyleSheet.create({
   flex: { flex: 1 },
 
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 12,
-    paddingTop: 6,
-    paddingBottom: 8,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: COLORS.border,
-  },
-  iconBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  backArrow: { color: COLORS.text, fontSize: 22, fontWeight: '600' },
-  title: { flex: 1, color: COLORS.text, fontSize: 18, fontWeight: '700', textAlign: 'center' },
+  headerBorder: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: COLORS.border },
 
 
   body: { paddingHorizontal: 16, paddingTop: 20, paddingBottom: 24 },

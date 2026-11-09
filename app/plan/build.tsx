@@ -17,6 +17,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { BackButton } from '@/components/PageHeader';
 import { Screen } from '@/components/Screen';
 import { router } from 'expo-router';
 
@@ -1275,7 +1276,10 @@ export default function BuildPlanScreen() {
                           onPress={() => removeLoveToken(t)}
                           activeOpacity={0.7}
                         >
-                          <Text style={[styles.chipText, styles.chipTextActive]}>{t}  ✕</Text>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                            <Text style={[styles.chipText, styles.chipTextActive]}>{t}</Text>
+                            <Ionicons name="close" size={14} color={COLORS.green} />
+                          </View>
                         </TouchableOpacity>
                       ))}
                     </View>
@@ -2042,7 +2046,7 @@ export default function BuildPlanScreen() {
                     hitSlop={10}
                     style={styles.describeCloseBtn}
                   >
-                    <Text style={styles.describeCloseText}>✕</Text>
+                    <Ionicons name="close" size={16} color={COLORS.text} />
                   </TouchableOpacity>
                 </View>
                 <Text style={styles.describeCardHint}>
@@ -2102,7 +2106,7 @@ export default function BuildPlanScreen() {
                   hitSlop={10}
                   style={styles.describeCloseBtn}
                 >
-                  <Text style={styles.describeCloseText}>✕</Text>
+                  <Ionicons name="close" size={16} color={COLORS.text} />
                 </TouchableOpacity>
               </View>
               <Text style={styles.describeCardHint}>
@@ -2492,9 +2496,11 @@ function Header({
   };
   return (
     <View style={styles.header}>
-      <TouchableOpacity onPress={handleBack} style={styles.headerBack} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-        <Text style={styles.headerBackText}>←</Text>
-      </TouchableOpacity>
+      {/* Same 56pt side width as the right slot so the title stays centred;
+          the chevron sits flush left like every PageHeader. */}
+      <View style={[styles.headerBack, styles.headerBackLeft]}>
+        <BackButton onPress={handleBack} />
+      </View>
       <View style={{ flex: 1 }}>
         <Text style={styles.headerTitle} numberOfLines={1}>{title}</Text>
         {subtitle ? <Text style={styles.headerSubtitle}>{subtitle}</Text> : null}
@@ -2560,7 +2566,7 @@ const styles = StyleSheet.create({
     borderBottomColor: COLORS.border,
   },
   headerBack: { minWidth: 56, height: 40, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 8 },
-  headerBackText: { color: COLORS.text, fontSize: 22, fontWeight: '600' },
+  headerBackLeft: { alignItems: 'flex-start', paddingHorizontal: 0 },
   headerTitle: { color: COLORS.text, fontSize: 17, fontWeight: '700', textAlign: 'center' },
   headerSubtitle: { color: COLORS.textSecondary, fontSize: 11, textAlign: 'center', marginTop: 2 },
   headerRightText: { color: COLORS.green, fontSize: 14, fontWeight: '700' },

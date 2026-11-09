@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { PageHeader } from '@/components/PageHeader';
 import { Screen } from '@/components/Screen';
 
 import { APP_NAME } from '@/constants/app';
@@ -118,18 +119,7 @@ export default function SettingsScreen() {
 
   return (
     <Screen edges={['top', 'bottom']}>
-      <View style={styles.header}>
-        <TouchableOpacity
-          onPress={handleBack}
-          style={styles.iconBtn}
-          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-          activeOpacity={0.7}
-        >
-          <Text style={styles.backArrow}>←</Text>
-        </TouchableOpacity>
-        <Text style={styles.title}>Settings</Text>
-        <View style={styles.iconBtn} />
-      </View>
+      <PageHeader title="Settings" onBack={handleBack} style={styles.header} />
 
       <ScrollView contentContainerStyle={styles.scroll}>
         <Text style={styles.sectionLabel}>MEMBERSHIP</Text>
@@ -181,19 +171,7 @@ function NavRow({ label, onPress }: { label: string; onPress: () => void }) {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: COLORS.bg },
 
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 12,
-    paddingTop: 6,
-    paddingBottom: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: COLORS.border,
-  },
-  iconBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  backArrow: { color: COLORS.text, fontSize: 22, fontWeight: '600' },
-  title: { fontSize: 18, fontWeight: '700', color: COLORS.text },
+  header: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: COLORS.border },
 
   scroll: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 40, gap: 12 },
 

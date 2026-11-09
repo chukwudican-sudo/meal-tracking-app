@@ -3,6 +3,7 @@ import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
+import { PageHeader } from '@/components/PageHeader';
 import { Screen } from '@/components/Screen';
 import { Skeleton } from '@/components/Skeleton';
 import { COLORS } from '@/constants/theme';
@@ -43,18 +44,7 @@ export default function NotificationsScreen() {
 
   return (
     <Screen edges={['top', 'bottom']}>
-      <View style={styles.header}>
-        <TouchableOpacity
-          onPress={handleBack}
-          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-          style={styles.backBtn}
-          activeOpacity={0.7}
-        >
-          <Text style={styles.backArrow}>←</Text>
-        </TouchableOpacity>
-        <Text style={styles.title}>Notifications</Text>
-        <View style={styles.backBtn} />
-      </View>
+      <PageHeader title="Notifications" onBack={handleBack} style={styles.header} />
 
       <ScrollView
         contentContainerStyle={styles.scroll}
@@ -125,19 +115,7 @@ function formatDate(iso: string): string {
 }
 
 const styles = StyleSheet.create({
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 12,
-    paddingTop: 6,
-    paddingBottom: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: COLORS.border,
-  },
-  backBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  backArrow: { color: COLORS.text, fontSize: 22, fontWeight: '600' },
-  title: { fontSize: 18, fontWeight: '700', color: COLORS.text },
+  header: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: COLORS.border },
 
   scroll: { flexGrow: 1, paddingHorizontal: 16, paddingTop: 16, paddingBottom: 40 },
   list: { gap: 12 },

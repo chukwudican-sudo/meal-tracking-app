@@ -9,6 +9,7 @@ import {
   type AppStateStatus,
 } from 'react-native';
 import { router } from 'expo-router';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { Screen } from '@/components/Screen';
 
 import { COLORS } from '@/constants/theme';
@@ -163,8 +164,9 @@ export default function HomeScreen() {
             style={styles.arrowBtn}
             onPress={() => navigateTo(shiftDate(viewingDate, -1))}
             activeOpacity={0.7}
+            accessibilityLabel="Previous day"
           >
-            <Text style={styles.arrowText}>←</Text>
+            <Ionicons name="chevron-back" size={18} color={COLORS.textSecondary} />
           </TouchableOpacity>
 
           <View style={styles.dateCenter}>
@@ -176,8 +178,9 @@ export default function HomeScreen() {
             style={styles.arrowBtn}
             onPress={() => navigateTo(shiftDate(viewingDate, 1))}
             activeOpacity={0.7}
+            accessibilityLabel="Next day"
           >
-            <Text style={styles.arrowText}>→</Text>
+            <Ionicons name="chevron-forward" size={18} color={COLORS.textSecondary} />
           </TouchableOpacity>
         </View>
 
@@ -363,11 +366,6 @@ const styles = StyleSheet.create({
     borderColor: COLORS.border,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  arrowText: {
-    fontSize: 16,
-    color: COLORS.textSecondary,
-    fontWeight: '400',
   },
   dateCenter: {
     alignItems: 'center',

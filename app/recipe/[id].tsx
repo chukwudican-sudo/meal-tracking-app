@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { PageHeader } from '@/components/PageHeader';
 import { Screen } from '@/components/Screen';
 
 import { COLORS } from '@/constants/theme';
@@ -305,37 +306,38 @@ function Header({
   onAdd?: () => void;
 }) {
   return (
-    <View style={styles.header}>
-      <TouchableOpacity onPress={onBack} style={styles.backBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-        <Text style={styles.backArrow}>←</Text>
-      </TouchableOpacity>
-      <View style={styles.headerActions}>
-        {onAdd ? (
-          <TouchableOpacity
-            onPress={onAdd}
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-            style={styles.headerAddBtn}
-            activeOpacity={0.85}
-          >
-            <Text style={styles.headerAddText}>＋</Text>
-          </TouchableOpacity>
-        ) : null}
-        {onToggleFavourite ? (
-          <TouchableOpacity
-            onPress={onToggleFavourite}
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-            style={styles.headerBookmarkBtn}
-            activeOpacity={0.7}
-          >
-            <Ionicons
-              name={favourited ? 'bookmark' : 'bookmark-outline'}
-              size={22}
-              color={favourited ? COLORS.green : COLORS.textSecondary}
-            />
-          </TouchableOpacity>
-        ) : null}
-      </View>
-    </View>
+    <PageHeader
+      onBack={onBack}
+      wideSides
+      right={
+        <View style={styles.headerActions}>
+          {onAdd ? (
+            <TouchableOpacity
+              onPress={onAdd}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              style={styles.headerAddBtn}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.headerAddText}>＋</Text>
+            </TouchableOpacity>
+          ) : null}
+          {onToggleFavourite ? (
+            <TouchableOpacity
+              onPress={onToggleFavourite}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              style={styles.headerBookmarkBtn}
+              activeOpacity={0.7}
+            >
+              <Ionicons
+                name={favourited ? 'bookmark' : 'bookmark-outline'}
+                size={22}
+                color={favourited ? COLORS.green : COLORS.textSecondary}
+              />
+            </TouchableOpacity>
+          ) : null}
+        </View>
+      }
+    />
   );
 }
 
@@ -347,16 +349,6 @@ function formatQty(ing: Ingredient): string {
 }
 
 const styles = StyleSheet.create({
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 12,
-    paddingTop: 6,
-    paddingBottom: 10,
-  },
-  backBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  backArrow: { color: COLORS.text, fontSize: 22, fontWeight: '600' },
   headerActions: { flexDirection: 'row', alignItems: 'center', gap: 14 },
   headerBookmarkBtn: { padding: 4 },
   headerAddBtn: {

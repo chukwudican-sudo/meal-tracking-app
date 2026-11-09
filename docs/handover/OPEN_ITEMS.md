@@ -192,6 +192,9 @@ Still open:
 
 ## E. Deferred product features (ideas Alex has mentioned; not specced enough to build)
 
+**Repeat on Manual add** (Once / Daily / Weekly) — Alex, Nov 8: "too extra" for now, future MVP. The sync side is ready
+(own templates sync via `meal_templates`); no UI creates repeating meals today.
+
 Cook Mode (guided cooking, timers, chef avatar) · Find Your Plan guided questions + "Try Build My Plan instead" bridge ·
 post-onboarding "build your plan" popup polish · onboarding visual design pass · Report Food backend · Feedback backend ·
 Export Data · Language · Data Consent · calorie filter in recipe lists · juicing / more meal categories · budget and

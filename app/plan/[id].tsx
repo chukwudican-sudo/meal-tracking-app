@@ -11,8 +11,10 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { BackButton, PageHeader } from '@/components/PageHeader';
 import { Screen } from '@/components/Screen';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 
@@ -143,13 +145,7 @@ export default function PlanDetailScreen() {
   if (!plan) {
     return (
       <Screen edges={['top', 'bottom']}>
-        <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.headerBack} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-            <Text style={styles.headerBackText}>←</Text>
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Plan not found</Text>
-          <View style={styles.headerBack} />
-        </View>
+        <PageHeader style={styles.pageHeader} title="Plan not found" />
       </Screen>
     );
   }
@@ -313,19 +309,12 @@ export default function PlanDetailScreen() {
   return (
     <View style={{ flex: 1 }}>
     <Screen edges={['top', 'bottom']}>
-      <View style={styles.header}>
-        <TouchableOpacity
-          onPress={handleBackPress}
-          style={styles.headerBack}
-          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-        >
-          <Text style={styles.headerBackText}>{isCustomizing ? '✕' : '←'}</Text>
-        </TouchableOpacity>
-        <Text style={styles.headerTitle} numberOfLines={1}>
-          {isCustomizing ? 'Customize Plan' : plan.name}
-        </Text>
-        <View style={styles.headerBack} />
-      </View>
+      <PageHeader
+        style={styles.pageHeader}
+        title={isCustomizing ? 'Customize Plan' : plan.name}
+        onBack={handleBackPress}
+        backIcon={isCustomizing ? 'close' : 'back'}
+      />
 
       <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
         {plan.description ? (
@@ -391,7 +380,7 @@ export default function PlanDetailScreen() {
                           hitSlop={10}
                           style={styles.removeBtn}
                         >
-                          <Text style={styles.removeBtnText}>✕</Text>
+                          <Ionicons name="close" size={16} color={COLORS.orange} />
                         </TouchableOpacity>
                       ) : r ? (
                         <Text style={styles.chevron}>›</Text>
@@ -607,13 +596,7 @@ function CustomizeDayOverlay({
   return (
     <View style={[styles.overlay, { paddingTop: insets.top, paddingBottom: 0 }]}>
       <View style={styles.header}>
-        <TouchableOpacity
-          onPress={onClose}
-          style={styles.headerBack}
-          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-        >
-          <Text style={styles.headerBackText}>←</Text>
-        </TouchableOpacity>
+        <BackButton onPress={onClose} />
         <View style={{ flex: 1 }}>
           <Text style={styles.headerTitle}>{fullWeekdayName(dayName)}</Text>
           <Text style={styles.dayEditorSubtitle}>Swap meals for this day</Text>
@@ -695,7 +678,7 @@ function AddSlotPopup({ onCancel, onConfirm }: AddSlotPopupProps) {
           <View style={styles.pickerHeader}>
             <Text style={styles.pickerTitle}>Add meal slot</Text>
             <TouchableOpacity onPress={onCancel} hitSlop={10}>
-              <Text style={styles.pickerClose}>✕</Text>
+              <Ionicons name="close" size={20} color={COLORS.textSecondary} />
             </TouchableOpacity>
           </View>
 
@@ -758,8 +741,8 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: COLORS.border,
   },
+  pageHeader: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: COLORS.border },
   headerBack: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  headerBackText: { color: COLORS.text, fontSize: 22, fontWeight: '600' },
   headerTitle: { flex: 1, color: COLORS.text, fontSize: 18, fontWeight: '700', textAlign: 'center' },
 
   body: { padding: 16, paddingBottom: 40 },

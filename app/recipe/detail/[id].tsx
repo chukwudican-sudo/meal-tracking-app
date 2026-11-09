@@ -17,6 +17,7 @@ import {
 } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { PageHeader } from '@/components/PageHeader';
 import { Screen } from '@/components/Screen';
 
 import { AIError } from '@/ai/aiEdgeClient';
@@ -162,13 +163,7 @@ export default function RecipeDetailScreen() {
   if (!resolved || !recipeInput) {
     return (
       <Screen edges={['top', 'bottom']}>
-        <View style={styles.header}>
-          <TouchableOpacity onPress={handleBack} style={styles.backBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-            <Text style={styles.backArrow}>←</Text>
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Recipe</Text>
-          <View style={styles.backBtn} />
-        </View>
+        <PageHeader title="Recipe" onBack={handleBack} style={styles.headerBorder} />
         <View style={styles.empty}>
           <Text style={styles.emptyText}>Recipe not found.</Text>
         </View>
@@ -178,24 +173,25 @@ export default function RecipeDetailScreen() {
 
   return (
     <Screen edges={['top', 'bottom']}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={handleBack} style={styles.backBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-          <Text style={styles.backArrow}>←</Text>
-        </TouchableOpacity>
-        <Text style={styles.headerTitle} numberOfLines={1}>{resolved.name}</Text>
-        <TouchableOpacity
-          onPress={() => favourite(recipeInput)}
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-          style={styles.backBtn}
-          activeOpacity={0.7}
-        >
-          <Ionicons
-            name={resolved.favourited ? 'bookmark' : 'bookmark-outline'}
-            size={22}
-            color={resolved.favourited ? COLORS.green : COLORS.textSecondary}
-          />
-        </TouchableOpacity>
-      </View>
+      <PageHeader
+        title={resolved.name}
+        onBack={handleBack}
+        style={styles.headerBorder}
+        right={
+          <TouchableOpacity
+            onPress={() => favourite(recipeInput)}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            style={styles.bookmarkBtn}
+            activeOpacity={0.7}
+          >
+            <Ionicons
+              name={resolved.favourited ? 'bookmark' : 'bookmark-outline'}
+              size={22}
+              color={resolved.favourited ? COLORS.green : COLORS.textSecondary}
+            />
+          </TouchableOpacity>
+        }
+      />
 
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
         <View style={styles.hero}>
@@ -509,19 +505,8 @@ function formatQty(ing: Ingredient): string {
 }
 
 const styles = StyleSheet.create({
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 12,
-    paddingTop: 6,
-    paddingBottom: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: COLORS.border,
-  },
-  backBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  backArrow: { color: COLORS.text, fontSize: 22, fontWeight: '600' },
-  headerTitle: { flex: 1, color: COLORS.text, fontSize: 16, fontWeight: '700', textAlign: 'center', marginHorizontal: 4 },
+  headerBorder: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: COLORS.border },
+  bookmarkBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
 
   scroll: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 96 },
 

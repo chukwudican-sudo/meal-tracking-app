@@ -752,7 +752,7 @@ function FixOverlay({ fixText, setFixText, busy, onClose, onReevaluate }: FixOve
           <View style={styles.fixHeader}>
             <Text style={styles.fixTitle}>Fix Result</Text>
             <TouchableOpacity onPress={onClose} hitSlop={10} style={styles.fixCloseBtn}>
-              <Text style={styles.fixCloseText}>✕</Text>
+              <Ionicons name="close" size={16} color={COLORS.text} />
             </TouchableOpacity>
           </View>
           <Text style={styles.fixHint}>

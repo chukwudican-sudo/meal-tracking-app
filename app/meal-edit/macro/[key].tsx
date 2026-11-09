@@ -3,6 +3,7 @@ import { Alert, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'reac
 import { router, useLocalSearchParams } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
 
+import { PageHeader } from '@/components/PageHeader';
 import { Screen } from '@/components/Screen';
 import { ProgressRing } from '@/components/ProgressRing';
 import { COLORS } from '@/constants/theme';
@@ -161,15 +162,16 @@ export default function MacroEditScreen() {
 
 function Header({ title, onDone }: { title: string; onDone: () => void }) {
   return (
-    <View style={styles.header}>
-      <TouchableOpacity onPress={() => router.back()} hitSlop={10}>
-        <Ionicons name="chevron-back" size={26} color={COLORS.text} />
-      </TouchableOpacity>
-      <Text style={styles.headerTitle} numberOfLines={1}>{title}</Text>
-      <TouchableOpacity onPress={onDone} hitSlop={10}>
-        <Text style={styles.headerDone}>Done</Text>
-      </TouchableOpacity>
-    </View>
+    <PageHeader
+      title={title}
+      wideSides
+      style={styles.headerBorder}
+      right={
+        <TouchableOpacity onPress={onDone} hitSlop={10}>
+          <Text style={styles.headerDone}>Done</Text>
+        </TouchableOpacity>
+      }
+    />
   );
 }
 
@@ -178,16 +180,7 @@ function cap(s: string): string {
 }
 
 const styles = StyleSheet.create({
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: COLORS.border,
-  },
-  headerTitle: { color: COLORS.text, fontSize: 17, fontWeight: '700', flex: 1, textAlign: 'center' },
+  headerBorder: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: COLORS.border },
   headerDone: { color: COLORS.green, fontSize: 15, fontWeight: '700', width: 50, textAlign: 'right' },
 
   body: { padding: 20, alignItems: 'center' },
