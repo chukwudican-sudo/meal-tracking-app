@@ -28,6 +28,8 @@ import { useToastStore } from '@/store/useToastStore';
 import { PaywallModalHost } from '@/components/paywall/PaywallModalHost';
 import { ToastHost } from '@/components/ToastHost';
 import { useCloseOnOverlayReset } from '@/lib/overlays';
+import { AIConsentHost } from '@/components/AIConsentHost';
+import { isAIConsentDeclined } from '@/lib/aiConsent';
 
 interface Props {
   visible: boolean;
@@ -105,6 +107,7 @@ export function KitchenScanModal({ visible, onClose }: Props) {
   // (matching ScanTab) and retries the scan on a successful purchase;
   // everything else is a lightweight toast.
   const handleScanError = (e: unknown, retry: () => void) => {
+    if (isAIConsentDeclined(e)) return; // "Not now" on the AI permission sheet: stay quiet
     console.warn('Kitchen scan failed:', e);
     if (e instanceof AIError && e.code === 'not_premium') {
       openPaywall({ reason: 'scan_limit', onSuccess: retry });
@@ -327,6 +330,7 @@ export function KitchenScanModal({ visible, onClose }: Props) {
         )}
       </View>
       <PaywallModalHost active={visible} />
+      <AIConsentHost active={visible} />
       <ToastHost />
     </Modal>
   );

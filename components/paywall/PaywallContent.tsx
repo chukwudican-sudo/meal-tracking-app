@@ -37,12 +37,9 @@ import {
 } from '@/lib/purchases';
 import { PRO_ENTITLEMENT_ID, useEntitlementStore } from '@/store/useEntitlementStore';
 import { usePaywallStore } from '@/store/usePaywallStore';
+import { PRIVACY_URL, TERMS_URL } from '@/constants/legal';
 import type { PurchasesPackage } from 'react-native-purchases';
 
-// Placeholder legal URLs — swap these two lines for the real pages once they
-// exist. Nothing else about the fine print needs to change.
-const TERMS_URL = 'https://example.com/terms';
-const PRIVACY_URL = 'https://example.com/privacy';
 
 const BENEFITS = [
   'Unlimited AI scans',

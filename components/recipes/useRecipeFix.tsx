@@ -26,6 +26,8 @@ import { openPaywall } from '@/lib/paywall';
 import { useEntitlementStore } from '@/store/useEntitlementStore';
 import { isOwnRecipe, useMealStore } from '@/store/useMealStore';
 import { useUndoStore } from '@/store/useUndoStore';
+import { AIConsentHost } from '@/components/AIConsentHost';
+import { isAIConsentDeclined } from '@/lib/aiConsent';
 
 const FIX_MESSAGES = ['Updating ingredients…', 'Rewriting steps…', 'Recalculating nutrition…'];
 
@@ -89,6 +91,7 @@ export function useRecipeFix(savedId: string | undefined) {
       showUndo({ message: 'Recipe updated', undo: () => revertRecipeFix(applied.id, previous, previousHistory) });
     } catch (e) {
       console.warn('Recipe fix failed:', e);
+      if (isAIConsentDeclined(e)) return; // "Not now" on the AI permission sheet: stay quiet
       if (e instanceof AIError && e.code === 'not_premium') {
         // Close first so the paywall isn't stacked under the sheet; after a
         // purchase, reopen it so the retry shows its loader.
@@ -137,6 +140,7 @@ export function useRecipeFix(savedId: string | undefined) {
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
+      <AIConsentHost active={open} />
     </Modal>
   );
 

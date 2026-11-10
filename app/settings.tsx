@@ -146,6 +146,11 @@ export default function SettingsScreen() {
           <NavRow label="Notifications" onPress={() => router.push('/settings/notifications')} />
         </View>
 
+        <Text style={styles.sectionLabel}>PRIVACY</Text>
+        <View style={styles.section}>
+          <NavRow label="Privacy & AI" onPress={() => router.push('/settings/privacy')} />
+        </View>
+
         <Text style={styles.sectionLabel}>HELP</Text>
         <View style={styles.section}>
           <NavRow label="Help" onPress={() => router.push('/settings/help')} />

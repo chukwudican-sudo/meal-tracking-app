@@ -21,7 +21,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { APP_NAME } from '@/constants/app';
-import { COLORS } from '@/constants/theme';
+import { COLORS, OPAQUE_SHEET_BG } from '@/constants/theme';
 import { AIError, aiErrorMessage } from '@/ai/aiEdgeClient';
 import { fixMeal } from '@/ai/fixMeal';
 import { scanMeal, type ScanMode } from '@/ai/scanMeal';
@@ -33,6 +33,8 @@ import type { Ingredient, UserGoals } from '@/store/types';
 import { rateMeal } from '@/utils/mealRating';
 import { useMealStore } from '@/store/useMealStore';
 import { useToastStore } from '@/store/useToastStore';
+import { AIConsentHost } from '@/components/AIConsentHost';
+import { isAIConsentDeclined } from '@/lib/aiConsent';
 
 // 'food' estimates a plated meal, 'label' reads a Nutrition Facts label (both
 // via scan-meal), 'barcode' looks the product up. Photo-library picks reuse the
@@ -182,6 +184,7 @@ export function ScanTab({ context, onDraftReady, onClose }: Props) {
   // purchase; everything else is a lightweight toast, since the camera view
   // has no inline note slot. ScanError subclasses AIError.
   function handleScanError(e: unknown, retry: () => void) {
+    if (isAIConsentDeclined(e)) return; // "Not now" on the AI permission sheet: stay quiet
     console.warn('Scan failed:', e);
     if (e instanceof AIError && e.code === 'not_premium') {
       openPaywall({ reason: 'scan_limit', onSuccess: retry });
@@ -367,6 +370,7 @@ export function ScanTab({ context, onDraftReady, onClose }: Props) {
       setScanState('result');
     } catch (e) {
       console.warn('Re-evaluate failed:', e);
+      if (isAIConsentDeclined(e)) return; // "Not now" on the AI permission sheet: stay quiet
       if (e instanceof AIError && e.code === 'not_premium') {
         // Drop the Fix sheet first so the paywall isn't stacked under it; after
         // a purchase the same correction re-runs automatically.
@@ -608,6 +612,7 @@ export function ScanTab({ context, onDraftReady, onClose }: Props) {
           onClose={() => setScanState('result')}
           onReevaluate={() => void handleReevaluate()}
         />
+        <AIConsentHost active={scanState === 'fix'} />
       </Modal>
     </View>
   );
@@ -944,7 +949,6 @@ function nowHHMM(): string {
 // Opaque surface for sheets that overlay the captured photo. COLORS.card is a
 // translucent white (rgba(...,0.04)) meant to sit on the opaque app bg; over a
 // photo it lets the image bleed through, so these surfaces need a solid color.
-const OPAQUE_SHEET_BG = '#1C1C1C';
 
 const styles = StyleSheet.create({
   full: { flex: 1, backgroundColor: '#000' },

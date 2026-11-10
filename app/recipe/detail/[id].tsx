@@ -36,6 +36,7 @@ import type { Ingredient, Macros, RecipeDifficulty } from '@/store/types';
 import { useEntitlementStore } from '@/store/useEntitlementStore';
 import { useMealStore } from '@/store/useMealStore';
 import { useToastStore } from '@/store/useToastStore';
+import { isAIConsentDeclined } from '@/lib/aiConsent';
 
 interface ResolvedRecipe {
   source: 'premade' | 'saved';
@@ -365,6 +366,16 @@ function RecipeAiChat({
       setMessages(prev => [...prev, { id: `a-${Date.now()}`, role: 'assistant', text: reply }]);
       scrollToEnd();
     } catch (e) {
+      // "Not now" on the AI permission sheet: take the unanswered message back
+      // into the box rather than leaving it hanging without a reply.
+      if (isAIConsentDeclined(e)) {
+        const last = nextMessages[nextMessages.length - 1];
+        if (last?.role === 'user') {
+          setMessages(prev => prev.filter(m => m.id !== last.id));
+          setInput(prev => prev || last.text);
+        }
+        return;
+      }
       // not_premium (subscription gate or steps-not-generated gate) → paywall
       // and close the panel rather than leaving a dangling fake reply. On a
       // successful purchase, reopen the panel and resend this same turn.

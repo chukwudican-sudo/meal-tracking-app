@@ -25,6 +25,7 @@ import { openPaywall } from '@/lib/paywall';
 import type { GroceryItem, IngredientCategory } from '@/store/types';
 import { useMealStore } from '@/store/useMealStore';
 import { useToastStore } from '@/store/useToastStore';
+import { isAIConsentDeclined } from '@/lib/aiConsent';
 
 const INITIAL = 6;
 const MORE = 4;
@@ -97,6 +98,7 @@ export default function WhatCanIMakeScreen() {
   // paywall (matching ScanTab) and retries the suggest call on a successful
   // purchase; everything else is a lightweight toast.
   const handleSuggestError = (e: unknown, retry: () => void) => {
+    if (isAIConsentDeclined(e)) return; // "Not now" on the AI permission sheet: stay quiet
     console.warn('Kitchen recipe suggest failed:', e);
     if (e instanceof AIError && e.code === 'not_premium') {
       openPaywall({ reason: 'scan_limit', onSuccess: retry });

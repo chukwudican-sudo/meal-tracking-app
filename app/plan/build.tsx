@@ -21,7 +21,7 @@ import { BackButton } from '@/components/PageHeader';
 import { Screen } from '@/components/Screen';
 import { router } from 'expo-router';
 
-import { COLORS } from '@/constants/theme';
+import { COLORS, OPAQUE_SHEET_BG } from '@/constants/theme';
 import { newId } from '@/lib/sync/uuid';
 import { fetchAllFoodOptionsCombined, fetchMacroFoodOptions } from '@/lib/macroFoodOptions';
 import { AIError } from '@/ai/aiEdgeClient';
@@ -42,6 +42,8 @@ import type {
   RecipeTemplate,
   UserProfile,
 } from '@/store/types';
+import { AIConsentHost } from '@/components/AIConsentHost';
+import { isAIConsentDeclined } from '@/lib/aiConsent';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -53,7 +55,6 @@ const PAGE_SIZE = 5;
 // Opaque background for cards rendered inside a transparent Modal. COLORS.card
 // is a translucent white meant to sit on the opaque app background, so it looks
 // see-through inside a Modal — matches the ScanTab fix for the same issue.
-const OPAQUE_SHEET_BG = '#1C1C1C';
 // INITIAL_SEED and SUGGEST_BATCH are sized against the ~15-recipe-per-category
 // static catalog in constants/recipeSeed.ts. With 15 per category, the initial
 // seed (9) leaves 6 unseen, so the first Suggest more returns 5 fresh catalog
@@ -1610,6 +1611,7 @@ export default function BuildPlanScreen() {
   // toast. Suggest-more's own AI top-up is deliberately excluded — it already
   // degrades silently to a toast on any failure (see addAutoPage below).
   function handleAIError(e: unknown, retry?: () => void) {
+    if (isAIConsentDeclined(e)) return; // "Not now" on the AI permission sheet: stay quiet
     console.warn('Meal suggestion failed:', e);
     if (e instanceof AIError && e.code === 'not_premium') {
       openPaywall({ reason: 'scan_limit', onSuccess: retry });
@@ -1664,6 +1666,7 @@ export default function BuildPlanScreen() {
       appendMealsForSlot(slot, safe, /* isSuggestMore */ true);
     } catch (e) {
       console.warn('Suggest-more AI top-up failed:', e);
+      if (isAIConsentDeclined(e)) return; // "Not now" on the AI permission sheet: stay quiet
       showToast('No more options — try Describe for custom ideas');
     } finally {
       setSuggestMoreLoadingBySlot(prev => ({ ...prev, [slot.id]: false }));
@@ -2080,6 +2083,7 @@ export default function BuildPlanScreen() {
               </Pressable>
             </Pressable>
           </KeyboardAvoidingView>
+          <AIConsentHost active={describeModalVisible} />
         </Modal>
 
         {/* Suggest more popup: fires once per slot at SUGGEST_POPUP_AT clicks.

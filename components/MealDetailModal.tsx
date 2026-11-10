@@ -33,6 +33,8 @@ import { ToastHost } from '@/components/ToastHost';
 import { useMealStore } from '@/store/useMealStore';
 import { useToastStore } from '@/store/useToastStore';
 import type { Macros, NutrientKey, NutrientValues } from '@/store/types';
+import { AIConsentHost } from '@/components/AIConsentHost';
+import { isAIConsentDeclined } from '@/lib/aiConsent';
 
 const SCREEN_W = Dimensions.get('window').width;
 const DEFAULT_PAGE_W = Math.min(SCREEN_W - 32, 460) - 32; // popup inner width minus padding
@@ -338,6 +340,7 @@ export function MealDetailModal() {
       setFixVisible(false);
     } catch (e) {
       console.warn('Fix failed:', e);
+      if (isAIConsentDeclined(e)) return; // "Not now" on the AI permission sheet: stay quiet
       if (e instanceof AIError && e.code === 'not_premium') {
         // Close the Fix popup so the paywall isn't stacked under it; the same
         // correction re-runs after a purchase.
@@ -644,6 +647,7 @@ export function MealDetailModal() {
             </View>
           </View>
         </KeyboardAvoidingView>
+        <AIConsentHost active={fixVisible} />
       </Modal>
 
       {/* Report Food popup (keyboard-safe shell) */}
@@ -678,6 +682,7 @@ export function MealDetailModal() {
       </Modal>
       {/* Rendered inside this modal so they appear on top of it, not behind. */}
       <PaywallModalHost active={visible} />
+      <AIConsentHost active={visible} />
       <ToastHost />
     </Modal>
   );

@@ -2200,6 +2200,12 @@ export const useMealStore = create<AppStore>()(
 
       closeMealEditSession: () => set({ mealEditSession: null }),
 
+      // ── AI permission (Apple 5.1.2) ────────────────────────────────────────
+      setAiConsent: (allowed) =>
+        set(state => ({
+          profile: { ...state.profile, aiConsent: allowed, aiConsentAt: new Date().toISOString() },
+        })),
+
       // ── Meal photo sync ────────────────────────────────────────────────────
       setMealPhotoSynced: (mealId, from, path) => {
         const { logs } = get();

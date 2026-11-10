@@ -143,6 +143,11 @@ export interface UserProfile {
 
   // Name of the currently active plan (set when a plan is activated).
   activePlanName?: string;
+
+  // AI permission (Apple 5.1.2): true = allowed, false = turned off,
+  // undefined = never asked. aiConsentAt = when that answer was given.
+  aiConsent?: boolean;
+  aiConsentAt?: string;
 }
 
 // ─── Recurrence & templates ───────────────────────────────────────────────────
@@ -519,4 +524,6 @@ export interface AppStore {
   // Sync uploaded a meal's photo from `from` to `path`. Returns false (nothing
   // recorded) if the meal is gone or its photo changed meanwhile.
   setMealPhotoSynced: (mealId: string, from: string, path: string) => boolean;
+  // The user's answer to the AI permission sheet / Settings switch.
+  setAiConsent: (allowed: boolean) => void;
 }

@@ -31,6 +31,7 @@ import { applyRecipeSwap } from '@/lib/recipeSwap';
 import { useEntitlementStore } from '@/store/useEntitlementStore';
 import { useToastStore } from '@/store/useToastStore';
 import { useUndoStore } from '@/store/useUndoStore';
+import { isAIConsentDeclined } from '@/lib/aiConsent';
 
 interface ResolvedRecipe {
   source: 'premade' | 'saved';
@@ -173,6 +174,7 @@ export default function RecipePreviewScreen() {
       openFullRecipe(saved.id);
     } catch (e) {
       console.warn('[recipe] writing steps failed:', e);
+      if (isAIConsentDeclined(e)) return; // "Not now" on the AI permission sheet: stay quiet
       if (e instanceof AIError && e.code === 'not_premium') {
         openPaywall({
           reason: 'premium_feature',

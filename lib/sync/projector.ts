@@ -61,6 +61,7 @@ function usersHash(state: AppStore): string {
     p.dietaryRestrictions, p.allergies, p.trackedNutrients, p.goalDate,
     p.notificationsAllowed, p.activePlanName,
     p.lastName, p.weightUnit, p.mealSlots, p.mealRemindersEnabled, p.remindMinutesBefore,
+    p.aiConsent, p.aiConsentAt,
     g.dailyCalories, g.protein, g.carbs, g.fats, g.waterTargetCups, g.secondaryTargets,
   ]);
 }

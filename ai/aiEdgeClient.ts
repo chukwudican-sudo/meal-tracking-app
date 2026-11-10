@@ -11,6 +11,7 @@ import { supabase } from '@/lib/supabase';
 import { newId } from '@/lib/sync/uuid';
 import type { Ingredient } from '@/store/types';
 import type { MealDraft } from './types';
+import { ensureAIConsent } from '@/lib/aiConsent';
 
 export type AIErrorCode =
   | 'invalid_input'
@@ -18,6 +19,7 @@ export type AIErrorCode =
   | 'not_premium'
   | 'rate_limited'
   | 'ai_failed'
+  | 'consent_declined' // the user chose "Not now" on the AI permission sheet
   | 'unknown';
 
 // Base class for every AI edge-function error so the UI can branch generically
@@ -207,6 +209,10 @@ export async function invokeAIFunction(
   opts: InvokeAIOptions,
 ): Promise<Record<string, unknown>> {
   const make = opts.makeError ?? ((code, message) => new AIError(code, message));
+  // Apple 5.1.2: nothing goes to Google Gemini without the user's permission.
+  if (!(await ensureAIConsent())) {
+    throw make('consent_declined', 'AI features are off. You can turn them on in Settings → Privacy & AI.');
+  }
   const startedAt = Date.now();
   const { data, error } = await supabase.functions.invoke(functionName, {
     body,

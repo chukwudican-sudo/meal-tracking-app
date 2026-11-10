@@ -26,6 +26,9 @@ export const COLORS = {
   purple: '#a78bfa',   // optional nutrient accent
 } as const;
 
+// Modal sheets / popups must be opaque (COLORS.card is see-through).
+export const OPAQUE_SHEET_BG = '#1C1C1C';
+
 // ─── Layout constants ────────────────────────────────────────────────────────
 
 // Generous inset for the bottom of every full-screen page so footers and

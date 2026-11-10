@@ -16,6 +16,8 @@ import { COLORS } from '@/constants/theme';
 import { aiErrorMessage } from '@/ai/aiEdgeClient';
 import { fixMeal } from '@/ai/fixMeal';
 import type { ChatMessage, DayContext, MealDraft } from '@/ai/types';
+import { AIConsentHost } from '@/components/AIConsentHost';
+import { isAIConsentDeclined } from '@/lib/aiConsent';
 
 interface Props {
   visible: boolean;
@@ -44,6 +46,7 @@ export function FixResultScreen({ visible, currentDraft, onClose, onResult }: Pr
       setText('');
     } catch (e) {
       console.warn('Fix failed:', e);
+      if (isAIConsentDeclined(e)) return; // "Not now" on the AI permission sheet: stay quiet
       setError(aiErrorMessage(e, 'Could not re-evaluate. Try again.'));
     } finally {
       setBusy(false);
@@ -100,6 +103,7 @@ export function FixResultScreen({ visible, currentDraft, onClose, onResult }: Pr
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
+      <AIConsentHost active={visible} />
     </Modal>
   );
 }

@@ -22,6 +22,7 @@ import { openPaywall } from '@/lib/paywall';
 import { newId } from '@/lib/sync/uuid';
 import type { Ingredient, MealEntry, RecipeCategory } from '@/store/types';
 import { useMealStore, initialMealStatus } from '@/store/useMealStore';
+import { isAIConsentDeclined } from '@/lib/aiConsent';
 
 interface Props {
   context: DayContext;
@@ -60,6 +61,7 @@ export function AITab({ date, onLogged }: Props) {
   // "used up the 5 free scans" — retrying `estimate()` on a successful
   // purchase resumes with whatever text/correction was already typed.
   function handleAIError(e: unknown) {
+    if (isAIConsentDeclined(e)) return; // "Not now" on the AI permission sheet: stay quiet
     console.warn('AI request failed:', e);
     if (e instanceof AIError && e.code === 'not_premium') {
       setNote('');

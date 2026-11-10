@@ -25,6 +25,7 @@ import type { RecipeCategory } from '@/store/types';
 import { useMealStore } from '@/store/useMealStore';
 import { useToastStore } from '@/store/useToastStore';
 import { newId } from '@/lib/sync/uuid';
+import { isAIConsentDeclined } from '@/lib/aiConsent';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -111,6 +112,7 @@ export default function CustomRecipeScreen() {
     } catch (e) {
       console.warn('[custom recipe] AI call failed:', e);
       setStage('describe');
+      if (isAIConsentDeclined(e)) return; // "Not now" on the AI permission sheet: stay quiet
       if (e instanceof AIError && e.code === 'not_premium') {
         openPaywall({ reason: 'scan_limit', onSuccess: () => void submitDescribe() });
         return;

@@ -167,6 +167,11 @@ These come straight from months of his feedback. Violating them is the #1 thing 
 - **`CameraView` must stay childless** — render overlays as absolutely-positioned siblings. Children inside it crashed the
   app on iOS (New Architecture) when the camera unmounted after a scan; expo-camera itself warns about it.
 - **AI calls from the client:** always via an `ai/<function>.ts` wrapper on `invokeAIFunction` (35s client timeout).
+  **AI permission (Apple 5.1.2, Nov 10):** `invokeAIFunction` first awaits `lib/aiConsent.ts#ensureAIConsent` (sheet
+  `components/AIConsentHost`, answer on `profile.aiConsent`/`aiConsentAt`, synced as users.ai_consent/_at; Settings →
+  Privacy & AI). "Not now" throws code `consent_declined`: every catch returns early on `isAIConsentDeclined(e)`.
+  **Any new RN Modal that can start an AI request must mount `<AIConsentHost active={visible} />` inside it** (like
+  PaywallModalHost), or the sheet would open hidden behind the modal.
   Error handling everywhere: `not_premium` → `openPaywall({ reason:'scan_limit' | 'premium_feature', onSuccess: retry })`;
   `rate_limited` / `ai_failed` / `unauthorized` → toast with the server message. Long waits → `ProgressiveLoader`.
 - **Edge functions:** follow the shared skeleton in `supabase/functions/_shared/` (see BACKEND.md §4). Profile data is

@@ -82,6 +82,12 @@ export function profileToUsersRow(
     meal_reminders_enabled: profile.mealRemindersEnabled ?? null,
     remind_minutes_before: profile.remindMinutesBefore ?? null,
     secondary_targets: goals.secondaryTargets ?? null,
+    // AI permission (Apple 5.1.2) + when it was given: the record of consent.
+    // Only once this phone has an answer: a phone never asked must not wipe
+    // another phone's record (the columns are left untouched by the upsert).
+    ...(profile.aiConsent !== undefined
+      ? { ai_consent: profile.aiConsent, ai_consent_at: profile.aiConsentAt ?? null }
+      : {}),
     // NOTE: free_scans_remaining and subscription_* are trigger-protected on
     // the server and must never be sent from the client.
   };
@@ -113,6 +119,8 @@ export function usersRowToProfileGoals(row: Record<string, any>): {
     mealSlots: parseMealSlots(row.meal_slots),
     mealRemindersEnabled: typeof row.meal_reminders_enabled === 'boolean' ? row.meal_reminders_enabled : undefined,
     remindMinutesBefore: REMIND_MINUTES.has(row.remind_minutes_before) ? row.remind_minutes_before : undefined,
+    aiConsent: typeof row.ai_consent === 'boolean' ? row.ai_consent : undefined,
+    aiConsentAt: typeof row.ai_consent === 'boolean' && typeof row.ai_consent_at === 'string' ? row.ai_consent_at : undefined,
   };
   // Use undefined (not 0) for missing targets so a near-empty server row never
   // zeroes out locally-computed goals during the merge (stripUndefined skips them).

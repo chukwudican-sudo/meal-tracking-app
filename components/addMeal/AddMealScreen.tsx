@@ -28,6 +28,7 @@ import { PageHeader } from '@/components/PageHeader';
 import { PaywallModalHost } from '@/components/paywall/PaywallModalHost';
 import { ToastHost } from '@/components/ToastHost';
 import type { MealEntry } from '@/store/types';
+import { AIConsentHost } from '@/components/AIConsentHost';
 
 // Stable empty-array reference; see DayDetailModal for the same pattern.
 const EMPTY_MEALS: MealEntry[] = [];
@@ -228,6 +229,7 @@ export function AddMealScreen({ visible, date, onClose }: Props) {
         <DisclaimerScreen visible={showDisclaimer} onClose={() => setShowDisclaimer(false)} />
         {/* Toasts + paywall render inside this modal, or they'd land behind it. */}
         <PaywallModalHost active={visible} />
+        <AIConsentHost active={visible} />
         <ToastHost />
       </View>
     </Modal>

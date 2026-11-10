@@ -13,6 +13,7 @@ import { SyncProvider } from '@/lib/sync/SyncProvider';
 import { ReminderSync } from '@/lib/notifications/ReminderSync';
 import { PushSync } from '@/lib/notifications/PushSync';
 import { configurePurchases } from '@/lib/purchases';
+import { AIConsentHost } from '@/components/AIConsentHost';
 
 export const unstable_settings = {
   anchor: '(tabs)',
@@ -79,6 +80,7 @@ export default function RootLayout() {
             <Stack.Screen name="settings/account"                 options={fullScreenSlide} />
             <Stack.Screen name="settings/account-delete-confirm"  options={fullScreenSlide} />
             <Stack.Screen name="settings/notifications"           options={fullScreenSlide} />
+            <Stack.Screen name="settings/privacy"                 options={fullScreenSlide} />
             <Stack.Screen name="settings/help"                    options={fullScreenSlide} />
             <Stack.Screen name="settings/feedback"                options={fullScreenSlide} />
             <Stack.Screen name="settings/coming-soon"             options={fullScreenSlide} />
@@ -105,6 +107,8 @@ export default function RootLayout() {
           </Stack>
           <UndoSnackbarHost />
           <ToastHost />
+          {/* AI permission sheet (Apple 5.1.2); modals carry their own host. */}
+          <AIConsentHost active />
         </View>
         </SyncProvider>
         </AuthProvider>
