@@ -29,6 +29,8 @@ interface FormPageProps {
   // Without it, the button is the sticky footer (e.g. Feedback's Submit).
   // Screens of switches/choices save on tap and have no button.
   dirty?: boolean;
+  // An async save finished: leave without the "Discard changes?" prompt.
+  saved?: boolean;
   onBack?: () => void;
   rightAction?: React.ReactNode;
   // Render extra content above the scroll body (banners, hero rows, etc).
@@ -42,6 +44,7 @@ export function FormPage({
   onSave,
   saveDisabled,
   dirty,
+  saved: savedProp,
   onBack,
   rightAction,
   topSlot,
@@ -56,7 +59,7 @@ export function FormPage({
   // expo-router queues router.back() and runs it later, so the leave check
   // fires after onSave has returned (that showed the prompt on Save, Nov 2).
   const saved = useRef(false);
-  usePreventRemove(dirty === true, ({ data }) => {
+  usePreventRemove(dirty === true && !savedProp, ({ data }) => {
     if (saved.current) {
       navigation.dispatch(data.action);
       return;

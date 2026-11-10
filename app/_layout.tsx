@@ -81,9 +81,9 @@ export default function RootLayout() {
             <Stack.Screen name="settings/account-delete-confirm"  options={fullScreenSlide} />
             <Stack.Screen name="settings/notifications"           options={fullScreenSlide} />
             <Stack.Screen name="settings/privacy"                 options={fullScreenSlide} />
+            <Stack.Screen name="settings/password"                options={fullScreenSlide} />
             <Stack.Screen name="settings/help"                    options={fullScreenSlide} />
             <Stack.Screen name="settings/feedback"                options={fullScreenSlide} />
-            <Stack.Screen name="settings/coming-soon"             options={fullScreenSlide} />
 
             {/* Plan sub-pages */}
             <Stack.Screen name="plan/build"                       options={fullScreenSlide} />

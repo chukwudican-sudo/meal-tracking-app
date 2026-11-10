@@ -31,6 +31,7 @@ import type {
   UserGoals,
 } from '@/store/types';
 import { useMealStore } from '@/store/useMealStore';
+import { HealthNote } from '@/components/HealthNote';
 
 const STEPS = ['Goal', 'Weight', 'Activity', 'Pace', 'Summary'] as const;
 const GOALS: GoalType[] = ['lose_weight', 'maintain', 'gain_muscle', 'lean_bulk'];
@@ -328,6 +329,7 @@ export default function EditGoalScreen() {
             >
               <Text style={styles.tweakBtnText}>{tweaking ? 'Done tweaking' : 'Tweak manually'}</Text>
             </TouchableOpacity>
+            <HealthNote style={{ marginTop: 14 }} />
           </>
         )}
       </ScrollView>

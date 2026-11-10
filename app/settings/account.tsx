@@ -41,9 +41,6 @@ export default function AccountSettingsScreen() {
     router.back();
   };
 
-  const navComingSoon = (title: string) =>
-    router.push({ pathname: '/settings/coming-soon', params: { title } });
-
   return (
     <FormPage
       title="Account Settings"
@@ -77,7 +74,7 @@ export default function AccountSettingsScreen() {
         </Field>
         <TouchableOpacity
           style={styles.row}
-          onPress={() => showToast('Password change coming soon')}
+          onPress={() => router.push('/settings/password')}
           activeOpacity={0.7}
         >
           <Text style={styles.rowText}>Password</Text>
@@ -105,9 +102,7 @@ export default function AccountSettingsScreen() {
             </TouchableOpacity>
           </View>
         </View>
-        <NavRow label="Language" onPress={() => navComingSoon('Language')} />
-        <NavRow label="Data Consent" onPress={() => navComingSoon('Data Consent')} />
-        <NavRow label="Export My Data" onPress={() => navComingSoon('Export My Data')} />
+        <NavRow label="Privacy & AI" onPress={() => router.push('/settings/privacy')} />
       </FormSection>
 
       <TouchableOpacity

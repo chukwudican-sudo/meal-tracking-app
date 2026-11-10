@@ -35,6 +35,7 @@ import { useToastStore } from '@/store/useToastStore';
 import type { Macros, NutrientKey, NutrientValues } from '@/store/types';
 import { AIConsentHost } from '@/components/AIConsentHost';
 import { isAIConsentDeclined } from '@/lib/aiConsent';
+import { FEEDBACK_MAX_LEN, submitFeedback } from '@/lib/feedback';
 
 const SCREEN_W = Dimensions.get('window').width;
 const DEFAULT_PAGE_W = Math.min(SCREEN_W - 32, 460) - 32; // popup inner width minus padding
@@ -107,6 +108,7 @@ export function MealDetailModal() {
   const [fixing, setFixing] = useState(false);
   const [reportVisible, setReportVisible] = useState(false);
   const [reportText, setReportText] = useState('');
+  const [reportSending, setReportSending] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [photoSubmenu, setPhotoSubmenu] = useState(false);
   const [page, setPage] = useState(0);
@@ -302,7 +304,25 @@ export function MealDetailModal() {
     }
   }
 
-  function submitReport() {
+  // Really sent (user_feedback table) with the meal's numbers, so the report
+  // can be checked; only says "sent" once it arrived.
+  async function submitReport() {
+    if (reportSending || !session) return;
+    setReportSending(true);
+    const d = session.draft;
+    const { error } = await submitFeedback('food_report', reportText, {
+      meal: d.name,
+      date: session.date,
+      calories: d.calories,
+      macros: d.macros,
+      servings: d.servings ?? 1,
+      ingredients: (d.ingredients ?? []).slice(0, 30).map(i => `${i.quantity} ${i.unit} ${i.name}`.trim()),
+    });
+    setReportSending(false);
+    if (error) {
+      showToast(error);
+      return;
+    }
     setReportVisible(false);
     setReportText('');
     showToast('Thanks — your report was sent.');
@@ -664,6 +684,7 @@ export function MealDetailModal() {
               style={styles.nestedInput}
               value={reportText}
               onChangeText={setReportText}
+              maxLength={FEEDBACK_MAX_LEN}
               placeholder="Describe the issue"
               placeholderTextColor={COLORS.textMuted}
               multiline
@@ -673,8 +694,12 @@ export function MealDetailModal() {
               <TouchableOpacity style={[styles.btn, styles.btnGhost]} onPress={() => setReportVisible(false)}>
                 <Text style={styles.btnGhostText}>Cancel</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.btn, styles.btnPrimary]} onPress={submitReport}>
-                <Text style={styles.btnPrimaryText}>Report</Text>
+              <TouchableOpacity
+                style={[styles.btn, styles.btnPrimary, (!reportText.trim() || reportSending) && { opacity: 0.5 }]}
+                onPress={() => { void submitReport(); }}
+                disabled={!reportText.trim() || reportSending}
+              >
+                <Text style={styles.btnPrimaryText}>{reportSending ? 'Sending…' : 'Report'}</Text>
               </TouchableOpacity>
             </View>
           </View>

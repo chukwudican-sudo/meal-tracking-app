@@ -69,10 +69,6 @@ export function DisclaimerScreen({ visible, onClose }: Props) {
               and recipes (https://ai.google.dev).
             </Text>
           </Section>
-
-          <Text style={styles.placeholder}>
-            (Replace this disclaimer copy with your own legal text before public release.)
-          </Text>
         </ScrollView>
       </View>
     </Modal>
@@ -104,5 +100,4 @@ const styles = StyleSheet.create({
   section: { gap: 6 },
   sectionTitle: { color: COLORS.text, fontSize: 15, fontWeight: '700' },
   p: { color: COLORS.textSecondary, fontSize: 13, lineHeight: 19 },
-  placeholder: { color: COLORS.textMuted, fontSize: 11, fontStyle: 'italic', marginTop: 18 },
 });

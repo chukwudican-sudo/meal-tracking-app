@@ -8,6 +8,7 @@ import { NUTRIENT_META } from '@/constants/nutrients';
 import { useMealStore } from '@/store/useMealStore';
 import { useToastStore } from '@/store/useToastStore';
 import type { NutrientKey } from '@/store/types';
+import { HealthNote } from '@/components/HealthNote';
 
 export default function NutritionGoalsScreen() {
   const goals = useMealStore(s => s.goals);
@@ -112,6 +113,7 @@ export default function NutritionGoalsScreen() {
         <Field label="Carbs (g)"              value={carbs}    onChange={setCarbs} />
         <Field label="Fats (g)"               value={fats}     onChange={setFats} />
       </FormSection>
+      <HealthNote style={{ marginTop: -8, marginBottom: 16, marginHorizontal: 4 }} />
 
       <FormSection label="HYDRATION">
         <Field label="Water target (cups)"    value={water}    onChange={setWater} />

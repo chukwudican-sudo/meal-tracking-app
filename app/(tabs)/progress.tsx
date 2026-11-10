@@ -337,12 +337,6 @@ export default function ProgressScreen() {
 
         <WeightSection />
 
-        <View style={styles.placeholderCard}>
-          <Text style={styles.placeholderTitle}>More insights coming soon</Text>
-          <Text style={styles.placeholderBody}>
-            Streaks, weekly totals, and macro trends will live here.
-          </Text>
-        </View>
       </ScrollView>
     </Screen>
   );
@@ -606,23 +600,4 @@ const styles = StyleSheet.create({
   chartXAxis: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 },
   chartAxisLabel: { color: COLORS.textSecondary, fontSize: 10 },
 
-  placeholderCard: {
-    backgroundColor: COLORS.card,
-    borderRadius: 16,
-    padding: 18,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: COLORS.border,
-  },
-  placeholderTitle: {
-    color: COLORS.text,
-    fontSize: 15,
-    fontWeight: '600',
-  },
-  placeholderBody: {
-    color: COLORS.textSecondary,
-    fontSize: 12,
-    marginTop: 6,
-    textAlign: 'center',
-  },
 });

@@ -14,7 +14,6 @@
       "infoPlist": {
         "NSCameraUsageDescription": "Used to scan meals and barcodes for adding to your day.",
         "NSPhotoLibraryUsageDescription": "Used to upload meal photos for AI identification.",
-        "NSMicrophoneUsageDescription": "Used for voice dictation when describing meals.",
         "ITSAppUsesNonExemptEncryption": false
       }
     },
@@ -29,7 +28,9 @@
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
       "permissions": [
-        "android.permission.CAMERA",
+        "android.permission.CAMERA"
+      ],
+      "blockedPermissions": [
         "android.permission.RECORD_AUDIO"
       ]
     },
@@ -55,13 +56,15 @@
         "expo-camera",
         {
           "cameraPermission": "Used to scan meals and barcodes for adding to your day.",
-          "microphonePermission": "Used for voice dictation when describing meals."
+          "microphonePermission": false,
+          "recordAudioAndroid": false
         }
       ],
       [
         "expo-image-picker",
         {
-          "photosPermission": "Used to upload meal photos for AI identification."
+          "photosPermission": "Used to upload meal photos for AI identification.",
+          "microphonePermission": false
         }
       ],
       "@react-native-community/datetimepicker",

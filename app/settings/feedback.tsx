@@ -5,17 +5,31 @@ import { StyleSheet, Text, TextInput, View } from 'react-native';
 import { FormPage } from '@/components/profile/FormPage';
 import { COLORS } from '@/constants/theme';
 import { useToastStore } from '@/store/useToastStore';
+import { FEEDBACK_MAX_LEN, submitFeedback } from '@/lib/feedback';
 
-const MAX_LEN = 1000;
+const MAX_LEN = FEEDBACK_MAX_LEN;
 
 export default function FeedbackScreen() {
   const [text, setText] = useState('');
+  const [sending, setSending] = useState(false);
   const showToast = useToastStore(s => s.showToast);
 
-  const handleSubmit = () => {
-    // For MVP we just thank the user; a backend hook can replace this later.
+  // Really sent (user_feedback table); only says thanks once it arrived.
+  const send = async () => {
+    if (sending) return;
+    setSending(true);
+    const { error } = await submitFeedback('feedback', text);
+    setSending(false);
+    if (error) {
+      showToast(error);
+      return;
+    }
     showToast('Thanks for your feedback!');
     router.back();
+  };
+  const handleSubmit = () => {
+    void send();
+    return false as const; // async: the page closes itself once it's sent
   };
 
   return (
@@ -23,7 +37,7 @@ export default function FeedbackScreen() {
       title="Feedback"
       saveLabel="Submit"
       onSave={handleSubmit}
-      saveDisabled={text.trim().length === 0}
+      saveDisabled={text.trim().length === 0 || sending}
     >
       <Text style={styles.intro}>
         Tell us what&apos;s working, what&apos;s broken, or what you&apos;d like to see next.

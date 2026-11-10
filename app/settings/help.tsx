@@ -3,35 +3,23 @@ import { StyleSheet, Text, TouchableOpacity } from 'react-native';
 
 import { FormPage, FormSection } from '@/components/profile/FormPage';
 import { COLORS } from '@/constants/theme';
+import { openPrivacy, openSupportEmail, openTerms } from '@/lib/openLink';
 
-const SHELL_ITEMS = [
-  { label: 'FAQ',              soon: true },
-  { label: 'About Us',         soon: true },
-  { label: 'Contact Support',  soon: true },
-  { label: 'Feedback',         soon: false },
-  { label: 'Terms of Service', soon: true },
-  { label: 'Privacy Policy',   soon: true },
-] as const;
+// Only things that work (Apple 2.1: no "coming soon"). FAQ and About Us come
+// back once they have real content.
+const ITEMS: { label: string; onPress: () => void }[] = [
+  { label: 'Contact Support',  onPress: () => { void openSupportEmail(); } },
+  { label: 'Send Feedback',    onPress: () => router.push('/settings/feedback') },
+  { label: 'Terms of Service', onPress: () => { void openTerms(); } },
+  { label: 'Privacy Policy',   onPress: () => { void openPrivacy(); } },
+];
 
 export default function HelpScreen() {
-  const navTo = (item: typeof SHELL_ITEMS[number]) => {
-    if (!item.soon) {
-      router.push('/settings/feedback');
-      return;
-    }
-    router.push({ pathname: '/settings/coming-soon', params: { title: item.label } });
-  };
-
   return (
     <FormPage title="Help">
       <FormSection>
-        {SHELL_ITEMS.map(item => (
-          <TouchableOpacity
-            key={item.label}
-            style={styles.row}
-            onPress={() => navTo(item)}
-            activeOpacity={0.7}
-          >
+        {ITEMS.map(item => (
+          <TouchableOpacity key={item.label} style={styles.row} onPress={item.onPress} activeOpacity={0.7}>
             <Text style={styles.rowText}>{item.label}</Text>
             <Text style={styles.rowArrow}>›</Text>
           </TouchableOpacity>

@@ -4,7 +4,6 @@ import { router } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   ScrollView,
   StyleSheet,
   Text,
@@ -38,6 +37,8 @@ import { engine } from '@/lib/sync/engine';
 import type { ActivityLevel, GoalType, NutrientKey } from '@/store/types';
 import { requestReminderPermission } from '@/lib/notifications/reminders';
 import { useMealStore } from '@/store/useMealStore';
+import { openPrivacy, openTerms } from '@/lib/openLink';
+import { HealthNote } from '@/components/HealthNote';
 
 
 type StepId =
@@ -768,19 +769,12 @@ function ProcessingStep({ onDone }: { onDone: () => void }) {
   );
 }
 
-// Apple / Google native sign-in requires a custom dev build (they don't run in
-// Expo Go), so they're scaffolded here and wired later. Email/Password is live.
-function comingSoon(provider: string) {
-  Alert.alert(
-    `${provider} sign-in coming soon`,
-    `${provider} Sign In needs a native build and will be enabled before launch. For now, please continue with email.`,
-  );
-}
-
 function AccountStep({
   appName, email, onEmailChange, onContinue, onExistingAccount,
 }: { appName: string; email: string; onEmailChange: (e: string) => void; onContinue: () => void; onExistingAccount: () => void }) {
-  const [emailForm, setEmailForm] = useState(false);
+  // Email is the only sign-up for v1 (Apple 2.1: no "coming soon" Apple/Google
+  // buttons; 4.8: Sign in with Apple is only required alongside other social logins).
+  const emailForm = true;
   const [pw, setPw] = useState('');
   const [pw2, setPw2] = useState('');
   const [loading, setLoading] = useState(false);
@@ -833,12 +827,6 @@ function AccountStep({
       <Text style={styles.title}>Your personalized plan is ready.</Text>
       <Text style={styles.explainTop}>Create an account to begin your progress.</Text>
 
-      <View style={{ marginTop: 28, gap: 12 }}>
-        <AuthButton icon="logo-apple" label="Continue with Apple" onPress={() => comingSoon('Apple')} />
-        <AuthButton icon="logo-google" label="Continue with Google" onPress={() => comingSoon('Google')} />
-        <AuthButton icon="mail-outline" label="Continue with Email" onPress={() => setEmailForm(v => !v)} />
-      </View>
-
       {emailForm ? (
         <View style={{ marginTop: 16, gap: 10 }}>
           <TextInput style={styles.input} placeholder="Email" placeholderTextColor={COLORS.textMuted}
@@ -862,19 +850,12 @@ function AccountStep({
       ) : null}
 
       <Text style={styles.legal}>
-        By continuing, you agree to {appName}'s <Text style={styles.legalLink}>Terms & Conditions</Text> and{' '}
-        <Text style={styles.legalLink}>Privacy Policy</Text>
+        By continuing, you agree to {appName}'s{' '}
+        <Text style={styles.legalLink} onPress={() => { void openTerms(); }} accessibilityRole="link">Terms & Conditions</Text>
+        {' '}and{' '}
+        <Text style={styles.legalLink} onPress={() => { void openPrivacy(); }} accessibilityRole="link">Privacy Policy</Text>
       </Text>
     </ScrollView>
-  );
-}
-
-function AuthButton({ icon, label, onPress }: { icon: any; label: string; onPress: () => void }) {
-  return (
-    <TouchableOpacity style={styles.authBtn} onPress={onPress} activeOpacity={0.85}>
-      <Ionicons name={icon} size={20} color={COLORS.text} />
-      <Text style={styles.authBtnText}>{label}</Text>
-    </TouchableOpacity>
   );
 }
 
@@ -959,6 +940,7 @@ function NutritionResultStep({ calories, onNext }: { calories: number; onNext: (
         </View>
       </ProgressRing>
       <Text style={[styles.bigTitle, { marginTop: 32 }]}>Progress gets easier when the goal is simple.</Text>
+      <HealthNote style={{ marginTop: 16, maxWidth: 340 }} />
       <View style={{ flex: 1 }} />
       <PrimaryButton label="Continue" onPress={onNext} />
     </View>
@@ -1275,11 +1257,6 @@ const styles = StyleSheet.create({
   resultSub: { color: COLORS.textSecondary, fontSize: 13, marginTop: 8 },
 
   // Account
-  authBtn: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10,
-    backgroundColor: COLORS.card, borderRadius: 12, borderWidth: 1, borderColor: COLORS.border, paddingVertical: 15,
-  },
-  authBtnText: { color: COLORS.text, fontSize: 15, fontWeight: '600' },
   legal: { color: COLORS.textMuted, fontSize: 12, textAlign: 'center', marginTop: 24, lineHeight: 18 },
   legalLink: { color: COLORS.green },
 

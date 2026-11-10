@@ -26,6 +26,7 @@ import {
   getPendingCredentials,
   savePendingPassword,
 } from './pendingCredentials';
+import { withTimeout } from '@/lib/timeoutSignal';
 
 // Deep links Supabase sends the user back to. These must be added to the
 // project's Auth "Redirect URLs" allow-list in the Supabase dashboard.
@@ -161,6 +162,49 @@ export async function verifyRecoveryOtp(email: string, token: string): Promise<A
   });
   if (error) return { error: error.message };
   return { error: null, userId: data.user?.id };
+}
+
+// Settings → Account → Password: confirm the current password first (so
+// someone holding an unlocked phone can't change it), then set the new one.
+// Every failure comes back as a plain message; capped at 15s per step.
+export async function changePassword(currentPassword: string, newPassword: string): Promise<AuthResult> {
+  try {
+    // The stored session (no network): "verify later" users have none yet.
+    const { data } = await supabase.auth.getSession();
+    const email = data.session?.user.email;
+    if (!email) return { error: 'Verify your email first, then you can change your password.' };
+
+    const check = await withTimeout(
+      supabase.auth.signInWithPassword({ email, password: currentPassword }),
+      15_000,
+      'timeout',
+    );
+    if (check.error) {
+      const code = (check.error as { code?: string }).code;
+      if (code === 'email_not_confirmed') {
+        return { error: 'Verify your email first, then you can change your password.' };
+      }
+      if (code === 'invalid_credentials' || check.error.status === 400) {
+        return { error: 'Your current password is incorrect.' };
+      }
+      return { error: 'Could not check your current password. Please try again.' };
+    }
+
+    const { error } = await withTimeout(
+      supabase.auth.updateUser({ password: newPassword }),
+      15_000,
+      'timeout',
+    );
+    if (error) {
+      const code = (error as { code?: string }).code;
+      if (code === 'same_password') return { error: 'Your new password must be different from the current one.' };
+      if (code === 'weak_password') return { error: 'That password is too weak. Try a longer one.' };
+      return { error: error.message || 'Could not change your password. Please try again.' };
+    }
+    return { error: null };
+  } catch {
+    return { error: 'The connection timed out. Check your internet and try again.' };
+  }
 }
 
 export async function updatePassword(newPassword: string): Promise<AuthResult> {
