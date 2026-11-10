@@ -3,9 +3,12 @@
 // plan and every meal from tomorrow onward (see useMealStore#activatePlan);
 // today's eaten/own meals and past days are never touched.
 
+import { router } from 'expo-router';
 import { Alert } from 'react-native';
 
+import type { MealPlan } from '@/store/types';
 import { countFutureMeals, countOwnFutureMeals, useMealStore } from '@/store/useMealStore';
+import { useToastStore } from '@/store/useToastStore';
 
 interface Options {
   /** A plan is already active (profile.activePlanName is set). */
@@ -59,4 +62,24 @@ export function confirmCustomizeSave(onSave: () => void): void {
       { text: 'Save', style: 'destructive', onPress: onSave },
     ],
   );
+}
+
+// Start a premade/saved plan: the confirmation above, then activate, toast and
+// return to the tabs. One path for Plan detail and Find Your Plan.
+export function startPlanWithConfirm(plan: MealPlan): void {
+  const start = () => {
+    useMealStore.getState().activatePlan(plan);
+    useToastStore.getState().showToast(`${plan.name} activated`);
+    router.dismissAll();
+  };
+  const { profile } = useMealStore.getState();
+  confirmPlanActivation({
+    hasCurrentPlan: !!profile.activePlanName,
+    onActivate: start,
+    onSaveAndActivate: () => {
+      const s = useMealStore.getState();
+      s.saveCurrentPlanAs(s.profile.activePlanName || `Plan saved ${new Date().toLocaleDateString()}`);
+      start();
+    },
+  });
 }

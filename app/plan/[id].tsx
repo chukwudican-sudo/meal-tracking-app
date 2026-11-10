@@ -24,7 +24,7 @@ import { useToastStore } from '@/store/useToastStore';
 import { useUndoStore } from '@/store/useUndoStore';
 import type { MealPlan, MealSlot, PlanDayMeal, RecipeTemplate } from '@/store/types';
 import { slotNameToCategory } from '@/utils/mealSlots';
-import { confirmCustomizeSave, confirmPlanActivation } from '@/lib/planActivation';
+import { confirmCustomizeSave, startPlanWithConfirm } from '@/lib/planActivation';
 import { EMPTY_SLOT, REMOVED_SLOT } from '@/constants/planSlots';
 
 
@@ -43,9 +43,7 @@ export default function PlanDetailScreen() {
   const savedPlans = useMealStore(s => s.savedPlans);
   const recipes = useMealStore(s => s.recipes);
   const profile = useMealStore(s => s.profile);
-  const activatePlan = useMealStore(s => s.activatePlan);
   const endPlan = useMealStore(s => s.endPlan);
-  const saveCurrentPlanAs = useMealStore(s => s.saveCurrentPlanAs);
   const saveCustomizedPlan = useMealStore(s => s.saveCustomizedPlan);
   const setCustomizeDraft = useMealStore(s => s.setCustomizeDraft);
   const clearCustomizeDraft = useMealStore(s => s.clearCustomizeDraft);
@@ -289,22 +287,7 @@ export default function PlanDetailScreen() {
     );
   };
 
-  const handleStartPlan = () => {
-    const start = () => {
-      activatePlan(plan);
-      showToast(`${plan.name} activated`);
-      router.dismissAll();
-    };
-    confirmPlanActivation({
-      hasCurrentPlan: !!profile.activePlanName,
-      onActivate: start,
-      onSaveAndActivate: () => {
-        const fallback = profile.activePlanName || `Plan saved ${new Date().toLocaleDateString()}`;
-        saveCurrentPlanAs(fallback);
-        start();
-      },
-    });
-  };
+  const handleStartPlan = () => startPlanWithConfirm(plan);
 
   return (
     <View style={{ flex: 1 }}>

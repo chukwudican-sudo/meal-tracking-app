@@ -125,7 +125,11 @@ remove). Day cards → day view inside `app/plan/[id].tsx` (reads/writes the dra
 "Add meal slot" (name + wheel time; plan-level only, doesn't touch Profile slots). Button becomes **Save** (warns about
 empty removed slots). Back = Cancel ("All unsaved changes will be lost. Are you sure?"). Every action gets a 5s undo.
 
-**Find Your Plan:** "Coming soon" shell; must end with a designed bridge "None of these fit? Try Build My Plan instead"
+**Find Your Plan (built Nov 10):** 5 tap-only questions (goal and food-to-avoid pre-filled from the profile; eating
+  style multi-pick; meals/day; cooking time) → top 3 premade plans scored on-device by `lib/findPlan.ts` (no AI, free),
+  plans containing anything avoided are never shown (conservative ingredient check), "why it fits" lines, View plan /
+  Start plan (shared `startPlanWithConfirm`), and the "None of these fit? Try Build My Plan instead" bridge. Answers
+  remembered locally (`findPlanAnswers`).
 ("designed and intentional, not an afterthought"). Guided ~5-question flow is deferred.
 
 **Superseded on this tab:** week schedule + DayDetailModal popup, header "+Add"/"+Day meal", drag reorder, heatmap here,

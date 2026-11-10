@@ -794,6 +794,7 @@ export const useMealStore = create<AppStore>()(
       savedPlans:   [],
       viewedRecipeIds: [],
       planAvoidFoods: [],
+      findPlanAnswers: null,
       recipeFixHistory: {},
       goalsBeforePlan: null,
       pendingSwap:    null,
@@ -1099,6 +1100,7 @@ export const useMealStore = create<AppStore>()(
       // Keeps the seeded recipes catalog and grocery initial state intact.
       resetUserData: () => {
         set({
+          findPlanAnswers: null, // per account
           logs:         {},
           goals:        DEFAULT_GOALS,
           goalsBeforePlan: null,
@@ -1988,6 +1990,7 @@ export const useMealStore = create<AppStore>()(
 
       // ─── Plan avoid foods ────────────────────────────────────────────────
       setPlanAvoidFoods: (foods) => set({ planAvoidFoods: foods }),
+      setFindPlanAnswers: (answers) => set({ findPlanAnswers: answers }),
 
       // ─── Swap coordination ──────────────────────────────────────────────
       setPendingSwap: (swap) => set({ pendingSwap: swap }),

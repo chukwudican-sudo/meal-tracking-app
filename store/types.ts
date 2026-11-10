@@ -280,6 +280,24 @@ export type PlanCategory =
   | 'Keto'
   | 'Mediterranean';
 
+// ─── Find Your Plan answers ───────────────────────────────────────────────────
+
+export type FindGoal = 'lose' | 'maintain' | 'muscle' | 'healthy';
+export type FindStyle = 'balanced' | 'protein' | 'lowcarb' | 'keto' | 'med' | 'fiber';
+export type FindMeals = '3' | '5' | 'any';
+export type FindTime = 'quick' | 'some' | 'any';
+export type FindAvoid =
+  | 'vegetarian' | 'vegan' | 'pescetarian' | 'no_fish' | 'no_shellfish' | 'no_red_meat' | 'no_pork'
+  | 'no_dairy' | 'no_eggs' | 'gluten_free' | 'no_nuts' | 'no_soy';
+
+export interface FindPlanAnswers {
+  goal: FindGoal;
+  styles: FindStyle[];   // empty = no preference
+  meals: FindMeals;
+  avoid: FindAvoid[];
+  time: FindTime;
+}
+
 // One slot's meal in a plan day.
 export interface PlanDayMeal {
   slotName: string;        // "Breakfast"
@@ -379,6 +397,8 @@ export interface AppStore {
   // Persisted "foods to avoid" from Build My Plan — survives across sessions so
   // the user doesn't have to re-enter custom items like "shellfish" each time.
   planAvoidFoods: string[];
+  // Find Your Plan: the last answers, so the quiz reopens filled in (local).
+  findPlanAnswers: FindPlanAnswers | null;
   // The user's own goals, saved when a plan with its own targets (premade
   // plans) overwrote them; restored when the plan ends. Local only, not synced.
   goalsBeforePlan: UserGoals | null;
@@ -493,6 +513,7 @@ export interface AppStore {
 
   // ─── Plan avoid foods ───────────────────────────────────────────────────
   setPlanAvoidFoods: (foods: string[]) => void;
+  setFindPlanAnswers: (answers: FindPlanAnswers) => void;
 
   // ─── Swap coordination actions ──────────────────────────────────────────
   setPendingSwap: (swap: PendingSwap | null) => void;
