@@ -96,6 +96,7 @@ const KEYWORD_MAP: Record<string, IngredientCategory> = {
   spinach: 'Fruits & Vegetables',
   kale: 'Fruits & Vegetables',
   lettuce: 'Fruits & Vegetables',
+  'butter lettuce': 'Fruits & Vegetables', // not butter (exact match wins)
   broccoli: 'Fruits & Vegetables',
   cauliflower: 'Fruits & Vegetables',
   carrot: 'Fruits & Vegetables',
@@ -178,6 +179,7 @@ const KEYWORD_MAP: Record<string, IngredientCategory> = {
   'onion powder': 'Spices & Seasonings',
 
   // ─── Condiments ─────────────────────────────────────────────────────────
+  olives: 'Condiments',
   'soy sauce': 'Condiments',
   ketchup: 'Condiments',
   mustard: 'Condiments',

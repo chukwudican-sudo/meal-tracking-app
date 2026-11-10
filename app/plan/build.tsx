@@ -55,7 +55,7 @@ const PAGE_SIZE = 5;
 // Opaque background for cards rendered inside a transparent Modal. COLORS.card
 // is a translucent white meant to sit on the opaque app background, so it looks
 // see-through inside a Modal — matches the ScanTab fix for the same issue.
-// INITIAL_SEED and SUGGEST_BATCH are sized against the ~15-recipe-per-category
+// INITIAL_SEED and SUGGEST_BATCH are sized against the 15–18-recipe-per-category
 // static catalog in constants/recipeSeed.ts. With 15 per category, the initial
 // seed (9) leaves 6 unseen, so the first Suggest more returns 5 fresh catalog
 // cards and a second returns the last 1 before the AI top-up kicks in — the

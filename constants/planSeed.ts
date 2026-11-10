@@ -180,25 +180,31 @@ export const PLAN_SEED: PlanTemplate[] = [
     description: 'Carb-conscious meals that still keep you full.',
     disclaimer: DEFAULT_DISCLAIMER,
     category: 'Low Carb',
-    targets: { calories: 1900, protein: 160, carbs: 110, fats: 95 },
+    // Nov 10: no more toast, wraps or rice dishes; every day is well under
+    // 100 g of carbs. Targets = what the meals add up to (7-day average).
+    targets: { calories: 1700, protein: 130, carbs: 60, fats: 105 },
     days: rotateDays(
       [
         { id: 'rcp-bf-veggie-omelette', name: 'Veggie Omelette' },
-        { id: 'rcp-bf-avocado-toast',   name: 'Avocado Toast' },
+        { id: 'rcp-bf-egg-muffins',     name: 'Spinach & Feta Egg Muffins' },
       ],
       [
-        { id: 'rcp-ln-chicken-caesar', name: 'Chicken Caesar Salad' },
-        { id: 'rcp-ln-tuna-wrap',      name: 'Tuna Wrap' },
+        { id: 'rcp-ln-greek-salad-chicken',   name: 'Greek Salad with Chicken' },
+        { id: 'rcp-ln-chicken-caesar',        name: 'Chicken Caesar Salad' },
+        { id: 'rcp-ln-chicken-lettuce-wraps', name: 'Chicken Avocado Lettuce Wraps' },
       ],
       [
-        { id: 'rcp-dn-chicken-stir-fry', name: 'Chicken Stir-Fry' },
-        { id: 'rcp-dn-salmon-rice',      name: 'Salmon & Rice' },
+        { id: 'rcp-dn-baked-salmon-veg',      name: 'Baked Salmon with Vegetables' },
+        { id: 'rcp-dn-garlic-butter-steak',   name: 'Garlic Butter Steak & Asparagus' },
+        { id: 'rcp-dn-creamy-tuscan-chicken', name: 'Creamy Tuscan Chicken' },
+        { id: 'rcp-dn-lemon-salmon-greens',   name: 'Lemon Herb Salmon with Greens' },
       ],
       [
-        { id: 'rcp-sn-apple-almonds', name: 'Apple & Almonds' },
-        { id: 'rcp-sn-yogurt-honey',  name: 'Greek Yogurt with Honey' },
+        { id: 'rcp-sn-boiled-eggs',   name: 'Boiled Eggs' },
+        { id: 'rcp-sn-guacamole-veg', name: 'Guacamole & Veg Sticks' },
+        { id: 'rcp-sn-edamame',       name: 'Steamed Edamame' },
       ],
-      { am: true, pm: false },
+      { am: true, pm: true },
     ),
     savedAt: '2024-01-01T00:00:00.000Z',
     source: 'premade',
@@ -243,22 +249,30 @@ export const PLAN_SEED: PlanTemplate[] = [
     disclaimer:
       'Keto is restrictive. Consult a clinician if you have medical concerns. ' + DEFAULT_DISCLAIMER,
     category: 'Keto',
-    targets: { calories: 1900, protein: 130, carbs: 40, fats: 140 },
+    // Nov 10: rebuilt from real keto recipes (was toast, wraps and rice —
+    // ~3× the carb limit). Every day stays under 40 g carbs. Targets = what
+    // the meals add up to (7-day average).
+    targets: { calories: 1700, protein: 135, carbs: 35, fats: 115 },
     days: rotateDays(
       [
         { id: 'rcp-bf-veggie-omelette', name: 'Veggie Omelette' },
-        { id: 'rcp-bf-avocado-toast',   name: 'Avocado Toast' },
+        { id: 'rcp-bf-egg-muffins',     name: 'Spinach & Feta Egg Muffins' },
       ],
       [
-        { id: 'rcp-ln-chicken-caesar', name: 'Chicken Caesar Salad' },
-        { id: 'rcp-ln-tuna-wrap',      name: 'Tuna Wrap' },
+        { id: 'rcp-ln-chicken-lettuce-wraps', name: 'Chicken Avocado Lettuce Wraps' },
+        { id: 'rcp-ln-tuna-stuffed-avocado',  name: 'Tuna-Stuffed Avocado' },
+        { id: 'rcp-ln-greek-salad-chicken',   name: 'Greek Salad with Chicken' },
       ],
       [
-        { id: 'rcp-dn-chicken-stir-fry', name: 'Chicken Stir-Fry' },
-        { id: 'rcp-dn-salmon-rice',      name: 'Salmon & Rice' },
+        { id: 'rcp-dn-garlic-butter-steak',   name: 'Garlic Butter Steak & Asparagus' },
+        { id: 'rcp-dn-lemon-salmon-greens',   name: 'Lemon Herb Salmon with Greens' },
+        { id: 'rcp-dn-creamy-tuscan-chicken', name: 'Creamy Tuscan Chicken' },
       ],
-      [{ id: 'rcp-sn-apple-almonds', name: 'Apple & Almonds' }],
-      { am: false, pm: true },
+      [
+        { id: 'rcp-sn-cheese-olives', name: 'Cheese & Olives' },
+        { id: 'rcp-sn-boiled-eggs',   name: 'Boiled Eggs' },
+      ],
+      { am: true, pm: true },
     ),
     savedAt: '2024-01-01T00:00:00.000Z',
     source: 'premade',

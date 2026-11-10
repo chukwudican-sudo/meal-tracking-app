@@ -1,6 +1,7 @@
 import type { RecipeTemplate } from '@/store/types';
 
-// 60-recipe starter catalog. 15 per category. Sized so Build My Plan's
+// 66-recipe starter catalog: 15 per category, plus 6 keto recipes added Nov
+// 10 (so Keto Starter is really keto, ~25–40 g carbs a day). Sized so Build My Plan's
 // INITIAL_SEED/SUGGEST_BATCH (see app/plan/build.tsx) can serve a full initial
 // seed plus a couple of "Suggest more" rounds from static content before the
 // AI top-up kicks in. Macros/calories are reasonable approximations — values
@@ -1252,6 +1253,142 @@ export const RECIPE_SEED: RecipeTemplate[] = [
     steps: [
       'Chop all the fruit into bite-size pieces.',
       'Toss together and serve chilled.',
+    ],
+    difficulty: 'Easy',
+  },
+
+  // ── Keto additions (Nov 10) ───────────────────────────────────────────────
+  // Macros are totals (not net carbs), estimated from standard values for the
+  // listed amounts, like the rest of the catalog.
+  {
+    id: 'rcp-ln-chicken-lettuce-wraps',
+    name: 'Chicken Avocado Lettuce Wraps',
+    category: 'Lunch',
+    calories: 420,
+    cookTimeMin: 15,
+    macros: { protein: 48, carbs: 10, fats: 21 },
+    ingredients: [
+      ing('i1', 'Chicken breast', 150, 'g'),
+      ing('i2', 'Avocado', 75, 'g'),
+      ing('i3', 'Butter lettuce', 4, 'leaves'),
+      ing('i4', 'Cherry tomatoes', 50, 'g'),
+      ing('i5', 'Lime', 0.5, 'units'),
+      ing('i6', 'Olive oil', 1, 'tsp'),
+    ],
+    steps: [
+      'Season the chicken with salt and pepper, then pan-cook in the olive oil for 5–6 minutes a side until cooked through.',
+      'Rest the chicken for 2 minutes, then slice thinly.',
+      'Mash the avocado with the lime juice and a pinch of salt.',
+      'Spread avocado into each lettuce leaf, add chicken and halved tomatoes, and fold to eat.',
+    ],
+    difficulty: 'Easy',
+  },
+  {
+    id: 'rcp-ln-tuna-stuffed-avocado',
+    name: 'Tuna-Stuffed Avocado',
+    category: 'Lunch',
+    calories: 510,
+    cookTimeMin: 10,
+    macros: { protein: 33, carbs: 17, fats: 34 },
+    ingredients: [
+      ing('i1', 'Canned tuna', 120, 'g'),
+      ing('i2', 'Avocado', 1, 'units'),
+      ing('i3', 'Mayonnaise', 1, 'tbsp'),
+      ing('i4', 'Celery', 30, 'g'),
+      ing('i5', 'Cucumber', 80, 'g'),
+      ing('i6', 'Lemon', 0.5, 'units'),
+    ],
+    steps: [
+      'Drain the tuna and mix it with the mayonnaise, finely chopped celery and a squeeze of lemon.',
+      'Halve the avocado, remove the stone and scoop out a little flesh to make room.',
+      'Fill both halves with the tuna mix.',
+      'Serve with sliced cucumber on the side.',
+    ],
+    difficulty: 'Easy',
+  },
+  {
+    id: 'rcp-dn-garlic-butter-steak',
+    name: 'Garlic Butter Steak & Asparagus',
+    category: 'Dinner',
+    calories: 550,
+    cookTimeMin: 20,
+    macros: { protein: 55, carbs: 8, fats: 33 },
+    ingredients: [
+      ing('i1', 'Sirloin steak', 200, 'g'),
+      ing('i2', 'Asparagus', 150, 'g'),
+      ing('i3', 'Butter', 15, 'g'),
+      ing('i4', 'Garlic', 2, 'cloves'),
+      ing('i5', 'Olive oil', 1, 'tsp'),
+    ],
+    steps: [
+      'Pat the steak dry and season well with salt and pepper.',
+      'Sear in a very hot pan with the olive oil, 3–4 minutes a side for medium.',
+      'Lower the heat, add the butter and crushed garlic, and spoon it over the steak for 1 minute. Rest the steak.',
+      'Cook the asparagus in the same pan for 4–5 minutes until tender, then serve with the sliced steak.',
+    ],
+    difficulty: 'Medium',
+  },
+  {
+    id: 'rcp-dn-lemon-salmon-greens',
+    name: 'Lemon Herb Salmon with Greens',
+    category: 'Dinner',
+    calories: 520,
+    cookTimeMin: 20,
+    macros: { protein: 39, carbs: 10, fats: 36 },
+    ingredients: [
+      ing('i1', 'Salmon fillet', 170, 'g'),
+      ing('i2', 'Broccoli', 120, 'g'),
+      ing('i3', 'Spinach', 60, 'g'),
+      ing('i4', 'Olive oil', 1, 'tbsp'),
+      ing('i5', 'Lemon', 0.5, 'units'),
+      ing('i6', 'Fresh dill', 1, 'tbsp'),
+    ],
+    steps: [
+      'Heat the oven to 200°C (400°F). Put the salmon on a lined tray, drizzle with half the olive oil and season.',
+      'Bake for 12–15 minutes until it flakes easily.',
+      'Meanwhile, steam the broccoli for 4 minutes, then toss with the spinach and remaining olive oil until wilted.',
+      'Finish the salmon with lemon juice and chopped dill and serve over the greens.',
+    ],
+    difficulty: 'Easy',
+  },
+  {
+    id: 'rcp-dn-creamy-tuscan-chicken',
+    name: 'Creamy Tuscan Chicken',
+    category: 'Dinner',
+    calories: 650,
+    cookTimeMin: 30,
+    macros: { protein: 47, carbs: 11, fats: 46 },
+    ingredients: [
+      ing('i1', 'Chicken thighs', 200, 'g'),
+      ing('i2', 'Heavy cream', 60, 'ml'),
+      ing('i3', 'Spinach', 50, 'g'),
+      ing('i4', 'Sun-dried tomatoes', 15, 'g'),
+      ing('i5', 'Parmesan', 15, 'g'),
+      ing('i6', 'Garlic', 2, 'cloves'),
+      ing('i7', 'Olive oil', 1, 'tsp'),
+    ],
+    steps: [
+      'Season the chicken thighs and brown them in the olive oil, 5–6 minutes a side. Set aside.',
+      'In the same pan, soften the garlic and chopped sun-dried tomatoes for 1 minute.',
+      'Stir in the cream and parmesan, simmer for 2 minutes, then add the spinach until wilted.',
+      'Return the chicken, simmer 5 more minutes until cooked through, and serve.',
+    ],
+    difficulty: 'Medium',
+  },
+  {
+    id: 'rcp-sn-cheese-olives',
+    name: 'Cheese & Olives',
+    category: 'Snacks',
+    calories: 200,
+    cookTimeMin: 2,
+    macros: { protein: 10, carbs: 2, fats: 17 },
+    ingredients: [
+      ing('i1', 'Cheddar cheese', 40, 'g'),
+      ing('i2', 'Olives', 40, 'g'),
+    ],
+    steps: [
+      'Cube the cheese.',
+      'Serve with the olives.',
     ],
     difficulty: 'Easy',
   },
