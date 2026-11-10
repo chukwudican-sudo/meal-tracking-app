@@ -30,7 +30,7 @@ function mealHash(entry: MealEntry): string {
   return JSON.stringify([
     entry.name, entry.time, entry.slotId, entry.calories,
     entry.macros?.protein, entry.macros?.carbs, entry.macros?.fats,
-    entry.status, entry.servings, entry.photoUri, entry.nutrients,
+    entry.status, entry.servings, entry.photoUri, entry.photoPath, entry.nutrients,
     (entry.ingredients ?? []).map(i => [i.name, i.quantity, i.unit, i.calories]),
   ]);
 }
@@ -123,6 +123,8 @@ function buildTemplates(state: AppStore): Map<string, TemplateSnap> {
   return map;
 }
 
+const PHOTO_DELETE_DELAY_MS = 15_000;
+
 class Projector {
   private unsub: (() => void) | null = null;
   private prevLogsRef: unknown = null;
@@ -207,6 +209,16 @@ class Projector {
     buildTemplates(s).forEach(snap => this.upsertTemplate(snap.template));
     this.upsertUsers();
     this.rebaseline();
+  }
+
+  // One-time upload of photos added before meal photos synced (Nov 9): any
+  // meal with a local photo never uploaded. Unreadable files are skipped at
+  // push time (the meal still syncs).
+  enqueuePhotoBackfill(): void {
+    buildMeals(useMealStore.getState()).forEach((snap, id) => {
+      const e = snap.entry;
+      if (e.photoUri && e.photoUri !== e.photoUploadedFrom) this.upsertMeal(id, snap);
+    });
   }
 
   // One-time upload of what this phone already had before settings, water,
@@ -327,10 +339,26 @@ class Projector {
     curr.forEach((snap, id) => {
       if (this.meals.get(id)?.hash !== snap.hash) this.upsertMeal(id, snap);
     });
-    this.meals.forEach((_snap, id) => {
-      if (!curr.has(id)) {
+    this.meals.forEach((prev, id) => {
+      const next = curr.get(id);
+      if (!next) {
         outbox.enqueue({ table: 'meal_logs', op: 'delete', entityKey: entityKey.mealLog(id), payload: { mealId: id } });
       }
+      // The cloud photo this meal pointed at is no longer used (photo
+      // replaced or removed, or the meal deleted): remove the file too.
+      // Held back 15s so Undo (5s) can bring the meal and its photo back.
+      const oldPhoto = prev.entry.photoPath;
+      if (oldPhoto && next?.entry.photoPath !== oldPhoto) {
+        outbox.enqueue({
+          table: 'meal_photos', op: 'delete', entityKey: entityKey.photo(oldPhoto),
+          payload: { path: oldPhoto }, delayMs: PHOTO_DELETE_DELAY_MS,
+        });
+      }
+    });
+    // A photo back in use (Undo restored its meal): cancel its pending delete.
+    curr.forEach((next, id) => {
+      const path = next.entry.photoPath;
+      if (path && this.meals.get(id)?.entry.photoPath !== path) outbox.discard(entityKey.photo(path));
     });
     this.meals = curr;
   }

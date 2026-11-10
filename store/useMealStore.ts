@@ -963,11 +963,18 @@ export const useMealStore = create<AppStore>()(
                   // seed marker from the existing entry — callers may not include
                   // them in `entry`. Keeping `seed` means built-in demo meals stay
                   // excluded from cloud sync even after being edited.
+                  // Same photo as stored: keep what sync recorded for it (an
+                  // upload may have finished while this draft was open — the
+                  // draft's copy would drop it and trigger a re-upload).
+                  const samePhoto = entry.photoUri !== undefined && entry.photoUri === m.photoUri;
                   return {
                     ...entry,
                     isAdHoc:    entry.isAdHoc    ?? m.isAdHoc,
                     templateId: entry.templateId ?? m.templateId,
                     seed:       entry.seed       ?? m.seed,
+                    ...(samePhoto
+                      ? { photoPath: m.photoPath ?? entry.photoPath, photoUploadedFrom: m.photoUploadedFrom ?? entry.photoUploadedFrom }
+                      : {}),
                   };
                 }),
               },
@@ -2193,6 +2200,22 @@ export const useMealStore = create<AppStore>()(
 
       closeMealEditSession: () => set({ mealEditSession: null }),
 
+      // ── Meal photo sync ────────────────────────────────────────────────────
+      setMealPhotoSynced: (mealId, from, path) => {
+        const { logs } = get();
+        for (const [date, log] of Object.entries(logs)) {
+          const idx = log.meals.findIndex(m => m.id === mealId);
+          if (idx < 0) continue;
+          const m = log.meals[idx];
+          if (m.photoUri !== from) return false; // photo changed meanwhile: next sync handles it
+          const meals = log.meals.slice();
+          meals[idx] = { ...m, photoUploadedFrom: from, photoPath: path };
+          set({ logs: { ...logs, [date]: { ...log, meals } } });
+          return true;
+        }
+        return false;
+      },
+
       // ── Cloud sync merge ───────────────────────────────────────────────────
       applyServerSnapshot: (snapshot, dirtyKeys) => {
         let planChanged = false;
@@ -2306,7 +2329,16 @@ export const useMealStore = create<AppStore>()(
             for (const [date, meals] of Object.entries(snapshot.logsByDate)) {
               const byId = new Map((logs[date]?.meals ?? []).map(m => [m.id, m]));
               meals.forEach(m => {
-                if (!dirtyKeys.has(entityKey.mealLog(m.id))) byId.set(m.id, m);
+                if (dirtyKeys.has(entityKey.mealLog(m.id))) return;
+                // The server never has this phone's own photo file: keep it
+                // while it's still the same photo (cloud copy unchanged).
+                const local = byId.get(m.id);
+                byId.set(
+                  m.id,
+                  local?.photoUri && local.photoPath === m.photoPath
+                    ? { ...m, photoUri: local.photoUri, photoUploadedFrom: local.photoUploadedFrom }
+                    : m,
+                );
               });
               logs[date] = {
                 date,

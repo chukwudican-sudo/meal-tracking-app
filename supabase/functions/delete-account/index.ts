@@ -37,6 +37,14 @@ Deno.serve(async (req: Request) => {
   const user = await getAuthedUser(req, admin);
   if (!user) return errorResponse('unauthorized', 'Not signed in', 401);
 
+  // Meal photos first (Storage files don't cascade with the user, and a user
+  // who still owns files can't be deleted). Fail loudly so the user retries
+  // rather than leaving photos behind.
+  const photosGone = await deleteMealPhotos(admin, user.id);
+  if (!photosGone) {
+    return errorResponse('server_error', 'Could not delete your account. Please try again.', 500);
+  }
+
   const { error } = await admin.auth.admin.deleteUser(user.id);
   if (error) {
     console.error('[delete-account] deleteUser failed:', error);
@@ -45,3 +53,24 @@ Deno.serve(async (req: Request) => {
 
   return jsonResponse({ success: true }, 200);
 });
+
+// Every object under meal-photos/<user id>/ (flat folder), a page at a time.
+// deno-lint-ignore no-explicit-any
+async function deleteMealPhotos(admin: any, userId: string): Promise<boolean> {
+  const bucket = admin.storage.from('meal-photos');
+  for (let round = 0; round < 100; round++) {
+    const { data, error } = await bucket.list(userId, { limit: 1000 });
+    if (error) {
+      console.error('[delete-account] list photos failed:', error);
+      return false;
+    }
+    const names = (data ?? []).map((f: { name: string }) => `${userId}/${f.name}`);
+    if (names.length === 0) return true;
+    const { error: rmErr } = await bucket.remove(names);
+    if (rmErr) {
+      console.error('[delete-account] remove photos failed:', rmErr);
+      return false;
+    }
+  }
+  return false;
+}

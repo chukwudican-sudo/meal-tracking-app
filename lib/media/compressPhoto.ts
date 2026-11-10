@@ -23,19 +23,24 @@ export interface CompressedPhoto {
 // Resize (long edge -> MAX_DIMENSION, aspect preserved) and re-encode as JPEG,
 // returning the bare base64 (no data: prefix) plus its mime type. Accepts a
 // local file URI or a base64 data URI.
-export async function compressPhotoToBase64(uri: string): Promise<CompressedPhoto> {
+// `opts` lets meal-photo storage use a smaller size than the AI calls.
+export async function compressPhotoToBase64(
+  uri: string,
+  opts: { maxDimension?: number; compress?: number } = {},
+): Promise<CompressedPhoto> {
+  const maxDimension = opts.maxDimension ?? MAX_DIMENSION;
   // Cap the LONG edge (resizing by width alone left tall portrait photos at
   // e.g. 1280x2800). Render once first: the manipulator applies the photo's
   // EXIF rotation, so its width/height are the real displayed size (a plain
   // Image.getSize can report a portrait camera shot as landscape).
   const original = await ImageManipulator.manipulate(uri).renderAsync();
   const context = ImageManipulator.manipulate(original);
-  if (Math.max(original.width, original.height) > MAX_DIMENSION) {
-    context.resize(original.width >= original.height ? { width: MAX_DIMENSION } : { height: MAX_DIMENSION });
+  if (Math.max(original.width, original.height) > maxDimension) {
+    context.resize(original.width >= original.height ? { width: maxDimension } : { height: maxDimension });
   }
   const rendered = await context.renderAsync();
   const result = await rendered.saveAsync({
-    compress: JPEG_COMPRESS,
+    compress: opts.compress ?? JPEG_COMPRESS,
     format: SaveFormat.JPEG,
     base64: true,
   });

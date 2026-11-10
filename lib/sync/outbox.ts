@@ -25,6 +25,8 @@ export interface EnqueueInput {
   op: OutboxOp;
   entityKey: string;
   payload: unknown;
+  // Hold the op back this long (still sent at sign-out, which drains all).
+  delayMs?: number;
 }
 
 class Outbox {
@@ -90,6 +92,7 @@ class Outbox {
     // permanently-parked duplicate, which otherwise lets the queue grow unbounded.
     this.items = this.items.filter(it => it.entityKey !== input.entityKey);
     const now = Date.now();
+    const due = now + Math.max(0, input.delayMs ?? 0);
     this.items.push({
       id: newId(),
       table: input.table,
@@ -97,8 +100,9 @@ class Outbox {
       entityKey: input.entityKey,
       payload: input.payload,
       attempts: 0,
-      nextAttemptAt: now,
-      enqueuedAt: now,
+      nextAttemptAt: due,
+      enqueuedAt: due, // a deliberate delay isn't "stuck"
+      ...(due > now ? { notBefore: due } : {}),
     });
     this.schedulePersist();
     this.changeListener?.();
@@ -108,6 +112,12 @@ class Outbox {
   ready(): OutboxItem[] {
     const now = Date.now();
     return this.items.filter(it => !it.deadLetter && it.nextAttemptAt <= now);
+  }
+
+  // Still queued? A drain works from a snapshot of ready items; one that was
+  // discarded or superseded (coalesced) meanwhile must not be sent.
+  has(itemId: string): boolean {
+    return this.items.some(it => it.id === itemId);
   }
 
   // Drop any pending op for one record without sending it.
@@ -148,12 +158,14 @@ class Outbox {
   // reconnect invalidates the "keep waiting" premise of a backoff that was set
   // while the network was flaky/absent, so the first retry after reconnect
   // shouldn't be stalled by a stale timer. Returns how many were reset.
-  resetBackoff(): number {
+  // `includeHeld` (sign-out) also releases deliberate holds (notBefore).
+  resetBackoff(includeHeld = false): number {
     const now = Date.now();
     let n = 0;
     for (const it of this.items) {
-      if (!it.deadLetter && it.nextAttemptAt > now) {
-        it.nextAttemptAt = now;
+      const earliest = includeHeld ? now : Math.max(now, it.notBefore ?? 0);
+      if (!it.deadLetter && it.nextAttemptAt > earliest) {
+        it.nextAttemptAt = earliest;
         n += 1;
       }
     }

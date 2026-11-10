@@ -3,7 +3,6 @@ import {
   ActivityIndicator,
   Alert,
   Dimensions,
-  Image,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -28,6 +27,7 @@ import { AIError, aiErrorMessage } from '@/ai/aiEdgeClient';
 import { fixMeal } from '@/ai/fixMeal';
 import { openPaywall } from '@/lib/paywall';
 import { BackButton, HEADER_SIDE } from '@/components/PageHeader';
+import { MealPhoto } from '@/components/MealPhoto';
 import { PaywallModalHost } from '@/components/paywall/PaywallModalHost';
 import { ToastHost } from '@/components/ToastHost';
 import { useMealStore } from '@/store/useMealStore';
@@ -132,6 +132,7 @@ export function MealDetailModal() {
   if (!session) return null;
   const draft = session.draft;
   const servings = draft.servings ?? 1;
+  const hasPhoto = !!(draft.photoUri || draft.photoPath);
   const draftJson = JSON.stringify(draft);
   const dirty = originalRef.current != null && originalRef.current !== draftJson;
 
@@ -224,7 +225,8 @@ export function MealDetailModal() {
   function removePhoto() {
     setMenuOpen(false);
     setPhotoSubmenu(false);
-    updateMealDraft({ photoUri: undefined });
+    // Both copies: the cloud one is then deleted by sync (after the Undo window).
+    updateMealDraft({ photoUri: undefined, photoPath: undefined, photoUploadedFrom: undefined });
   }
 
   function openPhotoActionSheet() {
@@ -234,6 +236,19 @@ export function MealDetailModal() {
       { text: 'Cancel', style: 'cancel' },
     ]);
   }
+
+  const photoUnavailable = (
+    <TouchableOpacity style={styles.imagePlaceholder} onPress={openPhotoActionSheet} activeOpacity={0.8}>
+      <Ionicons name="image-outline" size={32} color={COLORS.textSecondary} />
+      <Text style={styles.imagePlaceholderText}>Photo can&apos;t load right now</Text>
+    </TouchableOpacity>
+  );
+  const photoPlaceholder = (
+    <TouchableOpacity style={styles.imagePlaceholder} onPress={openPhotoActionSheet} activeOpacity={0.8}>
+      <Ionicons name="cloud-upload-outline" size={32} color={COLORS.textSecondary} />
+      <Text style={styles.imagePlaceholderText}>Add a photo</Text>
+    </TouchableOpacity>
+  );
 
   // ─── Delete / report ──────────────────────────────────────────────────────
 
@@ -366,13 +381,16 @@ export function MealDetailModal() {
             keyboardShouldPersistTaps="handled"
           >
             {/* Image tile */}
-            {draft.photoUri ? (
-              <Image source={{ uri: draft.photoUri }} style={styles.image} resizeMode="cover" />
+            {hasPhoto ? (
+              <MealPhoto
+                photoUri={draft.photoUri}
+                photoPath={draft.photoPath}
+                style={styles.image}
+                fallback={photoPlaceholder}
+                unavailable={photoUnavailable}
+              />
             ) : (
-              <TouchableOpacity style={styles.imagePlaceholder} onPress={openPhotoActionSheet} activeOpacity={0.8}>
-                <Ionicons name="cloud-upload-outline" size={32} color={COLORS.textSecondary} />
-                <Text style={styles.imagePlaceholderText}>Add a photo</Text>
-              </TouchableOpacity>
+              photoPlaceholder
             )}
 
             {/* Bookmark + time + name + servings */}
@@ -563,7 +581,7 @@ export function MealDetailModal() {
                 <>
                   <TouchableOpacity style={styles.menuItem} onPress={() => setPhotoSubmenu(true)}>
                     <Ionicons name="image-outline" size={18} color={COLORS.text} />
-                    <Text style={styles.menuText}>{draft.photoUri ? 'Change Photo' : 'Add Photo'}</Text>
+                    <Text style={styles.menuText}>{hasPhoto ? 'Change Photo' : 'Add Photo'}</Text>
                   </TouchableOpacity>
                   <TouchableOpacity style={styles.menuItem} onPress={() => { setMenuOpen(false); setReportVisible(true); }}>
                     <Ionicons name="flag-outline" size={18} color={COLORS.text} />
@@ -584,7 +602,7 @@ export function MealDetailModal() {
                     <Ionicons name="cloud-upload-outline" size={18} color={COLORS.text} />
                     <Text style={styles.menuText}>Upload Photo</Text>
                   </TouchableOpacity>
-                  {draft.photoUri ? (
+                  {hasPhoto ? (
                     <TouchableOpacity style={styles.menuItem} onPress={removePhoto}>
                       <Ionicons name="close-circle-outline" size={18} color={COLORS.red} />
                       <Text style={[styles.menuText, { color: COLORS.red }]}>Remove Photo</Text>

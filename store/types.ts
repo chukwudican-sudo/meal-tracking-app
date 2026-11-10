@@ -48,7 +48,9 @@ export interface MealEntry {
   category?: RecipeCategory; // meal type tag (Breakfast/Lunch/Dinner/Snacks)
   servings?: number;    // serving multiplier (default 1); scales calories/macros/ingredients
   nutrients?: NutrientValues; // optional secondary nutrient totals for this meal
-  photoUri?: string;    // optional meal photo (scanned capture or user upload)
+  photoUri?: string;    // this phone's own photo file (temp folder: can vanish; never synced)
+  photoPath?: string;   // cloud copy, "meal-photos/<uid>/<file>" (synced as meal_logs.image_url)
+  photoUploadedFrom?: string; // the photoUri photoPath was made from (local; stops re-uploads)
   seed?: boolean;       // built-in demo/sample data — excluded from cloud sync
 }
 
@@ -514,4 +516,7 @@ export interface AppStore {
   // entityKey is present in `dirtyKeys` (a pending local write) are left
   // untouched so an in-flight change is never clobbered by an incoming pull.
   applyServerSnapshot: (snapshot: ServerSnapshot, dirtyKeys: Set<string>) => void;
+  // Sync uploaded a meal's photo from `from` to `path`. Returns false (nothing
+  // recorded) if the meal is gone or its photo changed meanwhile.
+  setMealPhotoSynced: (mealId: string, from: string, path: string) => boolean;
 }

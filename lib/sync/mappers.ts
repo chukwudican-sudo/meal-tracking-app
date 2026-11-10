@@ -24,6 +24,7 @@ import type {
   UserProfile,
   WeightLogEntry,
 } from '@/store/types';
+import { isCloudPhotoPath } from '@/lib/media/mealPhotos';
 import { isUuid, newId } from './uuid';
 import { cupsToLiters, litersToCups } from './units';
 import type { SyncTable } from './types';
@@ -186,7 +187,8 @@ export function mealEntryToRows(
     servings: entry.servings ?? 1,
     is_completed: entry.status === 'completed',
     is_ad_hoc: entry.isAdHoc ?? false,
-    image_url: entry.photoUri ?? null,
+    // Only the cloud copy: a phone's own file path means nothing elsewhere.
+    image_url: entry.photoPath ?? null,
     health_rating: null,
     nutrients: entry.nutrients && Object.keys(entry.nutrients).length > 0 ? entry.nutrients : null,
   };
@@ -241,7 +243,8 @@ export function rowToMealEntry(
     status: row.is_completed ? 'completed' : 'pending',
     isAdHoc: row.is_ad_hoc ?? undefined,
     servings: numOrUndef(row.servings),
-    photoUri: row.image_url ?? undefined,
+    // Rows from before Nov 9 hold a phone file path: ignored (unusable here).
+    photoPath: isCloudPhotoPath(row.image_url) ? row.image_url : undefined,
     nutrients: parseNutrients(row.nutrients),
   };
   return { date: row.date, entry };

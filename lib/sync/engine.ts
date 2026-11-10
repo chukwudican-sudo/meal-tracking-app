@@ -37,6 +37,8 @@ const TABLE_DRAIN_PRIORITY: Record<SyncTable, number> = {
   progress_daily: 1,
   meal_templates: 1,
   plans: 2,
+  // After the meal row that stopped pointing at it.
+  meal_photos: 3,
 };
 
 // Per-user delta high-water-mark: the server timestamp captured before the last
@@ -46,6 +48,8 @@ const cursorKey = (userId: string): string => `sync:lastPulledAt:${userId}`;
 // Set once this install has uploaded the data that only started syncing on
 // Nov 6 (settings, water, own templates, secondary nutrients) for an account.
 const upgradeKey = (userId: string): string => `sync:upgrade-nov6:${userId}`;
+// Same idea for meal photos (Nov 9): upload the ones taken before they synced.
+const photoUpgradeKey = (userId: string): string => `sync:upgrade-photos-nov9:${userId}`;
 
 export type SyncStatusValue = 'idle' | 'syncing' | 'offline' | 'error';
 
@@ -125,6 +129,8 @@ class SyncEngine {
   // resumeAfterCancelledSignOut() to start capturing again.
   async prepareSignOut(): Promise<{ pending: number; deadLetter: number }> {
     projector.stop();
+    // Send held-back ops too (e.g. a replaced photo's 15s-delayed delete).
+    outbox.resetBackoff(true);
     if (this.userId && this.online) await this.flush();
     return outbox.counts();
   }
@@ -314,6 +320,10 @@ class SyncEngine {
         // everything, and restore/switch start from the server's copy.
         if (upgrading) projector.enqueueSyncUpgradeBackfill();
         await AsyncStorage.setItem(upgradeKey(userId), '1');
+        if (!(await AsyncStorage.getItem(photoUpgradeKey(userId)))) {
+          if (mode === 'same') projector.enqueuePhotoBackfill();
+          await AsyncStorage.setItem(photoUpgradeKey(userId), '1');
+        }
 
         // Advance the cursor only after a successful pull + apply.
         await AsyncStorage.setItem(cursorKey(userId), stamp);
@@ -372,9 +382,25 @@ class SyncEngine {
         // Signed out / switched accounts mid-drain — stop immediately so we
         // don't push with a stale auth context.
         if (this.userId !== uid) break;
+        // Cancelled or replaced since this drain started (e.g. Undo brought a
+        // photo back and discarded its delete): skip it.
+        if (!outbox.has(item.id)) continue;
         try {
-          await pushItem(uid, item);
+          const result = await pushItem(uid, item);
           outbox.markSuccess(item.id);
+          if (result?.mealPhoto) {
+            const { mealId, from, path } = result.mealPhoto;
+            const recorded = useMealStore.getState().setMealPhotoSynced(mealId, from, path);
+            // The meal or its photo changed while this one uploaded (deleted,
+            // replaced, removed): nothing will ever point at this file — and
+            // the newer queued write overwrites the row — so remove it.
+            if (!recorded) {
+              outbox.enqueue({
+                table: 'meal_photos', op: 'delete', entityKey: entityKey.photo(path),
+                payload: { path }, delayMs: 15_000,
+              });
+            }
+          }
         } catch (e: any) {
           hadFailure = true;
           const msg = e?.message ?? String(e);

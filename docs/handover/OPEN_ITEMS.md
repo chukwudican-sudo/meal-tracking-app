@@ -160,8 +160,12 @@ Still open:
 30. `public.users.email` doesn't follow an email change in Auth.
 31. Sync limits: deletes now reach other phones (Nov 9, `sync_deletions`: an AFTER DELETE trigger on the 8 synced
     tables writes a note; delta pulls remove those items before merging, queued local edits win; notes kept 180 days, so
-    a phone unopened longer can keep stale items). Meal photos sync only as the phone's local file path
-    (broken on another phone/reinstall) — upload to Storage is a planned pass. Plan meals opened on two phones before
+    a phone unopened longer can keep stale items). Meal photos sync (Nov 9): compressed ~200 KB JPEG to the private
+    `meal-photos` bucket (`<uid>/<mealId>-<hash of local uri>.jpg`, so retries overwrite), uploaded inside the
+    meal_logs push; `image_url` = cloud path; replaced/removed/deleted photos are removed 15s later (Undo window; the
+    hold survives reconnect via `notBefore`) via a `meal_photos` outbox op; delete-account empties the folder before
+    deleting the user; caches cleared on sign-out. Rows from before Nov 9 held phone paths and are ignored. Known limit:
+    two phones editing the same meal around a photo change can point the row at a removed file (last write wins). Plan meals opened on two phones before
     either syncs can still double up (own-template meals use a stable id per template+day, plan meals don't). A demo
     day's sample 500 ml water would upload if the user deletes all of that day's demo meals.
 31b. **More data syncs (Nov 6, migration 20261106010000):** users.last_name / weight_unit / meal_slots /

@@ -15,6 +15,7 @@ import type {
   UserProfile,
   WeightLogEntry,
 } from '@/store/types';
+import { removeMealPhoto, uploadMealPhoto } from '@/lib/media/mealPhotos';
 import * as M from './mappers';
 import type { OutboxItem, ServerSnapshot, SyncTable } from './types';
 
@@ -24,7 +25,14 @@ function throwIf(error: { message: string } | null, context: string) {
 
 // ─── Push a single outbox mutation ─────────────────────────────────────────
 
-export async function pushItem(userId: string, item: OutboxItem): Promise<void> {
+// What a push learned that the phone should record (written back by the engine).
+export interface PushResult {
+  // A meal's photo was uploaded from this local photo to `path`; the store
+  // records it so it isn't uploaded again.
+  mealPhoto?: { mealId: string; from: string; path: string };
+}
+
+export async function pushItem(userId: string, item: OutboxItem): Promise<PushResult | void> {
   const p = item.payload as any;
   switch (item.table) {
     case 'users': {
@@ -44,10 +52,24 @@ export async function pushItem(userId: string, item: OutboxItem): Promise<void> 
         throwIf(error, 'meal_logs.delete');
         return;
       }
+      // A new local photo (never uploaded from this file): compress + upload
+      // it first, so the row points at the cloud copy.
+      let entry = p.entry as MealEntry;
+      let mealPhoto: PushResult['mealPhoto'];
+      // Unreadable (file gone): the meal syncs without it and nothing is
+      // recorded, so the next save of this meal tries again.
+      const localPhoto = entry.photoUri;
+      if (localPhoto && localPhoto !== entry.photoUploadedFrom) {
+        const path = await uploadMealPhoto(userId, entry.id, localPhoto);
+        if (path) {
+          entry = { ...entry, photoPath: path };
+          mealPhoto = { mealId: entry.id, from: localPhoto, path };
+        }
+      }
       const { row, ingredients } = M.mealEntryToRows(
         userId,
         p.date as string,
-        p.entry as MealEntry,
+        entry,
         (p.slotName ?? null) as string | null,
       );
       const up = await supabase.from('meal_logs').upsert(row, { onConflict: 'id' });
@@ -59,6 +81,12 @@ export async function pushItem(userId: string, item: OutboxItem): Promise<void> 
         const ins = await supabase.from('meal_log_ingredients').insert(ingredients);
         throwIf(ins.error, 'meal_log_ingredients.insert');
       }
+      return mealPhoto ? { mealPhoto } : undefined;
+    }
+
+    case 'meal_photos': {
+      // A photo the meal no longer uses (replaced, removed, or meal deleted).
+      await removeMealPhoto(p.path as string);
       return;
     }
 

@@ -17,6 +17,7 @@ import * as Linking from 'expo-linking';
 import type { AuthError, Session, User } from '@supabase/supabase-js';
 
 import { allowPushRegistration, unregisterPushToken } from '@/lib/notifications/push';
+import { clearMealPhotoCaches } from '@/lib/media/mealPhotos';
 import { supabase } from './supabase';
 import { useMealStore } from '@/store/useMealStore';
 import { syncPurchasesIdentity } from './purchases';
@@ -131,6 +132,8 @@ export async function signOut(): Promise<AuthResult> {
   const { error } = await supabase.auth.signOut();
   // Still signed in after all: let this phone register for pushes again.
   if (error) allowPushRegistration();
+  // Don't leave this account's meal photos cached on the phone.
+  else clearMealPhotoCaches();
   return { error: error ? error.message : null };
 }
 

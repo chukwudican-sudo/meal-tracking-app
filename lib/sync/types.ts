@@ -16,7 +16,8 @@ export type SyncTable =
   | 'planned_ingredients'
   | 'plans'
   | 'progress_daily'   // water per day
-  | 'meal_templates';  // the user's own repeating meals / scheduled recipes
+  | 'meal_templates'   // the user's own repeating meals / scheduled recipes
+  | 'meal_photos';     // Storage: remove a replaced / deleted meal photo
 
 export type OutboxOp = 'upsert' | 'delete';
 
@@ -37,6 +38,9 @@ export interface OutboxItem {
   // before it officially dead-letters. Optional for items persisted before this
   // field existed (backfilled on load).
   enqueuedAt?: number;
+  // Deliberate hold (e.g. a photo delete waits out Undo): reconnect doesn't
+  // cut it, only sign-out (resetBackoff(true)) does.
+  notBefore?: number;
 }
 
 // ─── Entity-key builders ───────────────────────────────────────────────────
@@ -52,6 +56,7 @@ export const entityKey = {
   plan: (planId: string) => `plans:${planId}`,
   water: (date: string) => `progress_daily:${date}`,
   template: (templateId: string) => `meal_templates:${templateId}`,
+  photo: (cloudPath: string) => `meal_photos:${cloudPath}`,
   // Grocery keys are table-scoped so a section move (delete-old + upsert-new)
   // produces two distinct keys that both survive outbox coalescing.
   grocery: (table: SyncTable, groceryKey: string) => `${table}:${groceryKey}`,
