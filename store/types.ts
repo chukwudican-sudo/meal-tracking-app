@@ -167,6 +167,9 @@ export interface MealTemplate {
   ingredients: Ingredient[];
   macros: Macros;
   recurrence: RecurrenceRule;
+  // Plan meals: the portion (calories/macros/ingredients above are already
+  // scaled); copied onto the meals made from this template.
+  servings?: number;
 }
 
 // ─── Grocery (Kitchen / Cart / Planned ingredients) ──────────────────────────
@@ -304,6 +307,9 @@ export interface PlanDayMeal {
   time: string;            // "HH:MM"
   recipeId: string;        // refers to RecipeTemplate.id (or 'custom' for AI cards)
   recipeName: string;
+  // Portion of the recipe for this meal (quarter steps; default 1). Plans
+  // reach their calories with portions — see lib/planNutrition.ts.
+  servings?: number;
 }
 
 // A persisted plan (either premade or saved by the user).
@@ -315,7 +321,8 @@ export interface MealPlan {
   disclaimer?: string;
   category?: PlanCategory;
   days: PlanDayMeal[][];
-  targets?: { calories: number; protein: number; carbs: number; fats: number };
+  // No typed-in targets: a plan's calories/macros are worked out from its
+  // meals × portions (lib/planNutrition.ts#planNutrition), so they can't drift.
   savedAt: string;
   source: 'premade' | 'user';
 }

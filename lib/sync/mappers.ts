@@ -25,6 +25,7 @@ import type {
   WeightLogEntry,
 } from '@/store/types';
 import { isCloudPhotoPath } from '@/lib/media/mealPhotos';
+import { isPlanCategory } from '@/lib/planNutrition';
 import { isUuid, newId } from './uuid';
 import { cupsToLiters, litersToCups } from './units';
 import type { SyncTable } from './types';
@@ -474,6 +475,11 @@ export function planToRows(userId: string, plan: MealPlan, isActive: boolean): P
     user_id: userId,
     name: plan.name,
     is_active: isActive,
+    // Style (sets goals while running) + description, so a synced copy of a
+    // premade plan still behaves and reads like it (Nov 10).
+    category: plan.category ?? null,
+    description: plan.description?.slice(0, 500) ?? null,
+    disclaimer: plan.disclaimer?.slice(0, 500) ?? null,
   };
 
   // One synthesized slot per distinct (slotName, time), ordered by time.
@@ -510,12 +516,21 @@ export function planToRows(userId: string, plan: MealPlan, isActive: boolean): P
         recipe_id: resolvePlanRecipeUuid(m.recipeId),
         recipe_ref: m.recipeId,
         recipe_name: m.recipeName,
+        servings: m.servings && m.servings !== 1 ? m.servings : null,
         is_day_override: false,
       });
     });
   });
 
   return { planRow, slotRows, dayMealRows };
+}
+
+// A portion from the server: a sane quarter-step number, else none (= 1).
+function validServings(v: unknown): number | undefined {
+  const n = typeof v === 'number' ? v : typeof v === 'string' ? Number(v) : NaN;
+  if (!Number.isFinite(n) || n <= 0 || n > 10) return undefined;
+  const q = Math.round(n * 4) / 4;
+  return q === 1 ? undefined : q;
 }
 
 export function rowsToPlan(
@@ -536,6 +551,7 @@ export function rowsToPlan(
       // Prefer the local reference we stored; fall back to the FK, then the empty sentinel.
       recipeId: dm.recipe_ref ?? dm.recipe_id ?? '__empty__',
       recipeName: dm.recipe_name ?? '',
+      ...(validServings(dm.servings) ? { servings: validServings(dm.servings) } : {}),
     });
   });
   days.forEach(d => d.sort((a, b) => a.time.localeCompare(b.time)));
@@ -543,6 +559,9 @@ export function rowsToPlan(
   const plan: MealPlan = {
     id: planRow.id,
     name: planRow.name ?? 'Plan',
+    ...(isPlanCategory(planRow.category) ? { category: planRow.category } : {}),
+    ...(typeof planRow.description === 'string' && planRow.description ? { description: planRow.description } : {}),
+    ...(typeof planRow.disclaimer === 'string' && planRow.disclaimer ? { disclaimer: planRow.disclaimer } : {}),
     days,
     savedAt: planRow.created_at ?? new Date().toISOString(),
     source: 'user',

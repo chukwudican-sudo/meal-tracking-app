@@ -1831,7 +1831,6 @@ export default function BuildPlanScreen() {
       disclaimer: undefined,
       category: undefined,
       days: previewDays,
-      targets: undefined,
       savedAt: new Date().toISOString(),
       source: 'user',
     };

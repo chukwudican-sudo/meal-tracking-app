@@ -19,13 +19,14 @@ import { Screen } from '@/components/Screen';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 
 import { COLORS } from '@/constants/theme';
-import { useMealStore } from '@/store/useMealStore';
+import { planNutritionOf, useMealStore } from '@/store/useMealStore';
 import { useToastStore } from '@/store/useToastStore';
 import { useUndoStore } from '@/store/useUndoStore';
 import type { MealPlan, MealSlot, PlanDayMeal, RecipeTemplate } from '@/store/types';
 import { slotNameToCategory } from '@/utils/mealSlots';
 import { confirmCustomizeSave, startPlanWithConfirm } from '@/lib/planActivation';
 import { EMPTY_SLOT, REMOVED_SLOT } from '@/constants/planSlots';
+import { planSetsGoals, portionLabel, portionOf } from '@/lib/planNutrition';
 
 
 const WEEKDAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -42,6 +43,7 @@ export default function PlanDetailScreen() {
   const plans = useMealStore(s => s.plans);
   const savedPlans = useMealStore(s => s.savedPlans);
   const recipes = useMealStore(s => s.recipes);
+  const savedRecipes = useMealStore(s => s.savedRecipes);
   const profile = useMealStore(s => s.profile);
   const endPlan = useMealStore(s => s.endPlan);
   const saveCustomizedPlan = useMealStore(s => s.saveCustomizedPlan);
@@ -110,6 +112,13 @@ export default function PlanDetailScreen() {
     return m;
   }, [recipes]);
 
+  // The plan's real daily numbers: its meals × portions (live while
+  // customizing). Same calculation that sets the goals when it starts.
+  const nutrition = useMemo(
+    () => (plan ? planNutritionOf(plan, recipes, savedRecipes) : null),
+    [plan, recipes, savedRecipes],
+  );
+
   // Non-skipped meal slots from the user's profile, sorted by time.
   // Used by the customize-day Add-meal flow to populate the slot chips.
   // Hook is hoisted above the `if (!plan)` early-return below so it runs
@@ -124,16 +133,17 @@ export default function PlanDetailScreen() {
 
   // Build distinct recipe list for the "Meals in this plan" section.
   const distinctMeals = useMemo(() => {
-    if (!plan) return [] as { recipeId: string; recipeName: string }[];
-    const seen = new Map<string, { recipeId: string; recipeName: string }>();
+    if (!plan) return [] as { recipeId: string; recipeName: string; servings: number }[];
+    const seen = new Map<string, { recipeId: string; recipeName: string; servings: number }>();
     plan.days.forEach(day =>
       day.forEach(m => {
         // Older plans stored a shared placeholder id ('custom') for every meal,
         // which collapsed the whole list into one row. Fall back to the meal
         // name as the dedupe key so all unique meals surface.
-        const key = m.recipeId && m.recipeId !== 'custom' ? m.recipeId : m.recipeName;
+        // Same recipe at two portions = two rows (each shows its own numbers).
+        const key = `${m.recipeId && m.recipeId !== 'custom' ? m.recipeId : m.recipeName}|${portionOf(m)}`;
         if (!seen.has(key)) {
-          seen.set(key, { recipeId: m.recipeId, recipeName: m.recipeName });
+          seen.set(key, { recipeId: m.recipeId, recipeName: m.recipeName, servings: portionOf(m) });
         }
       }),
     );
@@ -310,15 +320,22 @@ export default function PlanDetailScreen() {
           </View>
         ) : null}
 
-        {plan.targets ? (
+        {nutrition ? (
           <View style={styles.targetsCard}>
-            <Text style={styles.targetsLabel}>Daily target</Text>
-            <Text style={styles.targetsCalories}>{plan.targets.calories} cal</Text>
+            {/* Style plans set your goals to these numbers; built plans just show them. */}
+            <Text style={styles.targetsLabel}>{planSetsGoals(plan) ? 'DAILY TARGET' : 'MEALS ADD UP TO'}</Text>
+            <Text style={styles.targetsCalories}>{nutrition.calories.toLocaleString()} cal</Text>
             <View style={styles.macroRow}>
-              <Text style={styles.macroPill}>P {plan.targets.protein}g</Text>
-              <Text style={styles.macroPill}>C {plan.targets.carbs}g</Text>
-              <Text style={styles.macroPill}>F {plan.targets.fats}g</Text>
+              <Text style={styles.macroPill}>P {nutrition.protein}g</Text>
+              <Text style={styles.macroPill}>C {nutrition.carbs}g</Text>
+              <Text style={styles.macroPill}>F {nutrition.fats}g</Text>
             </View>
+            <Text style={styles.targetsNote}>
+              Daily average of this plan&apos;s meals
+              {nutrition.maxCalories - nutrition.minCalories >= 50
+                ? ` (${nutrition.minCalories.toLocaleString()}–${nutrition.maxCalories.toLocaleString()} cal by day)`
+                : ''}
+            </Text>
           </View>
         ) : null}
 
@@ -351,7 +368,8 @@ export default function PlanDetailScreen() {
                         <Text style={styles.mealName} numberOfLines={1}>{m.recipeName}</Text>
                         {r ? (
                           <Text style={styles.mealMeta}>
-                            {r.calories} cal · {r.cookTimeMin}m · {r.category}
+                            {portionLabel(m.servings) ? `${portionLabel(m.servings)} · ` : ''}
+                            {Math.round(r.calories * m.servings)} cal · {r.cookTimeMin}m · {r.category}
                           </Text>
                         ) : (
                           <Text style={styles.mealMeta}>Custom recipe</Text>
@@ -603,7 +621,11 @@ function CustomizeDayOverlay({
                     <Text style={styles.dayEditorName} numberOfLines={1}>{sec.meal!.recipeName}</Text>
                     {recipe ? (
                       <Text style={styles.dayEditorMeta} numberOfLines={1}>
-                        {recipe.calories} cal · P {recipe.macros.protein}g · C {recipe.macros.carbs}g · F {recipe.macros.fats}g
+                        {(() => {
+                          const s = portionOf(sec.meal!);
+                          const label = portionLabel(s);
+                          return `${label ? `${label} · ` : ''}${Math.round(recipe.calories * s)} cal · P ${Math.round(recipe.macros.protein * s)}g · C ${Math.round(recipe.macros.carbs * s)}g · F ${Math.round(recipe.macros.fats * s)}g`;
+                        })()}
                       </Text>
                     ) : (
                       <Text style={styles.dayEditorMeta}>Custom recipe</Text>
@@ -749,6 +771,7 @@ const styles = StyleSheet.create({
   },
   targetsLabel: { color: COLORS.textSecondary, fontSize: 11, letterSpacing: 1, fontWeight: '700' },
   targetsCalories: { color: COLORS.text, fontSize: 26, fontWeight: '700', marginTop: 4 },
+  targetsNote: { color: COLORS.textSecondary, fontSize: 12, marginTop: 10 },
   macroRow: { flexDirection: 'row', gap: 6, marginTop: 10 },
   macroPill: {
     color: COLORS.textSecondary,

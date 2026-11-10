@@ -32,10 +32,13 @@ import { PaywallModalHost } from '@/components/paywall/PaywallModalHost';
 import { ToastHost } from '@/components/ToastHost';
 import { useMealStore } from '@/store/useMealStore';
 import { useToastStore } from '@/store/useToastStore';
-import type { Macros, NutrientKey, NutrientValues } from '@/store/types';
 import { AIConsentHost } from '@/components/AIConsentHost';
 import { isAIConsentDeclined } from '@/lib/aiConsent';
 import { FEEDBACK_MAX_LEN, submitFeedback } from '@/lib/feedback';
+import {
+  clampPortion, MIN_PORTION, PORTION_STEP, scaleIngredients, scaleMacros, scaleNutrients,
+} from '@/lib/planNutrition';
+import type { MealEntry } from '@/store/types';
 
 const SCREEN_W = Dimensions.get('window').width;
 const DEFAULT_PAGE_W = Math.min(SCREEN_W - 32, 460) - 32; // popup inner width minus padding
@@ -61,24 +64,10 @@ function formatTimeLabel(hhmm: string): string {
   if (h === 0) h = 12;
   return `${h}:${m} ${period}`;
 }
-// Meal totals round to whole grams; ingredient macros keep one decimal (see
-// ai/aiEdgeClient.ts#toOneDecimal) so items keep summing to the totals.
-function scaleMacros(m: Macros, ratio: number, decimals = 0): Macros {
-  const f = 10 ** decimals;
-  return {
-    protein: Math.round(m.protein * ratio * f) / f,
-    carbs: Math.round(m.carbs * ratio * f) / f,
-    fats: Math.round(m.fats * ratio * f) / f,
-  };
-}
-function scaleNutrients(n: NutrientValues | undefined, ratio: number): NutrientValues {
-  const out: NutrientValues = {};
-  if (!n) return out;
-  (Object.keys(n) as NutrientKey[]).forEach(k => {
-    const v = n[k];
-    if (v != null) out[k] = Math.round(v * ratio);
-  });
-  return out;
+// What the stepper compares to tell its own last result from a later edit.
+function stepKey(d: Pick<MealEntry, 'servings' | 'calories' | 'macros' | 'nutrients' | 'ingredients'>): string {
+  return JSON.stringify([d.servings ?? 1, d.calories, d.macros, d.nutrients ?? null,
+    (d.ingredients ?? []).map(i => [i.id, i.quantity, i.unit, i.calories ?? null, i.macros ?? null])]);
 }
 
 // ─── Component ──────────────────────────────────────────────────────────────
@@ -118,6 +107,13 @@ export function MealDetailModal() {
   // edits (including those made on the pushed macro/ingredient routes). Keyed by
   // draft id so reopening a different meal re-snapshots.
   const originalRef = useRef<string | null>(null);
+  // Stepper base (see changeServings): exact values at the portion stepping
+  // started from, and a key of the draft it last produced.
+  const stepBaseRef = useRef<{
+    key: string;
+    servings: number;
+    original: Pick<MealEntry, 'calories' | 'macros' | 'nutrients' | 'ingredients'>;
+  } | null>(null);
   const idRef = useRef<string | null>(null);
   useEffect(() => {
     if (session && idRef.current !== session.draft.id) {
@@ -177,20 +173,46 @@ export function MealDetailModal() {
     }
   }
 
+  // Quarter-serving steps (plans use portions like 1.25×). Totals, nutrients
+  // and ingredient amounts scale together. Every step is computed from the
+  // meal's exact values at the portion it had when stepping began — never
+  // from the previous step's rounded numbers, which drifted (1 → 0.25 → 1
+  // turned ½ avocado into 2 and broke Fix's maths). Returning to that portion
+  // restores the original values exactly. Any other edit starts a new base.
   function changeServings(next: number) {
-    if (next < 1) return;
-    const ratio = next / servings;
-    updateMealDraft({
-      servings: next,
-      calories: Math.round(draft.calories * ratio),
-      macros: scaleMacros(draft.macros, ratio),
-      nutrients: scaleNutrients(draft.nutrients, ratio),
-      ingredients: draft.ingredients.map(i => ({
-        ...i,
-        calories: i.calories != null ? Math.round(i.calories * ratio) : i.calories,
-        macros: i.macros ? scaleMacros(i.macros, ratio, 1) : i.macros,
-      })),
-    });
+    const cur = servings > 0 ? servings : 1;
+    const target = clampPortion(next);
+    if (next < MIN_PORTION || target === cur) return;
+    if ((next > cur && target < cur) || (next < cur && target > cur)) return; // never step the wrong way at a bound
+    let base = stepBaseRef.current;
+    if (!base || base.key !== stepKey(draft)) {
+      base = {
+        key: '',
+        servings: cur,
+        original: {
+          calories: draft.calories,
+          macros: draft.macros,
+          nutrients: draft.nutrients,
+          ingredients: draft.ingredients,
+        },
+      };
+    }
+    const o = base.original;
+    const patch: Partial<MealEntry> =
+      Math.abs(target - base.servings) < 1e-9
+        ? { servings: target, ...o }
+        : (() => {
+            const ratio = target / base.servings;
+            return {
+              servings: target,
+              calories: Math.round(o.calories * ratio),
+              macros: scaleMacros(o.macros, ratio),
+              nutrients: scaleNutrients(o.nutrients, ratio) ?? {},
+              ingredients: scaleIngredients(o.ingredients, ratio),
+            };
+          })();
+    stepBaseRef.current = { ...base, key: stepKey({ ...draft, ...patch }) };
+    updateMealDraft(patch);
   }
 
   function toggleBookmark() {
@@ -431,11 +453,11 @@ export function MealDetailModal() {
               </TouchableOpacity>
               <View style={{ flex: 1 }} />
               <View style={styles.stepper}>
-                <TouchableOpacity style={styles.stepBtn} onPress={() => changeServings(servings - 1)}>
+                <TouchableOpacity style={styles.stepBtn} onPress={() => changeServings(servings - PORTION_STEP)}>
                   <Text style={styles.stepBtnText}>−</Text>
                 </TouchableOpacity>
-                <Text style={styles.stepValue}>{servings}</Text>
-                <TouchableOpacity style={styles.stepBtn} onPress={() => changeServings(servings + 1)}>
+                <Text style={styles.stepValue}>{Number(servings.toFixed(2))}</Text>
+                <TouchableOpacity style={styles.stepBtn} onPress={() => changeServings(servings + PORTION_STEP)}>
                   <Text style={styles.stepBtnText}>＋</Text>
                 </TouchableOpacity>
               </View>

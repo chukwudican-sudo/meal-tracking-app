@@ -197,7 +197,12 @@ These come straight from months of his feedback. Violating them is the #1 thing 
   activation / End plan keep. Groceries (Planned Ingredients) only come from **planned** meals + the plan.
 - **Plans:** start date = activation day (never fill past days). Activate = today keeps eaten/own meals, future days
   belong to the new plan (warns first, `lib/planActivation.ts`). `endPlan` clears plan templates + pointer (synced
-  is_active=false) and restores `goalsBeforePlan` (saved when a premade plan's targets overwrote goals). Customize
+  is_active=false) and restores `goalsBeforePlan` (saved when a plan's numbers overwrote goals).
+  **Plan numbers (Nov 10): a plan is a fixed product you pick.** Its calories/macros are never typed — they're worked
+  out from its meals × portions (`lib/planNutrition.ts#planNutrition`, store `planNutritionOf`, same resolver that builds
+  the meals). Premade plans reach their calories with per-meal `servings` (quarter steps, `rotateDays` portions). A plan
+  with a `category` (premade, or a customized copy of one) sets the goals to those real numbers while running; built
+  plans keep the user's goals. Plan meals/templates carry `servings`; swaps keep the slot's portion. Customize
   Save = `saveCustomizedPlan`: premade → user's own copy "My <name>" (UUID, unique name), then re-applies from today.
   Placeholder slots `EMPTY_SLOT`/`REMOVED_SLOT` (`constants/planSlots.ts`) are never meals. The active plan is still
   matched **by name** (`activePlanName`) — known limitation.

@@ -22,6 +22,7 @@ import type {
   PlanDayMeal,
   RecurrenceRule,
   SavedMeal,
+  RecipeTemplate,
   SavedRecipe,
   UserGoals,
   UserProfile,
@@ -29,6 +30,9 @@ import type {
 } from './types';
 import { RECIPE_SEED } from '@/constants/recipeSeed';
 import { isPlaceholderSlot } from '@/constants/planSlots';
+import {
+  planNutrition, planSetsGoals, portionOf, scaleIngredients, scaleMacros, type PlanNutrition,
+} from '@/lib/planNutrition';
 import { PLAN_SEED } from '@/constants/planSeed';
 import { DEFAULT_TRACKED_NUTRIENTS } from '@/constants/nutrients';
 import { classifyIngredient, normalizeIngredientName } from '@/constants/ingredientCategories';
@@ -178,26 +182,53 @@ export function isTemplateApplicableOnDate(template: MealTemplate, date: string)
 // slot+time+recipe pairing, with a weekly recurrence covering the weekdays it
 // appears on). Shared by activatePlan and the non-destructive
 // hydrateActivePlanIfNeeded so both derive identical templates.
-function buildTemplatesFromPlan(state: AppStore, plan: MealPlan): MealTemplate[] {
-  const recipeById = new Map(state.recipes.map(r => [r.id, r]));
-  const savedById = new Map(state.savedRecipes.map(r => [r.id, r]));
+// One resolver for a plan meal's recipe (1 serving), shared by the meals a
+// plan creates and the plan's displayed/goal numbers, so the two can never
+// disagree. Premade recipes first, then the user's saved/AI recipes (by id,
+// source id, or name); an unknown recipe gets deterministic non-zero
+// nutrition so plan meals always count on Home.
+function planMealResolver(recipes: RecipeTemplate[], savedRecipes: SavedRecipe[]) {
+  const recipeById = new Map(recipes.map(r => [r.id, r]));
+  const savedById = new Map(savedRecipes.map(r => [r.id, r]));
   const savedByRecipeId = new Map(
-    state.savedRecipes.filter(r => r.recipeId).map(r => [r.recipeId as string, r]),
+    savedRecipes.filter(r => r.recipeId).map(r => [r.recipeId as string, r]),
   );
-  // Resolve a plan meal's nutrition from premade recipes first, then the
-  // user's saved/AI recipes (by id, source id, or name). Without this,
-  // custom recipes referenced by a plan resolved to 0 calories, so the
-  // Home progress rings never moved when those meals were completed.
-  const resolveNutrition = (recipeId: string, recipeName: string) => {
+  return (recipeId: string, recipeName: string): { calories: number; macros: Macros; ingredients: Ingredient[] } => {
     const nameKey = recipeName.trim().toLowerCase();
-    return (
+    const recipe =
       recipeById.get(recipeId) ??
       savedById.get(recipeId) ??
       savedByRecipeId.get(recipeId) ??
-      state.recipes.find(r => r.name.trim().toLowerCase() === nameKey) ??
-      state.savedRecipes.find(r => r.name.trim().toLowerCase() === nameKey)
-    );
+      recipes.find(r => r.name.trim().toLowerCase() === nameKey) ??
+      savedRecipes.find(r => r.name.trim().toLowerCase() === nameKey);
+    const fb = fallbackNutrition(recipeName);
+    return {
+      calories: recipe?.calories && recipe.calories > 0 ? recipe.calories : fb.calories,
+      macros: recipe?.macros ?? fb.macros,
+      ingredients: recipe?.ingredients ?? [],
+    };
   };
+}
+
+// A plan's real daily calories/macros (meals × portions, 7-day average).
+// Screens pass the store's recipes/savedRecipes; see lib/planNutrition.ts.
+export function planNutritionOf(
+  plan: Pick<MealPlan, 'days'>,
+  recipes: RecipeTemplate[],
+  savedRecipes: SavedRecipe[],
+): PlanNutrition | null {
+  return planNutrition(plan, planMealResolver(recipes, savedRecipes));
+}
+
+// Goals while a plan with its own numbers runs: the plan's real averages.
+function goalsForPlan(state: AppStore, plan: MealPlan, base: UserGoals): UserGoals {
+  const n = planNutritionOf(plan, state.recipes, state.savedRecipes);
+  if (!n) return base;
+  return { ...base, dailyCalories: n.calories, protein: n.protein, carbs: n.carbs, fats: n.fats };
+}
+
+function buildTemplatesFromPlan(state: AppStore, plan: MealPlan): MealTemplate[] {
+  const resolveNutrition = planMealResolver(state.recipes, state.savedRecipes);
 
   // Build one MealTemplate per (slotName + time + recipe) combo, with
   // a weekly recurrence whose `days[]` is the set of weekdays that
@@ -207,6 +238,7 @@ function buildTemplatesFromPlan(state: AppStore, plan: MealPlan): MealTemplate[]
     time: string;
     recipeId: string;
     recipeName: string;
+    servings: number;
     days: number[];
   };
   const buckets = new Map<string, Bucket>();
@@ -215,7 +247,10 @@ function buildTemplatesFromPlan(state: AppStore, plan: MealPlan): MealTemplate[]
     (dayMeals ?? []).forEach(m => {
       // Empty / removed customize slots are placeholders, never meals.
       if (isPlaceholderSlot(m.recipeId)) return;
-      const key = `${m.slotName}|${m.time}|${m.recipeId}|${m.recipeName}`;
+      // Portion is part of the key: the same recipe at another portion on
+      // another day is a different meal.
+      const servings = portionOf(m);
+      const key = `${m.slotName}|${m.time}|${m.recipeId}|${m.recipeName}|${servings}`;
       const bucket = buckets.get(key);
       if (bucket) {
         bucket.days.push(dayIdx);
@@ -225,6 +260,7 @@ function buildTemplatesFromPlan(state: AppStore, plan: MealPlan): MealTemplate[]
           time: m.time,
           recipeId: m.recipeId,
           recipeName: m.recipeName,
+          servings,
           days: [dayIdx],
         });
       }
@@ -236,13 +272,11 @@ function buildTemplatesFromPlan(state: AppStore, plan: MealPlan): MealTemplate[]
   const nextTemplates: MealTemplate[] = [];
 
   buckets.forEach(bucket => {
-    const recipe = resolveNutrition(bucket.recipeId, bucket.recipeName);
-    // Fall back to deterministic non-zero nutrition if the recipe can't be
-    // resolved, so plan meals always contribute to the Home progress.
-    const fb          = fallbackNutrition(bucket.recipeName);
-    const calories    = recipe?.calories && recipe.calories > 0 ? recipe.calories : fb.calories;
-    const macros      = recipe?.macros ?? fb.macros;
-    const ingredients = recipe ? cloneIngredients(recipe.ingredients) : [];
+    const base = resolveNutrition(bucket.recipeId, bucket.recipeName);
+    const s = bucket.servings;
+    const calories    = Math.round(base.calories * s);
+    const macros      = scaleMacros(base.macros, s);
+    const ingredients = cloneIngredients(scaleIngredients(base.ingredients, s));
 
     // Plan day indices are Monday=0..Sunday=6, but recurrence.days uses
     // the JS weekday convention Sunday=0..Saturday=6. Convert so the
@@ -265,6 +299,7 @@ function buildTemplatesFromPlan(state: AppStore, plan: MealPlan): MealTemplate[]
       ingredients,
       macros,
       recurrence,
+      ...(s !== 1 ? { servings: s } : {}),
     });
   });
 
@@ -414,6 +449,7 @@ function mealsFromTemplates(templates: MealTemplate[], date: string): MealEntry[
         macros:      t.macros,
         status:      'pending' as const,
         templateId:  t.id,
+        ...(t.servings ? { servings: t.servings } : {}),
         // Built from the user's own template (scheduled recipe / repeating
         // meal): theirs, not the plan's — for heatmap, activation, swaps.
         ...(own ? { isAdHoc: true } : {}),
@@ -1702,6 +1738,7 @@ export const useMealStore = create<AppStore>()(
               macros:      t.macros,
               status:      'pending' as const,
               templateId:  t.id,
+              ...(t.servings ? { servings: t.servings } : {}),
             }));
         };
 
@@ -1730,29 +1767,21 @@ export const useMealStore = create<AppStore>()(
           refreshedLogs[today] = { date: today, meals: planMealsFor(today, []), waterMl: 0 };
         }
 
-        // If the plan defines explicit daily targets (premade plans), reflect
-        // them in the Home tab goals. Built plans have no targets, so the
-        // user's onboarding-derived goals are kept.
-        // Plans with their own targets (premade) set the goals; the user's own
-        // goals are saved first (only once — switching plan to plan keeps the
-        // original) and restored by endPlan, or by starting a plan without
-        // targets, so nobody is left on a previous plan's numbers.
+        // A plan with its own numbers (premade, or a customized copy of one)
+        // sets the goals to what its meals really add up to — you pick a plan
+        // for its calories and macros (Alex, Nov 10). Built plans keep the
+        // user's goals. The user's own goals are saved first (only once —
+        // switching plan to plan keeps the original) and restored by endPlan,
+        // or by starting a plan without its own numbers.
         const ownGoals = state.goalsBeforePlan ?? state.goals;
-        const nextGoals = plan.targets
-          ? {
-              ...ownGoals,
-              dailyCalories: plan.targets.calories,
-              protein: plan.targets.protein,
-              carbs: plan.targets.carbs,
-              fats: plan.targets.fats,
-            }
-          : ownGoals;
+        const setsGoals = planSetsGoals(plan);
+        const nextGoals = setsGoals ? goalsForPlan(state, plan, ownGoals) : ownGoals;
 
         set({
           templates: nextTemplates,
           logs: refreshedLogs,
           goals: nextGoals,
-          goalsBeforePlan: plan.targets ? ownGoals : null,
+          goalsBeforePlan: setsGoals ? ownGoals : null,
           // Building/activating a plan satisfies the onboarding "first plan"
           // step, so clear the persistent Home nudge.
           profile: { ...state.profile, activePlanName: plan.name, pendingFirstPlan: false },
@@ -1826,21 +1855,14 @@ export const useMealStore = create<AppStore>()(
             macros:      t.macros,
             status:      'pending' as const,
             templateId:  t.id,
+            ...(t.servings ? { servings: t.servings } : {}),
           }));
 
         const mergedTodayMeals = [...existingToday, ...materialized].sort((a, b) =>
           (a.time ?? '').localeCompare(b.time ?? ''),
         );
 
-        const nextGoals = plan.targets
-          ? {
-              ...state.goals,
-              dailyCalories: plan.targets.calories,
-              protein: plan.targets.protein,
-              carbs: plan.targets.carbs,
-              fats: plan.targets.fats,
-            }
-          : state.goals;
+        const nextGoals = planSetsGoals(plan) ? goalsForPlan(state, plan, state.goals) : state.goals;
 
         set({
           // The user's own templates stay (they sync now; dropping them here
@@ -1894,6 +1916,11 @@ export const useMealStore = create<AppStore>()(
           return match?.id ?? t.id;
         };
 
+        const runningPlan = state.profile.activePlanName
+          ? state.savedPlans.find(p => p.name === state.profile.activePlanName) ??
+            state.plans.find(p => p.name === state.profile.activePlanName)
+          : undefined;
+
         // Reverse-map templates -> 7-day plan structure using each template's
         // weekly recurrence days (falling back to "every day" for `daily`).
         const days: PlanDayMeal[][] = Array.from({ length: 7 }, () => [] as PlanDayMeal[]);
@@ -1917,6 +1944,9 @@ export const useMealStore = create<AppStore>()(
               time: t.time,
               recipeId,
               recipeName: t.name,
+              // Template numbers are already scaled; recipeId points at the
+              // 1-serving recipe, so keep the portion.
+              ...(t.servings ? { servings: t.servings } : {}),
             });
           });
         });
@@ -1927,11 +1957,12 @@ export const useMealStore = create<AppStore>()(
           id: newId(),
           // "Save current plan" passes the active plan's own name.
           name: uniquePlanName(name, [...state.savedPlans, ...state.plans]),
-          description: undefined,
-          disclaimer: undefined,
-          category: undefined,
+          // A snapshot of a style plan (premade / its copy) keeps the style,
+          // so restarting it sets the goals the same way.
+          description: runningPlan?.description,
+          disclaimer: runningPlan?.disclaimer,
+          category: runningPlan?.category,
           days,
-          targets: undefined,
           savedAt: new Date().toISOString(),
           source: 'user',
         };
@@ -1980,11 +2011,13 @@ export const useMealStore = create<AppStore>()(
           set({ savedPlans: [applied, ...state.savedPlans] });
         }
         // Same rules as starting a plan: today keeps eaten/own meals, future
-        // days follow the edited plan, past days untouched. The plan was
-        // already active, so goals (incl. edits made during it) stay as they are.
+        // days follow the edited plan, past days untouched. A plan with its own
+        // numbers now sets the goals to the EDITED plan's real totals (swapping
+        // meals changes them — the rings must match the meals); the user's own
+        // goals stay saved in goalsBeforePlan. Other plans keep goals as they are.
         const { goals, goalsBeforePlan } = state;
         get().activatePlan(applied);
-        set({ goals, goalsBeforePlan });
+        if (!planSetsGoals(applied)) set({ goals, goalsBeforePlan });
         return applied;
       },
 
@@ -2091,18 +2124,22 @@ export const useMealStore = create<AppStore>()(
           const matchIdx = log.meals.findIndex(m =>
             slot.slotId ? m.slotId === slot.slotId : !m.isAdHoc && m.time === slot.time,
           );
+          // The swapped-in recipe takes the replaced meal's portion, so a
+          // plan day stays near its numbers (1.5× dinner → 1.5× the new one).
+          const portion = matchIdx >= 0 ? (log.meals[matchIdx].servings ?? 1) : 1;
           const nextEntry: MealEntry = {
             id: matchIdx >= 0
               ? log.meals[matchIdx].id
               : newId(),
             name: recipe.name,
             time: slot.time,
-            calories: recipe.calories,
-            ingredients: cloneIngredients(recipe.ingredients),
-            macros: recipe.macros,
+            calories: Math.round(recipe.calories * portion),
+            ingredients: cloneIngredients(scaleIngredients(recipe.ingredients, portion)),
+            macros: scaleMacros(recipe.macros, portion),
             status: matchIdx >= 0 ? log.meals[matchIdx].status : 'pending',
             slotId: slot.slotId,
             category: recipe.category,
+            ...(portion !== 1 ? { servings: portion } : {}),
           };
           const meals = matchIdx >= 0
             ? log.meals.map((m, i) => (i === matchIdx ? nextEntry : m))
@@ -2279,14 +2316,14 @@ export const useMealStore = create<AppStore>()(
             });
             base = { ...base, logs: logsNow };
           }
-          // Own goals while a plan with targets runs (endPlan restores them).
-          // The pulled goals may already be the new plan's targets, so save
+          // Own goals while a plan with its own numbers runs (endPlan restores
+          // them). The pulled goals may already be the new plan's, so save
           // this phone's goals from before the merge — unless this is a
           // restore (reset profile: its goals are only defaults).
           const goalsBeforePlan =
-            serverName === null || (serverPlan && !serverPlan.targets)
+            serverName === null || (serverPlan && !planSetsGoals(serverPlan))
               ? null
-              : serverPlan?.targets && profileHasData(state.profile)
+              : serverPlan && planSetsGoals(serverPlan) && profileHasData(state.profile)
                 ? state.goalsBeforePlan ?? state.goals
                 : state.goalsBeforePlan;
 

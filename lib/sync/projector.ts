@@ -49,7 +49,10 @@ function planHash(plan: MealPlan, isActive: boolean): string {
   return JSON.stringify([
     plan.name,
     isActive, // an activation flip must re-push so is_active moves server-side
-    plan.days.map(day => (day ?? []).map(m => [m.slotName, m.time, m.recipeId, m.recipeName])),
+    plan.category,
+    plan.description,
+    plan.disclaimer,
+    plan.days.map(day => (day ?? []).map(m => [m.slotName, m.time, m.recipeId, m.recipeName, m.servings ?? 1])),
   ]);
 }
 function usersHash(state: AppStore): string {

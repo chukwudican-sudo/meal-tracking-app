@@ -7,6 +7,7 @@
 import type {
   FindAvoid, FindGoal, FindPlanAnswers, FindStyle, GoalType, MealPlan, PlanCategory, RecipeTemplate, UserProfile,
 } from '@/store/types';
+import { planNutrition } from '@/lib/planNutrition';
 
 export type { FindAvoid, FindGoal, FindMeals, FindPlanAnswers, FindStyle, FindTime } from '@/store/types';
 
@@ -224,7 +225,8 @@ export function matchPlans(
     const mealsPerDay = Math.max(...plan.days.map(d => d.length), 0);
     const known = planRecipes.filter((r): r is RecipeTemplate => !!r);
     const avgCook = known.length > 0 ? known.reduce((n, r) => n + r.cookTimeMin, 0) / known.length : 20;
-    const calories = plan.targets?.calories ?? null;
+    // The plan's real daily calories (meals × portions), same as its page.
+    const calories = planNutrition(plan, (id) => recipeById.get(id))?.calories ?? null;
 
     const reasons: { text: string; weight: number }[] = [];
 

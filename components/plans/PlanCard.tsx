@@ -2,6 +2,8 @@ import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 import { COLORS } from '@/constants/theme';
 import type { MealPlan } from '@/store/types';
+import { useMemo } from 'react';
+import { planNutritionOf, useMealStore } from '@/store/useMealStore';
 
 export type PlanCardVariant = 'compact' | 'row';
 
@@ -20,7 +22,13 @@ function countDistinctMeals(plan: MealPlan): number {
 
 export function PlanCard({ plan, variant = 'compact', onPress, onLongPress }: Props) {
   const distinct = countDistinctMeals(plan);
-  const cal = plan.targets?.calories;
+  const recipes = useMealStore(s => s.recipes);
+  const savedRecipes = useMealStore(s => s.savedRecipes);
+  // Real daily calories (meals × portions), same as the plan page.
+  const cal = useMemo(
+    () => planNutritionOf(plan, recipes, savedRecipes)?.calories,
+    [plan, recipes, savedRecipes],
+  );
 
   if (variant === 'row') {
     return (
@@ -36,7 +44,7 @@ export function PlanCard({ plan, variant = 'compact', onPress, onLongPress }: Pr
         <View style={styles.rowBody}>
           <Text style={styles.rowName} numberOfLines={1}>{plan.name}</Text>
           <Text style={styles.rowMeta} numberOfLines={1}>
-            {cal != null ? `${cal} cal/day · ` : ''}{distinct} unique meals
+            {cal != null ? `${cal.toLocaleString()} cal/day · ` : ''}{distinct} unique meals
             {plan.category ? ` · ${plan.category}` : ''}
           </Text>
         </View>
@@ -57,7 +65,7 @@ export function PlanCard({ plan, variant = 'compact', onPress, onLongPress }: Pr
       </View>
       <Text style={styles.compactName} numberOfLines={2}>{plan.name}</Text>
       <Text style={styles.compactMeta}>
-        {cal != null ? `${cal} cal/day` : `${distinct} meals`}
+        {cal != null ? `${cal.toLocaleString()} cal/day` : `${distinct} meals`}
       </Text>
     </TouchableOpacity>
   );

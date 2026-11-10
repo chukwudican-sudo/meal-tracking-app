@@ -19,6 +19,15 @@ const DINNER = (recipeId: string, name: string): PlanDayMeal => ({
   slotName: 'Dinner', time: '19:00', recipeId, recipeName: name,
 });
 
+// Portions per meal type (quarter steps, default 1). A plan reaches its
+// calories with portions — its numbers are then worked out from the meals
+// (lib/planNutrition.ts), never typed here.
+type Portions = Partial<Record<'breakfast' | 'lunch' | 'dinner' | 'snack', number>>;
+
+function withPortion(m: PlanDayMeal, servings: number | undefined): PlanDayMeal {
+  return servings && servings !== 1 ? { ...m, servings } : m;
+}
+
 // Build a 7-day pattern by rotating breakfast/lunch/dinner options.
 // Indices supply variety while keeping macro profiles within the same family.
 function rotateDays(
@@ -27,6 +36,7 @@ function rotateDays(
   dinners: { id: string; name: string }[],
   snacks: { id: string; name: string }[],
   includeSnacks: { am: boolean; pm: boolean },
+  portions: Portions = {},
 ): PlanDayMeal[][] {
   return Array.from({ length: 7 }, (_, day) => {
     const bf = breakfasts[day % breakfasts.length];
@@ -34,11 +44,11 @@ function rotateDays(
     const dn = dinners[day % dinners.length];
     const am = snacks[day % snacks.length];
     const pm = snacks[(day + 1) % snacks.length];
-    const meals: PlanDayMeal[] = [BREAKFAST(bf.id, bf.name)];
-    if (includeSnacks.am) meals.push(MIDMORN(am.id, am.name));
-    meals.push(LUNCH(ln.id, ln.name));
-    if (includeSnacks.pm) meals.push(AFTERNOON(pm.id, pm.name));
-    meals.push(DINNER(dn.id, dn.name));
+    const meals: PlanDayMeal[] = [withPortion(BREAKFAST(bf.id, bf.name), portions.breakfast)];
+    if (includeSnacks.am) meals.push(withPortion(MIDMORN(am.id, am.name), portions.snack));
+    meals.push(withPortion(LUNCH(ln.id, ln.name), portions.lunch));
+    if (includeSnacks.pm) meals.push(withPortion(AFTERNOON(pm.id, pm.name), portions.snack));
+    meals.push(withPortion(DINNER(dn.id, dn.name), portions.dinner));
     return meals;
   });
 }
@@ -56,7 +66,6 @@ export const PLAN_SEED: PlanTemplate[] = [
     description: 'A 5-meal balanced split designed for steady energy and easy maintenance.',
     disclaimer: DEFAULT_DISCLAIMER,
     category: 'Balanced',
-    targets: { calories: 2200, protein: 165, carbs: 220, fats: 65 },
     days: rotateDays(
       [
         { id: 'rcp-bf-oats-berries',      name: 'Oats & Berries' },
@@ -79,6 +88,7 @@ export const PLAN_SEED: PlanTemplate[] = [
         { id: 'rcp-sn-hummus-carrots',  name: 'Hummus & Carrots' },
       ],
       { am: true, pm: true },
+      { breakfast: 1.25, lunch: 1, dinner: 1.25, snack: 1.25 },
     ),
     savedAt: '2024-01-01T00:00:00.000Z',
     source: 'premade',
@@ -89,7 +99,6 @@ export const PLAN_SEED: PlanTemplate[] = [
     description: 'Three solid meals — perfect if snacks aren\'t your thing.',
     disclaimer: DEFAULT_DISCLAIMER,
     category: 'Balanced',
-    targets: { calories: 2000, protein: 140, carbs: 210, fats: 65 },
     days: rotateDays(
       [
         { id: 'rcp-bf-greek-yogurt-bowl', name: 'Greek Yogurt Bowl' },
@@ -108,6 +117,7 @@ export const PLAN_SEED: PlanTemplate[] = [
       ],
       [{ id: 'rcp-sn-apple-almonds', name: 'Apple & Almonds' }],
       { am: false, pm: false },
+      { breakfast: 1.25, lunch: 1.75, dinner: 1.25 },
     ),
     savedAt: '2024-01-01T00:00:00.000Z',
     source: 'premade',
@@ -120,7 +130,6 @@ export const PLAN_SEED: PlanTemplate[] = [
     description: 'Protein-forward at every slot for hypertrophy training blocks.',
     disclaimer: DEFAULT_DISCLAIMER,
     category: 'High Protein',
-    targets: { calories: 2600, protein: 210, carbs: 230, fats: 75 },
     days: rotateDays(
       [
         { id: 'rcp-bf-protein-pancakes',  name: 'Protein Pancakes' },
@@ -142,6 +151,7 @@ export const PLAN_SEED: PlanTemplate[] = [
         { id: 'rcp-sn-yogurt-honey',     name: 'Greek Yogurt with Honey' },
       ],
       { am: true, pm: true },
+      { lunch: 1.25, dinner: 1.5, snack: 1.5 },
     ),
     savedAt: '2024-01-01T00:00:00.000Z',
     source: 'premade',
@@ -152,7 +162,6 @@ export const PLAN_SEED: PlanTemplate[] = [
     description: 'Higher protein, lower calorie — built for a sustainable deficit.',
     disclaimer: DEFAULT_DISCLAIMER,
     category: 'High Protein',
-    targets: { calories: 1800, protein: 180, carbs: 140, fats: 55 },
     days: rotateDays(
       [
         { id: 'rcp-bf-greek-yogurt-bowl', name: 'Greek Yogurt Bowl' },
@@ -168,6 +177,7 @@ export const PLAN_SEED: PlanTemplate[] = [
       ],
       [{ id: 'rcp-sn-protein-smoothie', name: 'Protein Smoothie' }],
       { am: false, pm: true },
+      { lunch: 0.75, dinner: 1.25, snack: 1.25 },
     ),
     savedAt: '2024-01-01T00:00:00.000Z',
     source: 'premade',
@@ -181,8 +191,7 @@ export const PLAN_SEED: PlanTemplate[] = [
     disclaimer: DEFAULT_DISCLAIMER,
     category: 'Low Carb',
     // Nov 10: no more toast, wraps or rice dishes; every day is well under
-    // 100 g of carbs. Targets = what the meals add up to (7-day average).
-    targets: { calories: 1700, protein: 130, carbs: 60, fats: 105 },
+    // 100 g of carbs.
     days: rotateDays(
       [
         { id: 'rcp-bf-veggie-omelette', name: 'Veggie Omelette' },
@@ -205,6 +214,7 @@ export const PLAN_SEED: PlanTemplate[] = [
         { id: 'rcp-sn-edamame',       name: 'Steamed Edamame' },
       ],
       { am: true, pm: true },
+      { lunch: 0.75, dinner: 1.25 },
     ),
     savedAt: '2024-01-01T00:00:00.000Z',
     source: 'premade',
@@ -217,7 +227,6 @@ export const PLAN_SEED: PlanTemplate[] = [
     description: 'Plenty of whole grains, legumes, and produce to support gut health.',
     disclaimer: DEFAULT_DISCLAIMER,
     category: 'High Fiber',
-    targets: { calories: 2100, protein: 110, carbs: 280, fats: 70 },
     days: rotateDays(
       [
         { id: 'rcp-bf-oats-berries',  name: 'Oats & Berries' },
@@ -236,6 +245,7 @@ export const PLAN_SEED: PlanTemplate[] = [
         { id: 'rcp-sn-apple-almonds',  name: 'Apple & Almonds' },
       ],
       { am: true, pm: true },
+      { dinner: 1.5 },
     ),
     savedAt: '2024-01-01T00:00:00.000Z',
     source: 'premade',
@@ -250,9 +260,7 @@ export const PLAN_SEED: PlanTemplate[] = [
       'Keto is restrictive. Consult a clinician if you have medical concerns. ' + DEFAULT_DISCLAIMER,
     category: 'Keto',
     // Nov 10: rebuilt from real keto recipes (was toast, wraps and rice —
-    // ~3× the carb limit). Every day stays under 40 g carbs. Targets = what
-    // the meals add up to (7-day average).
-    targets: { calories: 1700, protein: 135, carbs: 35, fats: 115 },
+    // ~3× the carb limit). Every day stays under 40 g carbs.
     days: rotateDays(
       [
         { id: 'rcp-bf-veggie-omelette', name: 'Veggie Omelette' },
@@ -273,6 +281,7 @@ export const PLAN_SEED: PlanTemplate[] = [
         { id: 'rcp-sn-boiled-eggs',   name: 'Boiled Eggs' },
       ],
       { am: true, pm: true },
+      { lunch: 0.75, dinner: 1.25 },
     ),
     savedAt: '2024-01-01T00:00:00.000Z',
     source: 'premade',
@@ -285,7 +294,6 @@ export const PLAN_SEED: PlanTemplate[] = [
     description: 'Olive oil, fish, whole grains, vegetables — Mediterranean staples.',
     disclaimer: DEFAULT_DISCLAIMER,
     category: 'Mediterranean',
-    targets: { calories: 2100, protein: 130, carbs: 230, fats: 80 },
     days: rotateDays(
       [
         { id: 'rcp-bf-greek-yogurt-bowl', name: 'Greek Yogurt Bowl' },
@@ -306,6 +314,7 @@ export const PLAN_SEED: PlanTemplate[] = [
         { id: 'rcp-sn-yogurt-honey',    name: 'Greek Yogurt with Honey' },
       ],
       { am: true, pm: true },
+      { breakfast: 1.25, lunch: 1.25, dinner: 1.25, snack: 0.75 },
     ),
     savedAt: '2024-01-01T00:00:00.000Z',
     source: 'premade',
