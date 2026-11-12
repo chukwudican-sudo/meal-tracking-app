@@ -36,7 +36,11 @@ Deeper material lives in `docs/handover/` — read the relevant file before touc
 - **State:** Zustand 5 + `persist` (AsyncStorage, **pinned `^2.2.0` — v3 breaks on Expo 54**). Main store
   `store/useMealStore.ts` (~1950 lines), persist key `meal-app-store-v2`, **version 6**.
 - **Backend:** Supabase (dev project ref **`kpmxjufzggcapljhxutv`**, `https://kpmxjufzggcapljhxutv.supabase.co`).
-  Postgres + RLS, email/password auth, 12 Deno edge functions. A separate *production* project is planned before launch.
+  Postgres + RLS, email/password auth, 12 Deno edge functions. **Production** project **Macrotri-Prod** (ref
+  `tmsydkqpskwcsrrbuqst`, same MealApp Pro org, West US Oregon, Micro) created Nov 12: all migrations applied and
+  schema verified identical to dev; secrets, functions, auth settings, SMTP and the food tables are still TODO (see
+  the roadmap). The repo stays **linked to dev**; target prod per command with `--remote=tmsydkqpskwcsrrbuqst`
+  (`db push`, `functions deploy`, `secrets set`, read-only `db query --read-only`).
 - **AI:** Google Gemini **`gemini-3.6-flash`**, called only from edge functions (key is a Supabase secret).
   No client-side AI remains (the legacy OpenAI client was deleted Oct 28). Voice = the keyboard's own dictation;
   a dedicated on-device voice button is planned after launch.
@@ -178,6 +182,14 @@ These come straight from months of his feedback. Violating them is the #1 thing 
   always read server-side, never trusted from the client. **Editing anything in `_shared/` means redeploying every
   function that imports it** (each bundles its own copy). `constants/entitlements.ts` is imported by the Deno
   `revenuecat-webhook` via relative path — keep it dependency-free and redeploy the webhook if it changes.
+- **Database grants — locked unless granted (Nov 12, migration `20261112010000_explicit_grants_auto_rls`):** new
+  tables get NO automatic grants (Supabase's current default) and RLS is switched on automatically (`ensure_rls` event
+  trigger). Every migration that creates a table must, in the same file: enable RLS, write its policies, and
+  `grant` exactly the commands those policies allow to `authenticated` plus `select, insert, update, delete` to
+  `service_role`. Nothing is granted to `anon`: any app read that can run without a session ("verify later"
+  users) must check `supabase.auth.getSession()` first and return empty (done in `useInboxStore`,
+  `lib/macroFoodOptions`). Every new function: `revoke all … from public, anon, authenticated`, then grant `execute`
+  to the roles that need it (server-only RPCs: `service_role` only). Otherwise the app gets "permission denied".
 - **AI quality log (`ai_events`):** scan-meal and fix-meal record every outcome (input, before/after, prompt version,
   latency, error) via `_shared/aiEvents.ts#recordAiEvent` — private table (RLS, no policies), no photos, rows cascade
   on account delete. **Bump a function's `PROMPT_VERSION` on any prompt/schema change.** To analyse a test, read it

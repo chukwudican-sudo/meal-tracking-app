@@ -3,10 +3,17 @@
 // FoodData Central (see scripts/import-macro-foods.ts) and are editable in the
 // Table Editor, so the picker lists can change without an app release.
 //
-// Uses the app-wide anon-key client — the tables are world-readable to any
-// authenticated user via RLS (select using true), so no special access needed.
+// Uses the app-wide anon-key client — the tables are readable by any signed-in
+// user via RLS (select using true). Logged-out visitors have no access at all
+// (Nov 12 grants), so without a session ("verify later") both fetchers return
+// empty lists — as before — instead of a permission error the user can't fix.
 
 import { supabase } from '@/lib/supabase';
+
+async function hasSession(): Promise<boolean> {
+  const { data } = await supabase.auth.getSession();
+  return !!data.session;
+}
 
 export type MacroGroup = 'proteins' | 'carbs' | 'fats';
 
@@ -25,6 +32,7 @@ const TABLE_BY_GROUP: Record<MacroGroup, string> = {
  * the caller can show a retry state.
  */
 export async function fetchMacroFoodOptions(): Promise<Record<MacroGroup, string[]>> {
+  if (!(await hasSession())) return { proteins: [], carbs: [], fats: [] };
   const load = (table: string) =>
     supabase
       .from(table)
@@ -57,6 +65,7 @@ export async function fetchMacroFoodOptions(): Promise<Record<MacroGroup, string
  * "foods to avoid" searchable list which draws from the entire food pool.
  */
 export async function fetchAllFoodOptionsCombined(): Promise<string[]> {
+  if (!(await hasSession())) return [];
   const load = (table: string) =>
     supabase
       .from(table)

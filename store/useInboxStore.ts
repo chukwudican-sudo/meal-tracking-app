@@ -50,6 +50,14 @@ export const useInboxStore = create<InboxStore>((set, get) => ({
     const gen = generation;
     const t = timeoutSignal(FETCH_TIMEOUT_MS);
     try {
+      // Announcements are for signed-in users only (the table grants nothing
+      // to logged-out visitors since Nov 12). "Verify later" users have no
+      // session yet: show the empty inbox instead of a permission error.
+      const { data: auth } = await supabase.auth.getSession();
+      if (!auth.session) {
+        if (gen === generation) set({ items: [], loaded: true, loading: false });
+        return;
+      }
       const { data, error } = await supabase
         .from('announcements')
         .select('id, title, body, created_at')
