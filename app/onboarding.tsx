@@ -16,25 +16,26 @@ import Svg, { Line, Polyline, Circle as SvgCircle } from 'react-native-svg';
 
 import { EmailCodeVerification } from '@/components/auth/EmailCodeVerification';
 import { HeightPicker, type HeightUnit } from '@/components/onboarding/HeightPicker';
-import { Slider } from '@/components/onboarding/Slider';
 import { WeightPicker, type WeightUnitChoice } from '@/components/onboarding/WeightPicker';
 import { BackButton, HEADER_SIDE } from '@/components/PageHeader';
 import { ProgressRing } from '@/components/ProgressRing';
+import { PaceSlider } from '@/components/PaceSlider';
 import { Screen } from '@/components/Screen';
 import { APP_NAME } from '@/constants/app';
+import { clampPace } from '@/constants/goalCalc';
 import { NUTRIENT_META } from '@/constants/nutrients';
 import {
   ageFromBirthday,
   calcGoalDate,
   calcOnboardingTargets,
-  KG_PER_LB,
   LBS_PER_KG,
+  ONBOARDING_GOAL_TYPE,
   type OnboardingGoal,
 } from '@/constants/onboardingCalc';
 import { COLORS } from '@/constants/theme';
 import { signInWithEmail, signUpWithEmail, useAuth } from '@/lib/auth';
 import { engine } from '@/lib/sync/engine';
-import type { ActivityLevel, GoalType, NutrientKey } from '@/store/types';
+import type { ActivityLevel, NutrientKey } from '@/store/types';
 import { requestReminderPermission } from '@/lib/notifications/reminders';
 import { useMealStore } from '@/store/useMealStore';
 import { openPrivacy, openTerms } from '@/lib/openLink';
@@ -64,12 +65,6 @@ const ACTIVITY_OPTIONS: { value: ActivityLevel; label: string }[] = [
 const DIETARY_OPTIONS = ['Vegan', 'Vegetarian', 'Pescatarian', 'Halal', 'Kosher', 'Keto', 'Gluten-free', 'Dairy-free', 'None'];
 const ALLERGY_OPTIONS = ['Nuts', 'Dairy', 'Gluten', 'Shellfish', 'Soy', 'Eggs', 'Fish', 'None'];
 const NUTRIENT_OPTIONS: NutrientKey[] = ['fiber', 'sodium', 'potassium', 'sugar', 'cholesterol', 'iron'];
-
-const GOAL_TO_TYPE: Record<OnboardingGoal, GoalType> = {
-  lose: 'lose_weight',
-  healthier: 'maintain',
-  muscle: 'gain_muscle',
-};
 
 const CAROUSEL = [
   { icon: 'scan-outline',      title: 'AI-powered meal scanning',  sub: 'Snap a photo and we log the nutrition for you.' },
@@ -126,6 +121,9 @@ export default function OnboardingScreen() {
   const patch = (p: Partial<Answers>) => setAnswers(a => ({ ...a, ...p }));
 
   const isWeightGoal = answers.goal === 'lose' || answers.goal === 'muscle';
+  // The pace in use: inside the chosen goal's range (going back and switching
+  // from losing to muscle could leave the slider's last value, e.g. 2, behind).
+  const pace = answers.goal ? clampPace(ONBOARDING_GOAL_TYPE[answers.goal], answers.paceLbsPerWeek) : null;
 
   // The ordered flow. Conditional screens are only present for weight goals.
   const steps = useMemo<StepId[]>(() => {
@@ -157,15 +155,16 @@ export default function OnboardingScreen() {
       age: ageFromBirthday(answers.birthday.toISOString().slice(0, 10)),
       heightCm: answers.heightCm,
       weightKg: answers.weightKg,
+      targetWeightKg: isWeightGoal ? answers.targetWeightKg : null,
       activityLevel: answers.activity,
-      paceLbsPerWeek: isWeightGoal ? answers.paceLbsPerWeek : null,
+      paceLbsPerWeek: pace,
     });
-  }, [answers, isWeightGoal]);
+  }, [answers, isWeightGoal, pace]);
 
   const goalDate = useMemo(() => {
     if (!isWeightGoal) return null;
-    return calcGoalDate(answers.weightKg, answers.targetWeightKg, answers.paceLbsPerWeek);
-  }, [answers.weightKg, answers.targetWeightKg, answers.paceLbsPerWeek, isWeightGoal]);
+    return calcGoalDate(answers.weightKg, answers.targetWeightKg, pace);
+  }, [answers.weightKg, answers.targetWeightKg, pace, isWeightGoal]);
 
   // ─── Completion ────────────────────────────────────────────────────────────
   const finish = (buildPlan: boolean) => {
@@ -183,9 +182,9 @@ export default function OnboardingScreen() {
       heightCm: Math.round(answers.heightCm),
       weightKg: answers.weightKg,
       targetWeightKg,
-      goalType: GOAL_TO_TYPE[answers.goal],
+      goalType: ONBOARDING_GOAL_TYPE[answers.goal],
       activityLevel: answers.activity ?? undefined,
-      paceLbsPerWeek: isWeightGoal ? answers.paceLbsPerWeek : null,
+      paceLbsPerWeek: pace,
       goalDate,
       weightUnit: answers.weightUnit === 'kg' ? 'kg' : 'lbs',
       dietaryRestrictions: answers.dietary.filter(d => d !== 'None'),
@@ -434,15 +433,7 @@ export default function OnboardingScreen() {
           </CardsStep>
         );
 
-      case 'pace': {
-        const min = answers.goal === 'muscle' ? 0.25 : 0.5;
-        const max = answers.goal === 'muscle' ? 1.0 : 2.0;
-        const t = (answers.paceLbsPerWeek - min) / (max - min);
-        const paceLabel = t < 0.34 ? 'Gentle and sustainable' : t < 0.67 ? 'Steady momentum' : 'Ambitious pace';
-        const rateText =
-          answers.weightUnit === 'kg'
-            ? `${(Math.round(answers.paceLbsPerWeek * KG_PER_LB * 100) / 100)} kg / week`
-            : `${answers.paceLbsPerWeek} lbs / week`;
+      case 'pace':
         return (
           <FormStep
             title="Desired speed of change?"
@@ -450,20 +441,14 @@ export default function OnboardingScreen() {
             canNext
             onNext={() => go(1)}
           >
-            <Text style={styles.paceRate}>{rateText}</Text>
-            <View style={{ paddingHorizontal: 4, marginTop: 20 }}>
-              <Slider
-                min={min}
-                max={max}
-                step={0.25}
-                value={answers.paceLbsPerWeek}
-                onChange={v => patch({ paceLbsPerWeek: v })}
-              />
-            </View>
-            <Text style={styles.paceLabel}>{paceLabel}</Text>
+            <PaceSlider
+              goalType={answers.goal === 'muscle' ? 'gain_muscle' : 'lose_weight'}
+              value={pace}
+              imperial={answers.weightUnit !== 'kg'}
+              onChange={v => patch({ paceLbsPerWeek: v })}
+            />
           </FormStep>
         );
-      }
 
       case 'dietary':
         return (
@@ -1208,8 +1193,6 @@ const styles = StyleSheet.create({
 
   warn: { color: COLORS.red, fontSize: 13, textAlign: 'center', marginTop: 12 },
 
-  paceRate: { color: COLORS.text, fontSize: 28, fontWeight: '700', textAlign: 'center', marginTop: 24 },
-  paceLabel: { color: COLORS.green, fontSize: 15, fontWeight: '600', textAlign: 'center', marginTop: 18 },
 
   primaryBtn: { backgroundColor: COLORS.green, borderRadius: 12, paddingVertical: 16, alignItems: 'center', marginTop: 8 },
   primaryBtnDisabled: { opacity: 0.4 },

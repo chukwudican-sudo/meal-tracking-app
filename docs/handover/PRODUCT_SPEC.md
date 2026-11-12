@@ -240,8 +240,12 @@ secondary nutrients (skippable) → processing 0→100% (ProgressiveLoader-style
 Apple/Google (coming soon)/Email → email + password + confirm → **6-digit code screen ("I'll verify later" allowed)** →
 setup → goal timeline ("[Name], you will reach your goal by [date]") → calorie ring → notifications ask → "Ready to build
 your first meal plan?" (Build My Plan / "I'll do this later" → Home nudge).
-Math (`constants/onboardingCalc.ts`): Mifflin-St Jeor; activity 1.2/1.375/1.55/1.725; −500 kcal per lb/wk lost, +250
-per 0.5 lb/wk gained; floor 1200 kcal female / 1500 male; macros 30% P / 40% C / 30% F; water kg × 0.033 L.
+Math — ONE calculator, `calcTargets` in `constants/goalCalc.ts`, shared by onboarding and Edit Goal (Nov 11; they used
+to differ): Mifflin-St Jeor; activity 1.2/1.375/1.55/1.725/1.9; ±500 kcal/day per lb/week (pace slider: lose 0.5–2,
+gain 0.25–1, 0.25 steps); floor 1200 kcal (1500 for a man losing). Macros (superseded 30/40/30 — it gave a 62 kg
+person 197 g protein): protein 2.0 g/kg losing (goal weight) or gaining, 1.6 maintaining, counted from at most the
+BMI-25 weight for the height, ≤40% of kcal; fat 25% (30% maintain), ≥0.6 g/kg, ≤35%; carbs = the rest. Water
+kg × 0.033 L in cups, 6–16. Existing accounts keep their numbers until they run Edit Goal.
 Exact screen copy is in `chat-history/main-chat-may-oct-2026.md` (message around Jul 13, "Onboarding").
 
 ## 10. Profile & Settings
@@ -250,7 +254,8 @@ Exact screen copy is in `chat-history/main-chat-may-oct-2026.md` (message around
   goal (→ Edit Goal), active plan, Free/Pro status with **Upgrade** (paywall) or **Manage Subscription** (Apple sheet).
   Sections: Body & Goals (Edit Goal, Personal Details), Nutrition (Dietary & Allergies, Nutrition Goals), Preferences
   (lbs/kg, app-wide, default lbs). Gear → Settings.
-- **Edit Goal:** goal tiles → confirm weight → activity → pace → old vs new targets side by side (manual tweaks) →
+- **Edit Goal:** goal tiles (Lose Weight / Maintain / Gain Muscle — same as onboarding) → confirm weight → activity →
+  pace slider (shared `components/PaceSlider`, skipped for Maintain) → old vs new targets side by side (manual tweaks) →
   "Update your meal plan to match?" Yes → auto-save current plan as "Auto-saved Plan – {date}" (if one exists) and
   `router.replace('/plan/build')`; No → targets only.
 - **Personal Details:** name, age, height, weight, gender, activity, and **Meal Time Slots** (5 fixed, wheel times + skip

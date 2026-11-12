@@ -81,7 +81,6 @@ export type ActivityLevel =
   | 'extra_active';
 export type WeightUnit = 'lbs' | 'kg';
 export type Gender = 'male' | 'female' | 'other';
-export type GoalPace = 'slow' | 'moderate' | 'aggressive';
 export type SubscriptionTier = 'free' | 'premium';
 export type RemindMinutes = 5 | 10 | 15 | 30;
 

@@ -35,6 +35,9 @@ export function Slider({ min, max, step, value, onChange }: SliderProps) {
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder: () => true,
+      // Keep the drag once started (a parent ScrollView would otherwise take
+      // over a slightly diagonal swipe).
+      onPanResponderTerminationRequest: () => false,
       onPanResponderGrant: (e) => onChange(fromX(e.nativeEvent.locationX)),
       onPanResponderMove: (e) => onChange(fromX(e.nativeEvent.locationX)),
     }),
@@ -54,9 +57,11 @@ export function Slider({ min, max, step, value, onChange }: SliderProps) {
       }}
       {...responder.panHandlers}
     >
-      <View style={styles.track} />
-      <View style={[styles.fill, { width: thumbLeft + THUMB / 2 }]} />
-      <View style={[styles.thumb, { left: thumbLeft }]} />
+      {/* Children ignore touches so locationX is always measured from the
+          slider's left edge (not from the thumb when the drag starts on it). */}
+      <View style={styles.track} pointerEvents="none" />
+      <View style={[styles.fill, { width: thumbLeft + THUMB / 2 }]} pointerEvents="none" />
+      <View style={[styles.thumb, { left: thumbLeft }]} pointerEvents="none" />
     </View>
   );
 }

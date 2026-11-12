@@ -19,26 +19,32 @@ import {
   ACTIVITY_LABEL,
   GOAL_LABEL,
   calcTargets,
+  clampPace,
+  goalDirection,
   kgToLbs,
   lbsToKg,
-  paceLabel,
   type GoalTargets,
 } from '@/constants/goalCalc';
+import { calcGoalDate } from '@/constants/onboardingCalc';
 import type {
   ActivityLevel,
-  GoalPace,
   GoalType,
   UserGoals,
 } from '@/store/types';
 import { useMealStore } from '@/store/useMealStore';
 import { HealthNote } from '@/components/HealthNote';
+import { PaceSlider } from '@/components/PaceSlider';
 
-const STEPS = ['Goal', 'Weight', 'Activity', 'Pace', 'Summary'] as const;
-const GOALS: GoalType[] = ['lose_weight', 'maintain', 'gain_muscle', 'lean_bulk'];
+type StepId = 'Goal' | 'Weight' | 'Activity' | 'Pace' | 'Summary';
+// Maintaining has no pace to pick (as in onboarding).
+const STEPS_WEIGHT_GOAL: StepId[] = ['Goal', 'Weight', 'Activity', 'Pace', 'Summary'];
+const STEPS_MAINTAIN: StepId[] = ['Goal', 'Weight', 'Activity', 'Summary'];
+// The same three goals as onboarding. Lean Bulk left the list: with one pace
+// slider it was identical to Gain Muscle (a saved one opens as Gain Muscle).
+const GOALS: GoalType[] = ['lose_weight', 'maintain', 'gain_muscle'];
 const ACTIVITIES: ActivityLevel[] = [
   'sedentary', 'lightly_active', 'moderately_active', 'very_active', 'extra_active',
 ];
-const PACES: GoalPace[] = ['slow', 'moderate', 'aggressive'];
 
 export default function EditGoalScreen() {
   const profile = useMealStore(s => s.profile);
@@ -51,17 +57,30 @@ export default function EditGoalScreen() {
 
   const isImperial = (profile.weightUnit ?? 'lbs') === 'lbs';
 
+  const savedGoal: GoalType = profile.goalType === 'lean_bulk' ? 'gain_muscle' : profile.goalType ?? 'maintain';
+
   const [step, setStep] = useState(0);
-  const [goalType, setGoalType]    = useState<GoalType>(profile.goalType ?? 'maintain');
-  const [weightStr, setWeightStr]  = useState(
+  const [goalType, setGoalType]    = useState<GoalType>(savedGoal);
+  // The field shows whole numbers; untouched, it stands for the exact saved
+  // weight (so Confirm doesn't round 154.7 to 155 or log a fake weigh-in).
+  const [initialWeightStr] = useState(() =>
     profile.weightKg != null
       ? isImperial
         ? Math.round(kgToLbs(profile.weightKg)).toString()
         : Math.round(profile.weightKg).toString()
       : ''
   );
+  const [weightStr, setWeightStr]  = useState(initialWeightStr);
   const [activity, setActivity]    = useState<ActivityLevel>(profile.activityLevel ?? 'moderately_active');
-  const [pace, setPace]            = useState<GoalPace>('moderate');
+
+  // Pace slider (lb/week): starts at the saved pace (1 if none, as in
+  // onboarding), so walking through with no changes keeps the numbers. The
+  // value used is clamped to the goal's range (a 2 lb loss pace → 1 for muscle).
+  const [paceLbs, setPaceLbs] = useState<number | null>(profile.paceLbsPerWeek ?? null);
+  const paceLbsPerWeek = clampPace(goalType, paceLbs);
+
+  const steps = goalType === 'maintain' ? STEPS_MAINTAIN : STEPS_WEIGHT_GOAL;
+  const stepId = steps[Math.min(step, steps.length - 1)];
 
   // Cached results from Step 5; null until the summary step is reached.
   const [targets, setTargets] = useState<GoalTargets | null>(null);
@@ -70,15 +89,27 @@ export default function EditGoalScreen() {
   const [tweakedTargets, setTweakedTargets] = useState<GoalTargets | null>(null);
 
   const weightKg = useMemo(() => {
+    if (weightStr === initialWeightStr && profile.weightKg != null) return profile.weightKg;
     const n = Number(weightStr);
     if (!Number.isFinite(n) || n <= 0) return null;
     return isImperial ? lbsToKg(n) : n;
-  }, [weightStr, isImperial]);
+  }, [weightStr, initialWeightStr, profile.weightKg, isImperial]);
+
+  // Edit Goal has no goal-weight step, so the saved goal weight only counts
+  // when it was set for a goal in the same direction and still lies ahead
+  // ("eat healthier" saves a copy of the current weight — not a goal).
+  const dir = goalDirection(goalType);
+  const savedTarget = profile.targetWeightKg;
+  const goalWeightKg = dir !== 0 && goalDirection(savedGoal) === dir
+    && savedTarget != null && weightKg != null
+    && (dir < 0 ? savedTarget < weightKg : savedTarget > weightKg)
+    ? savedTarget
+    : null;
 
   const canProceed = useMemo(() => {
-    if (step === 1) return weightKg != null;
+    if (stepId === 'Weight') return weightKg != null;
     return true;
-  }, [step, weightKg]);
+  }, [stepId, weightKg]);
 
   const dirty = step > 0;
 
@@ -95,18 +126,19 @@ export default function EditGoalScreen() {
   };
 
   const handleNext = () => {
-    if (step === STEPS.length - 2) {
+    if (steps[step + 1] === 'Summary') {
       // About to reach Summary — compute targets.
       const ageVal = profile.age ?? 30;
       const heightVal = profile.heightCm ?? 175;
       const result = calcTargets({
         weightKg: weightKg!,
+        targetWeightKg: goalWeightKg,
         heightCm: heightVal,
         age: ageVal,
         gender: profile.gender ?? 'other',
         activityLevel: activity,
         goalType,
-        pace,
+        paceLbsPerWeek,
       });
       setTargets(result);
       setTweakedTargets(result);
@@ -143,9 +175,23 @@ export default function EditGoalScreen() {
   };
 
   const persist = (t: GoalTargets, updatePlan: boolean) => {
+    // The pace (and the goal date it implies) are saved with the goal, so the
+    // profile always matches the numbers it produced.
+    // A goal weight belongs to the direction it was set for. Changing
+    // direction here (there's no goal-weight step) drops it — maintaining keeps
+    // the current weight, as onboarding does — so an old target never comes
+    // back as the new goal on a later visit.
+    const directionChanged = goalDirection(goalType) !== goalDirection(savedGoal);
     updateProfile({
       goalType,
       activityLevel: activity,
+      paceLbsPerWeek,
+      goalDate: goalWeightKg != null && weightKg != null
+        ? calcGoalDate(weightKg, goalWeightKg, paceLbsPerWeek)
+        : null,
+      ...(directionChanged
+        ? { targetWeightKg: goalType === 'maintain' && weightKg != null ? weightKg : undefined }
+        : {}),
     });
     if (weightKg != null && weightKg !== profile.weightKg) {
       logWeight(weightKg);
@@ -191,7 +237,7 @@ export default function EditGoalScreen() {
 
       {/* Progress dots */}
       <View style={styles.progressRow}>
-        {STEPS.map((_, idx) => (
+        {steps.map((_, idx) => (
           <View
             key={idx}
             style={[styles.progressDot, idx <= step && styles.progressDotActive]}
@@ -200,7 +246,7 @@ export default function EditGoalScreen() {
       </View>
 
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
-        {step === 0 && (
+        {stepId === 'Goal' && (
           <>
             <StepHeader title="What's your goal?" sub="Pick what you're working toward right now." />
             {GOALS.map(g => (
@@ -219,7 +265,7 @@ export default function EditGoalScreen() {
           </>
         )}
 
-        {step === 1 && (
+        {stepId === 'Weight' && (
           <>
             <StepHeader title="Confirm your weight" sub="We'll use this to recalculate your targets." />
             <View style={styles.weightRow}>
@@ -236,7 +282,7 @@ export default function EditGoalScreen() {
           </>
         )}
 
-        {step === 2 && (
+        {stepId === 'Activity' && (
           <>
             <StepHeader title="Activity level" sub="Has anything changed since last time?" />
             {ACTIVITIES.map(a => (
@@ -255,29 +301,19 @@ export default function EditGoalScreen() {
           </>
         )}
 
-        {step === 3 && (
+        {stepId === 'Pace' && (
           <>
-            <StepHeader
-              title="How fast?"
-              sub={paceSubtitle(goalType)}
+            <StepHeader title="How fast?" sub={paceSubtitle(goalType)} />
+            <PaceSlider
+              goalType={goalType}
+              value={paceLbsPerWeek}
+              imperial={isImperial}
+              onChange={setPaceLbs}
             />
-            {PACES.map(p => (
-              <TouchableOpacity
-                key={p}
-                style={[styles.tile, pace === p && styles.tileActive]}
-                onPress={() => setPace(p)}
-                activeOpacity={0.85}
-              >
-                <Text style={[styles.tileTitle, pace === p && styles.tileTitleActive]}>
-                  {paceLabel(goalType, p)}
-                </Text>
-                <Text style={styles.tileSub}>{paceHint(p)}</Text>
-              </TouchableOpacity>
-            ))}
           </>
         )}
 
-        {step === 4 && targets && (
+        {stepId === 'Summary' && targets && (
           <>
             <StepHeader title="Your new targets" sub="Compare and confirm." />
             <View style={styles.compareCard}>
@@ -338,11 +374,11 @@ export default function EditGoalScreen() {
         <TouchableOpacity
           style={[styles.primaryBtn, !canProceed && styles.primaryBtnDisabled]}
           disabled={!canProceed}
-          onPress={step === STEPS.length - 1 ? handleConfirm : handleNext}
+          onPress={stepId === 'Summary' ? handleConfirm : handleNext}
           activeOpacity={0.85}
         >
           <Text style={styles.primaryBtnText}>
-            {step === STEPS.length - 1 ? 'Confirm' : 'Next'}
+            {stepId === 'Summary' ? 'Confirm' : 'Next'}
           </Text>
         </TouchableOpacity>
       </View>
@@ -411,17 +447,7 @@ function goalDescription(g: GoalType): string {
 }
 
 function paceSubtitle(g: GoalType): string {
-  if (g === 'lose_weight') return 'How aggressive should the deficit be?';
-  if (g === 'maintain') return 'Maintenance is steady — pace is mostly cosmetic here.';
-  return 'How aggressive should the surplus be?';
-}
-
-function paceHint(p: GoalPace): string {
-  switch (p) {
-    case 'slow':       return 'Easier to stick to. Best long-term.';
-    case 'moderate':   return 'Balanced — recommended for most people.';
-    case 'aggressive': return 'Faster results. Harder to sustain.';
-  }
+  return g === 'lose_weight' ? 'How aggressive should the deficit be?' : 'How aggressive should the surplus be?';
 }
 
 const styles = StyleSheet.create({

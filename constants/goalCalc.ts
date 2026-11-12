@@ -1,7 +1,6 @@
 import type {
   ActivityLevel,
   Gender,
-  GoalPace,
   GoalType,
   UserGoals,
 } from '@/store/types';
@@ -33,39 +32,103 @@ const ACTIVITY_MULTIPLIER: Record<ActivityLevel, number> = {
 };
 
 export function calcTDEE(bmr: number, activity: ActivityLevel): number {
-  return bmr * ACTIVITY_MULTIPLIER[activity];
+  // An unknown level (old or bad data) counts as sedentary, never NaN.
+  return bmr * (ACTIVITY_MULTIPLIER[activity] ?? ACTIVITY_MULTIPLIER.sedentary);
 }
 
-// Daily kcal delta keyed by goal + pace.
-const PACE_DELTA: Record<GoalType, Record<GoalPace, number>> = {
-  lose_weight: { slow: -250, moderate: -500, aggressive: -750 },
-  maintain:    { slow:    0, moderate:    0, aggressive:    0 },
-  gain_muscle: { slow:  150, moderate:  250, aggressive:  400 },
-  lean_bulk:   { slow:  250, moderate:  400, aggressive:  600 },
-};
+// ─── The one goal calculator (Nov 11) ───────────────────────────────────────
+// Onboarding and Edit Goal both call calcTargets, so the same person always
+// gets the same numbers (they used to run two different formulas).
+//
+// Calories (Alex's onboarding spec): Mifflin–St Jeor BMR × activity, then
+// 1 lb/week of change = 500 kcal/day of deficit or surplus. Never below
+// 1,200 kcal; a man losing weight never below 1,500.
+//
+// Macros, the way coaching apps set them: protein from BODY WEIGHT (not a
+// share of calories, which gave a 62 kg person 197 g), fat as a share of
+// calories with a healthy minimum, carbs fill the rest.
 
-// Macro split as fractions of total calories.
-const MACRO_SPLIT: Record<GoalType, { p: number; c: number; f: number }> = {
-  lose_weight: { p: 0.40, c: 0.35, f: 0.25 },
-  maintain:    { p: 0.30, c: 0.45, f: 0.25 },
-  gain_muscle: { p: 0.35, c: 0.40, f: 0.25 },
-  lean_bulk:   { p: 0.30, c: 0.45, f: 0.25 },
+const KCAL_PER_LB_PER_WEEK = 500;
+
+// Pace in lb/week, picked on one slider (components/PaceSlider) in both
+// onboarding and Edit Goal: losing 0.5–2, gaining 0.25–1, in 0.25 steps.
+export const PACE_STEP = 0.25;
+export const DEFAULT_PACE_LBS = 1;
+
+export function paceRange(goal: GoalType): { min: number; max: number } | null {
+  if (goal === 'lose_weight') return { min: 0.5, max: 2 };
+  if (goal === 'maintain') return null;
+  return { min: 0.25, max: 1 };
+}
+
+// The pace actually used for a goal: inside its range, on a 0.25 step (a 2 lb
+// loss pace carried over to a muscle goal becomes 1). Null for maintain.
+export function clampPace(goal: GoalType, lbs: number | null | undefined): number | null {
+  const r = paceRange(goal);
+  if (!r) return null;
+  const v = lbs != null && Number.isFinite(lbs) && lbs > 0 ? lbs : DEFAULT_PACE_LBS;
+  const snapped = Math.round(v / PACE_STEP) * PACE_STEP;
+  return Math.min(r.max, Math.max(r.min, snapped));
+}
+
+// −1 losing, 0 maintaining, +1 gaining.
+export function goalDirection(g: GoalType): -1 | 0 | 1 {
+  return g === 'lose_weight' ? -1 : g === 'maintain' ? 0 : 1;
+}
+
+// "1.5 lbs / week" or "0.68 kg / week" (same wording as onboarding's slider).
+export function formatPace(lbsPerWeek: number, imperial: boolean): string {
+  return imperial
+    ? `${lbsPerWeek} lbs / week`
+    : `${Math.round((lbsPerWeek / 2.20462) * 100) / 100} kg / week`;
+}
+
+// Protein in g per kg (ISSN position stand: 1.4–2.0 g/kg a day for people who
+// exercise, toward the top while in a deficit to keep muscle).
+const PROTEIN_G_PER_KG: Record<GoalType, number> = {
+  lose_weight: 2.0,
+  maintain:    1.6,
+  gain_muscle: 2.0,
+  lean_bulk:   2.0,
 };
+// Fat as a share of calories, never under 0.6 g/kg (hormone health).
+const FAT_SHARE: Record<GoalType, number> = {
+  lose_weight: 0.25,
+  maintain:    0.30,
+  gain_muscle: 0.25,
+  lean_bulk:   0.25,
+};
+const FAT_MIN_G_PER_KG = 0.6;
+// Ceilings so carbs always keep at least a quarter of the calories, even on a
+// 1,200 kcal day.
+const PROTEIN_MAX_SHARE = 0.40;
+const FAT_MAX_SHARE = 0.35;
+// A heavier body is mostly extra fat, not extra muscle needing protein: above
+// a BMI of 25, protein uses the weight at a BMI of 25 for your height
+// (without it, a 120 kg person eating healthier would be set 190 g+).
+const PROTEIN_BMI_CAP = 25;
 
 // 4 kcal/g for protein & carbs, 9 kcal/g for fat.
 const KCAL_PER_G = { p: 4, c: 4, f: 9 };
 
+const L_PER_CUP = 0.2366; // 8 fl oz cup in liters
+
 export interface GoalInputs {
   weightKg: number;
+  // Goal weight — protein while losing is based on it (the body you're
+  // keeping), when it's below the current weight.
+  targetWeightKg?: number | null;
   heightCm: number;
   age: number;
   gender: Gender;
   activityLevel: ActivityLevel;
   goalType: GoalType;
-  pace: GoalPace;
+  paceLbsPerWeek: number | null; // ignored for maintain; clamped by clampPace
 }
 
 export interface GoalTargets {
+  bmr: number;
+  tdee: number;
   dailyCalories: number;
   protein: number;          // grams (rounded)
   carbs: number;            // grams
@@ -73,21 +136,53 @@ export interface GoalTargets {
   waterTargetCups: number;  // 8oz cups
 }
 
+// The body weight protein (and the fat minimum) are counted from.
+export function proteinWeightKg(i: Pick<GoalInputs, 'weightKg' | 'targetWeightKg' | 'heightCm' | 'goalType'>): number {
+  let w = i.weightKg;
+  const t = i.targetWeightKg;
+  if (i.goalType === 'lose_weight' && t != null && Number.isFinite(t) && t > 0 && t < w) w = t;
+  const m = i.heightCm / 100;
+  if (Number.isFinite(m) && m > 0) w = Math.min(w, PROTEIN_BMI_CAP * m * m);
+  return w;
+}
+
 export function calcTargets(inputs: GoalInputs): GoalTargets {
+  const g = inputs.goalType;
   const bmr = calcBMR(inputs.weightKg, inputs.heightCm, inputs.age, inputs.gender);
   const tdee = calcTDEE(bmr, inputs.activityLevel);
-  const calories = Math.max(1200, Math.round(tdee + PACE_DELTA[inputs.goalType][inputs.pace]));
 
-  const split = MACRO_SPLIT[inputs.goalType];
-  const protein = Math.round((calories * split.p) / KCAL_PER_G.p);
-  const carbs   = Math.round((calories * split.c) / KCAL_PER_G.c);
-  const fats    = Math.round((calories * split.f) / KCAL_PER_G.f);
+  const pace = clampPace(g, inputs.paceLbsPerWeek) ?? 0;
+  const direction = goalDirection(g);
+  const floor = g === 'lose_weight' && inputs.gender === 'male' ? 1500 : 1200;
+  const calories = Math.max(floor, Math.round(tdee + direction * pace * KCAL_PER_LB_PER_WEEK));
 
-  // ~0.5 oz per lb bodyweight, capped 6–16 cups.
-  const lbs = inputs.weightKg * 2.20462;
-  const waterTargetCups = Math.min(16, Math.max(6, Math.round((lbs * 0.5) / 8)));
+  const w = proteinWeightKg(inputs);
+  const protein = Math.round(Math.min(
+    w * PROTEIN_G_PER_KG[g],
+    (calories * PROTEIN_MAX_SHARE) / KCAL_PER_G.p,
+  ));
+  const fats = Math.round(Math.min(
+    Math.max((calories * FAT_SHARE[g]) / KCAL_PER_G.f, w * FAT_MIN_G_PER_KG),
+    (calories * FAT_MAX_SHARE) / KCAL_PER_G.f,
+  ));
+  const carbs = Math.max(0, Math.round(
+    (calories - protein * KCAL_PER_G.p - fats * KCAL_PER_G.f) / KCAL_PER_G.c,
+  ));
 
-  return { dailyCalories: calories, protein, carbs, fats, waterTargetCups };
+  // Water (onboarding spec): 0.033 L per kg, to the nearest 0.1 L, as 8 oz
+  // cups — kept within 6–16 cups (16 ≈ 3.8 L, the top of daily guidance).
+  const waterLiters = Math.round(inputs.weightKg * 0.033 * 10) / 10;
+  const waterTargetCups = Math.min(16, Math.max(6, Math.round(waterLiters / L_PER_CUP)));
+
+  return {
+    bmr: Math.round(bmr),
+    tdee: Math.round(tdee),
+    dailyCalories: calories,
+    protein,
+    carbs,
+    fats,
+    waterTargetCups,
+  };
 }
 
 // ─── Display helpers ─────────────────────────────────────────────────────────
@@ -115,17 +210,6 @@ export const ACTIVITY_HINT: Record<ActivityLevel, string> = {
   extra_active:        'Very intense training, physical job.',
 };
 
-// Pace label per goal — text varies because surplus vs deficit reads differently.
-export function paceLabel(goal: GoalType, pace: GoalPace): string {
-  if (goal === 'maintain') {
-    return { slow: 'Steady', moderate: 'Steady', aggressive: 'Steady' }[pace];
-  }
-  if (goal === 'lose_weight') {
-    return { slow: '0.5 lb / week', moderate: '1 lb / week', aggressive: '1.5 lb / week' }[pace];
-  }
-  // gain_muscle / lean_bulk
-  return { slow: 'Slow surplus', moderate: 'Moderate surplus', aggressive: 'Aggressive surplus' }[pace];
-}
 
 // ─── Unit conversion ─────────────────────────────────────────────────────────
 
