@@ -29,6 +29,7 @@
 
 import { jsonResponse } from '../_shared/errors.ts';
 import { createAdminClient } from '../_shared/auth.ts';
+import { fetchRevenueCatPro, grantedStatus, isAppUserId, mapProvider } from '../_shared/subscription.ts';
 import { PRO_ENTITLEMENT_ID } from '../../../constants/entitlements.ts';
 
 const FUNCTION_NAME = 'revenuecat-webhook';
@@ -55,7 +56,6 @@ const REVOKE_EVENT_TYPES = new Set(['EXPIRATION']);
 const NO_OP_EVENT_TYPES = new Set(['CANCELLATION', 'BILLING_ISSUE']);
 
 type SubscriptionStatus = 'trial' | 'active' | 'expired';
-type SubscriptionProvider = 'apple' | 'google' | 'stripe' | 'revenuecat';
 
 interface RevenueCatEvent {
   type?: string;
@@ -65,24 +65,12 @@ interface RevenueCatEvent {
   period_type?: string;
   store?: string;
   expiration_at_ms?: number | null;
+  transferred_from?: string[] | null;
+  transferred_to?: string[] | null;
 }
 
-function mapProvider(store: string | undefined): SubscriptionProvider {
-  switch (store) {
-    case 'APP_STORE':
-    case 'MAC_APP_STORE':
-      return 'apple';
-    case 'PLAY_STORE':
-      return 'google';
-    case 'STRIPE':
-      return 'stripe';
-    default:
-      // PROMOTIONAL, RC_BILLING, AMAZON, ROKU, etc. — the schema's check
-      // constraint only allows the four values above; 'revenuecat' is the
-      // honest catch-all rather than guessing a wrong specific store.
-      return 'revenuecat';
-  }
-}
+// mapProvider / grantedStatus live in _shared/subscription.ts (shared with
+// sync-subscription, so both write the same values).
 
 // Only skip when the event explicitly lists entitlements and Pro isn't one
 // of them — some event payloads omit entitlement_ids entirely, and with a
@@ -120,6 +108,18 @@ Deno.serve(async (req: Request) => {
   const eventType = event.type;
   const userId = event.app_user_id;
 
+  // TRANSFER (Nov 12): a restore moved the purchase to another account
+  // (RevenueCat's default "transfer to new App User ID"). Pro moves with it:
+  // without this, the old account kept server Pro forever (its future
+  // EXPIRATION goes to the new account), so one subscription restored onto
+  // several accounts made all of them Pro. Each account involved is re-checked
+  // with RevenueCat directly: the old account(s) are set to what it says now;
+  // the receiving one is only ever granted (like sync-subscription — a lagging
+  // answer must never take Pro from the person who just restored it).
+  if (eventType === 'TRANSFER') {
+    return await handleTransfer(event);
+  }
+
   if (!eventType || !userId) {
     console.warn(`${LOG_PREFIX} missing type/app_user_id — acking without action`, event.id);
     return jsonResponse({ received: true }, 200);
@@ -139,7 +139,7 @@ Deno.serve(async (req: Request) => {
   const expiryIso = event.expiration_at_ms ? new Date(event.expiration_at_ms).toISOString() : null;
 
   if (GRANT_EVENT_TYPES.has(eventType)) {
-    const status: SubscriptionStatus = event.period_type === 'TRIAL' ? 'trial' : 'active';
+    const status: SubscriptionStatus = grantedStatus(event.period_type);
     const { error } = await admin
       .from('users')
       .update({
@@ -181,3 +181,42 @@ Deno.serve(async (req: Request) => {
 
   return jsonResponse({ received: true }, 200);
 });
+
+async function handleTransfer(event: RevenueCatEvent): Promise<Response> {
+  const from = (event.transferred_from ?? []).filter(isAppUserId);
+  const to = (event.transferred_to ?? []).filter(isAppUserId);
+  const admin = createAdminClient();
+  const secretKey = Deno.env.get('REVENUECAT_SECRET_API_KEY');
+  if (!admin || !secretKey) {
+    console.error(`${LOG_PREFIX} TRANSFER: server not configured (admin client / REVENUECAT_SECRET_API_KEY)`);
+    // Non-2xx so RevenueCat retries once the secret is set.
+    return jsonResponse({ error: { code: 'ai_failed', message: 'Server not configured' } }, 500);
+  }
+  const receiving = new Set(to);
+  for (const id of [...from, ...to]) {
+    let pro;
+    try {
+      pro = await fetchRevenueCatPro(id, secretKey);
+    } catch (e) {
+      console.error(`${LOG_PREFIX} TRANSFER: RevenueCat lookup failed for ${id}:`, e);
+      return jsonResponse({ error: { code: 'ai_failed', message: 'Lookup failed' } }, 500); // RevenueCat retries
+    }
+    if (!pro && receiving.has(id)) {
+      console.log(`${LOG_PREFIX} TRANSFER: ${id} (receiving) not active yet — left as is`);
+      continue;
+    }
+    const update = pro
+      ? { subscription_status: pro.status, subscription_provider: pro.provider, subscription_expiry_date: pro.expiryIso }
+      // Only take away what the subscription gave: leave 'free' rows alone.
+      : { subscription_status: 'expired' };
+    let q = admin.from('users').update(update).eq('id', id);
+    if (!pro) q = q.in('subscription_status', ['active', 'trial']);
+    const { error } = await q;
+    if (error) {
+      console.error(`${LOG_PREFIX} TRANSFER: failed to update ${id}:`, error);
+      return jsonResponse({ error: { code: 'ai_failed', message: 'Failed to update subscription' } }, 500);
+    }
+    console.log(`${LOG_PREFIX} TRANSFER: ${id} → ${pro ? pro.status : 'expired'}`);
+  }
+  return jsonResponse({ received: true }, 200);
+}

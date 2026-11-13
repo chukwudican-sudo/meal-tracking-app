@@ -457,6 +457,13 @@ verify_jwt = true
 enabled = true
 verify_jwt = true
 
+# Right after a purchase/restore the app calls this; it asks RevenueCat's REST
+# API directly and saves Pro to users (closes the webhook-delay gap). User JWT.
+# Needs the REVENUECAT_SECRET_API_KEY secret.
+[functions.sync-subscription]
+enabled = true
+verify_jwt = true
+
 # RevenueCat purchase-lifecycle webhook. verify_jwt MUST be false — RevenueCat
 # sends its own dashboard-configured shared secret in the Authorization
 # header (checked in-function against REVENUECAT_WEBHOOK_SECRET), not a

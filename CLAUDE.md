@@ -168,6 +168,12 @@ These come straight from months of his feedback. Violating them is the #1 thing 
 - **Paywall from inside an RN `Modal`:** mount `<PaywallModalHost active={visible} />` inside the modal (done for AddMealScreen,
   KitchenScanModal). While a host is active, `openPaywall` shows the paywall on top of the modal instead of pushing
   `/paywall`, which would land behind it (a real past bug: the scan-limit paywall was invisible).
+  **After a purchase/restore (Nov 12):** the paywall calls `usePaywallStore.succeed(syncSubscriptionWithServer())`
+  — the `sync-subscription` edge function asks RevenueCat's REST API directly and saves Pro, so the retried AI call
+  isn't refused while the webhook is still on its way — and the blocked action runs once, via
+  `lib/paywall.ts#runPendingSuccess`, after the paywall has fully closed AND the sync finished. `openPaywall` never
+  shows the paywall on a phone that already has Pro (Alert + Restore instead). Rapidly re-presenting/dismissing the
+  paywall RN Modal left an invisible layer that froze the app. The webhook handles TRANSFER (restores move Pro).
 - **`CameraView` must stay childless** — render overlays as absolutely-positioned siblings. Children inside it crashed the
   app on iOS (New Architecture) when the camera unmounted after a scan; expo-camera itself warns about it.
 - **AI calls from the client:** always via an `ai/<function>.ts` wrapper on `invokeAIFunction` (35s client timeout).

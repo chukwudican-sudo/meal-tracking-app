@@ -43,6 +43,8 @@ import type {
   UserProfile,
 } from '@/store/types';
 import { AIConsentHost } from '@/components/AIConsentHost';
+import { PaywallModalHost } from '@/components/paywall/PaywallModalHost';
+import { ToastHost } from '@/components/ToastHost';
 import { isAIConsentDeclined } from '@/lib/aiConsent';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -374,7 +376,6 @@ export default function BuildPlanScreen() {
   const planAvoidFoods = useMealStore(s => s.planAvoidFoods);
   const setPlanAvoidFoods = useMealStore(s => s.setPlanAvoidFoods);
   const showToast = useToastStore(s => s.showToast);
-  const isPro = useEntitlementStore(s => s.isPro);
   const insets = useSafeAreaInsets();
   const footerBottomPad = Math.max(insets.bottom, 16) + 16;
 
@@ -1812,8 +1813,10 @@ export default function BuildPlanScreen() {
     // Client-only Pro gate: activating a built plan has no edge function of
     // its own to return a not_premium error, so this is checked directly
     // against the live RevenueCat entitlement. A successful purchase resumes
-    // straight into activation rather than requiring a second tap.
-    if (!isPro) {
+    // straight into activation rather than requiring a second tap — so read
+    // the store, not the render-time `isPro`: the resumed call is this same
+    // closure, which would still see false and reopen the paywall (Nov 12).
+    if (!useEntitlementStore.getState().isPro) {
       openPaywall({
         reason: 'premium_feature',
         headline: 'Activate your plan with Pro',
@@ -2083,6 +2086,10 @@ export default function BuildPlanScreen() {
             </Pressable>
           </KeyboardAvoidingView>
           <AIConsentHost active={describeModalVisible} />
+          {/* A Describe that hits the free-scan limit shows the paywall (and
+              toasts) here, on top — otherwise they'd open behind this popup. */}
+          <PaywallModalHost active={describeModalVisible} />
+          <ToastHost />
         </Modal>
 
         {/* Suggest more popup: fires once per slot at SUGGEST_POPUP_AT clicks.

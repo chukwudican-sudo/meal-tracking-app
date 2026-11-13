@@ -37,6 +37,7 @@ import {
 } from '@/lib/purchases';
 import { PRO_ENTITLEMENT_ID, useEntitlementStore } from '@/store/useEntitlementStore';
 import { usePaywallStore } from '@/store/usePaywallStore';
+import { syncSubscriptionWithServer } from '@/lib/subscriptionSync';
 import { PRIVACY_URL, TERMS_URL } from '@/constants/legal';
 import type { PurchasesPackage } from 'react-native-purchases';
 
@@ -57,8 +58,8 @@ export function PaywallContent({ onExit }: { onExit: () => void }) {
   const insets = useSafeAreaInsets();
   const reason = usePaywallStore(s => s.reason);
   const customHeadline = usePaywallStore(s => s.headline);
-  const onSuccess = usePaywallStore(s => s.onSuccess);
   const close = usePaywallStore(s => s.close);
+  const succeed = usePaywallStore(s => s.succeed);
   const isPro = useEntitlementStore(s => s.isPro);
 
   const [packages, setPackages] = useState<ProPackages>({ monthly: null, yearly: null });
@@ -97,18 +98,16 @@ export function PaywallContent({ onExit }: { onExit: () => void }) {
   };
 
   // The moment RevenueCat reports an active 'MealApp Pro' entitlement — whether from
-  // a purchase or restore completed right here — close and resume whatever
-  // the caller was trying to do, without a second tap.
+  // a purchase or restore completed right here — tell the server (it asks
+  // RevenueCat directly) and close at the same time; the blocked action then
+  // resumes without a second tap, once the paywall is gone and the server
+  // agrees (usePaywallStore.succeed, lib/paywall.ts#runPendingSuccess).
   useEffect(() => {
     console.info('[paywall] isPro effect fired, isPro =', isPro);
     if (!isPro) return;
-    console.info('[paywall] isPro is true — closing paywall and calling onSuccess');
-    const cb = onSuccess;
-    close();
-    console.info('[paywall]   close() done, exiting paywall');
+    console.info('[paywall] isPro is true — syncing server + closing; resume runs after both');
+    succeed(syncSubscriptionWithServer());
     onExit();
-    console.info('[paywall]   calling onSuccess callback:', cb ? 'exists' : 'none');
-    cb?.();
   }, [isPro]);
 
   const headline = reason === 'scan_limit'
