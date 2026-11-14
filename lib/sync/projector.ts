@@ -5,7 +5,7 @@
 // subsequent change emits the delta. Reference checks keep unrelated updates
 // cheap; per-record content hashes avoid spurious writes.
 
-import { isPlanTemplate, useMealStore } from '@/store/useMealStore';
+import { isPlanTemplate, isSeedTemplate, useMealStore } from '@/store/useMealStore';
 import type {
   AppStore, GroceryItem, MealEntry, MealPlan, MealTemplate, SavedRecipe, ServerSnapshot,
 } from '@/store/types';
@@ -74,8 +74,12 @@ function buildMeals(state: AppStore): Map<string, MealSnap> {
   for (const [date, log] of Object.entries(state.logs)) {
     (log?.meals ?? []).forEach(entry => {
       // Built-in demo/sample meals are never uploaded — they'd otherwise appear
-      // in a brand-new account's cloud data as if they were real logs.
+      // in a brand-new account's cloud data as if they were real logs. That
+      // includes meals the old demo templates generated on days (Nov 13: the
+      // first production sign-up uploaded 75 of them); new installs no longer
+      // have demo content at all (useMealStore DEMO_TEMPLATE_IDS) — safety net.
       if (entry.seed) return;
+      if (entry.templateId && isSeedTemplate({ id: entry.templateId })) return;
       map.set(entry.id, { hash: mealHash(entry), date, entry, slotName: slotNameFor(state, entry) });
     });
   }

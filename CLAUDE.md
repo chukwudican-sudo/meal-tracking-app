@@ -65,6 +65,11 @@ npx expo start --dev-client --tunnel # only when phone + Mac can't see each othe
   variables** (expo.dev → project → Environment variables) for the profile's `environment` in `eas.json`:
   `development` → development, **`preview` → production** (installable release build for testing against prod before
   TestFlight), `production` → production. Without them `lib/supabase.ts` throws at launch.
+  **RevenueCat key per build type:** the Test Store key (`test_…`) is ONLY for the dev client (`.env`). RevenueCat
+  deliberately crashes any Release build (preview/TestFlight/App Store) configured with a Test Store key — the first
+  preview build did exactly that (Nov 13). EAS production env uses the App Store key (`appl_…`, RevenueCat app
+  "Macrotri (App Store)", In-App Purchase key GL2K58CPK4). Until the App Store subscriptions exist, release builds
+  can't load plans (the paywall says so) — expected.
 - New dev build: `npx eas-cli@latest build --profile development --platform ios` (plain `npx eas` fetches an
   unrelated npm package and fails; Alex runs it in his own terminal — it asks for Apple login/2FA) (or `npx expo run:ios` if Xcode is installed — it
   wasn't as of June). Needed whenever a native module/plugin/app.json native field changes.
@@ -237,15 +242,19 @@ These come straight from months of his feedback. Violating them is the #1 thing 
   the returned list with the input). Fix = `useRecipeFix` → `fix-recipe` (free scans; no steps yet → ingredients/macros
   only; never renames). Fix memory is `recipeFixHistory` (local, not synced). Free users see ingredients + step 1.
   Swaps (picker + "Use this recipe") go through `lib/recipeSwap.ts#applyRecipeSwap`, which returns its Undo.
+- **No demo content (Nov 13):** a new install starts like a clean account (`resetUserData`): no demo meals,
+  history, library or streak. The old first-launch demo templates (`DEMO_TEMPLATE_IDS` tpl-1..5) made a new account
+  upload 75 fake meals on the first production sign-up; persist v8 removes leftovers, and the projector never uploads a
+  meal generated from them. Don't add sample data to the initial store — a new account uploads whatever is local.
 - **Sync, first login on an install (`claim`):** if the server already has real profile data (`profileHasData`: name
-  or any onboarding answer) and the phone has none, it RESTORES (demo seeds cleared, server wins, nothing local
+  or any onboarding answer) and the phone has none, it RESTORES (local leftovers cleared, server wins, nothing local
   uploaded over it); otherwise (new account) local data is uploaded as before. Decided by server data, not onboarding timing (signup gets a session before answers are saved).
   Never upload local defaults over a server profile — that wiped real profiles before Oct 30.
 - **Settings/profile forms (`components/profile/FormPage`):** switches and choices save on tap (no button); typed
   forms pass `dirty` (`useIsDirty`) → green **Save** top-right, grey until changed, "Discard changes?" on leaving
   unsaved. `onSave` returns `false` when validation refuses. Only Feedback keeps a bottom button (Submit).
 - **Notifications (`lib/notifications/`):** two features. *Meal reminders* = local notifications rebuilt from the store
-  (`reminders.ts#computeReminders`: pending planned meals, rolling 7 days, cap 60 for iOS's 64 limit, demo seeds never;
+  (`reminders.ts#computeReminders`: pending planned meals, rolling 7 days, cap 60 for iOS's 64 limit;
   diff-scheduled by `ReminderSync`, cancelled on logout). *Bell inbox* = `announcements` table (read-only to users)
   + Expo push to `push_tokens` (written only via `register_push_token`/`unregister_push_token` RPCs) by the
   `send-announcement` function (ANNOUNCE_SECRET, `scripts/send-announcement.mjs`); `PushSync` + `useInboxStore`

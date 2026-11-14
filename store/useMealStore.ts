@@ -21,7 +21,6 @@ import type {
   PendingSwap,
   PlanDayMeal,
   RecurrenceRule,
-  SavedMeal,
   RecipeTemplate,
   SavedRecipe,
   UserGoals,
@@ -403,12 +402,12 @@ export function profileHasData(p: Partial<UserProfile> | undefined | null): bool
 
 // The single test for "does this template belong to the plan?". Plan
 // templates are always minted as `tpl-plan-…` (buildTemplatesFromPlan); the
-// demo seeds (exact ids in SEED_TEMPLATES) act as a plan too. Anything else is
+// old demo seeds (exact ids in DEMO_TEMPLATE_IDS) act as a plan too. Anything else is
 // the user's own (scheduled recipes; draft-card repeating meals, which are
 // `tpl-${Date.now()}` — so never match seeds by pattern). Works for data
 // persisted before this rule existed — no flag/migration needed.
 export function isPlanTemplate(t: Pick<MealTemplate, 'id'>): boolean {
-  return t.id.startsWith('tpl-plan-') || SEED_TEMPLATES.some(s => s.id === t.id);
+  return t.id.startsWith('tpl-plan-') || DEMO_TEMPLATE_IDS.includes(t.id);
 }
 
 // The active plan is matched by name, so two plans with one name get mixed
@@ -421,9 +420,9 @@ export function uniquePlanName(base: string, plans: Pick<MealPlan, 'name'>[]): s
   return name;
 }
 
-// The first-launch demo meals (exact ids) — never the user's own food.
+// The old first-launch demo meals (exact ids) — never the user's own food.
 export function isSeedTemplate(t: Pick<MealTemplate, 'id'>): boolean {
-  return SEED_TEMPLATES.some(s => s.id === t.id);
+  return DEMO_TEMPLATE_IDS.includes(t.id);
 }
 
 // Recipes the user made (Custom Recipe / AI / manual) can be fixed; the
@@ -621,103 +620,15 @@ const DEFAULT_PROFILE: UserProfile = {
   pendingEmailVerification: false,
 };
 
-// ─── Templates ────────────────────────────────────────────────────────────────
-
-const SEED_TEMPLATES: MealTemplate[] = [
-  {
-    id: 'tpl-1',
-    name: 'Breakfast',
-    time: '07:30',
-    calories: 420,
-    ingredients: [
-      { id: 'i1', name: 'Oats',           quantity: 80, unit: 'g' },
-      { id: 'i2', name: 'Protein powder', quantity: 30, unit: 'g' },
-      { id: 'i3', name: 'Banana',         quantity: 1,  unit: ''  },
-    ],
-    macros: { protein: 35, carbs: 55, fats: 8 },
-    recurrence: { type: 'daily' },
-  },
-  {
-    id: 'tpl-2',
-    name: 'Mid-morning snack',
-    time: '10:30',
-    calories: 180,
-    ingredients: [
-      { id: 'i4', name: 'Greek yogurt', quantity: 150, unit: 'g' },
-      { id: 'i5', name: 'Almonds',      quantity: 20,  unit: 'g' },
-    ],
-    macros: { protein: 15, carbs: 12, fats: 7 },
-    recurrence: { type: 'weekly', days: [1, 2, 3, 4, 5] },
-  },
-  {
-    id: 'tpl-3',
-    name: 'Lunch',
-    time: '13:00',
-    calories: 520,
-    ingredients: [
-      { id: 'i6', name: 'Chicken breast', quantity: 200, unit: 'g' },
-      { id: 'i7', name: 'Brown rice',     quantity: 150, unit: 'g' },
-      { id: 'i8', name: 'Broccoli',       quantity: 100, unit: 'g' },
-    ],
-    macros: { protein: 42, carbs: 55, fats: 8 },
-    recurrence: { type: 'daily' },
-  },
-  {
-    id: 'tpl-4',
-    name: 'Pre-workout',
-    time: '16:30',
-    calories: 200,
-    ingredients: [
-      { id: 'i9',  name: 'Rice cakes',     quantity: 3,  unit: '' },
-      { id: 'i10', name: 'Peanut butter',  quantity: 20, unit: 'g' },
-    ],
-    macros: { protein: 8, carbs: 28, fats: 7 },
-    recurrence: { type: 'weekly', days: [1, 2, 3, 4, 5] },
-  },
-  {
-    id: 'tpl-5',
-    name: 'Dinner',
-    time: '19:30',
-    calories: 480,
-    ingredients: [
-      { id: 'i11', name: 'Salmon',       quantity: 180, unit: 'g' },
-      { id: 'i12', name: 'Sweet potato', quantity: 200, unit: 'g' },
-      { id: 'i13', name: 'Spinach',      quantity: 80,  unit: 'g' },
-    ],
-    macros: { protein: 42, carbs: 38, fats: 16 },
-    recurrence: { type: 'daily' },
-  },
-];
-
-// ─── Seed logs (dynamic — always relative to today at module load) ─────────────
-
-function buildSeedLog(daysAgo: number): [string, DailyLog] {
-  const d = new Date();
-  d.setDate(d.getDate() - daysAgo);
-  const date       = toIsoDate(d);
-
-  const applicable = SEED_TEMPLATES.filter(t => isTemplateApplicableOnDate(t, date));
-
-  const meals: MealEntry[] = applicable.map(t => ({
-    id:          newId(),
-    name:        t.name,
-    time:        t.time,
-    calories:    t.calories,
-    ingredients: t.ingredients,
-    macros:      t.macros,
-    status:      'completed',
-    seed:        true,   // built-in sample history — never uploaded to the cloud
-  }));
-
-  return [date, { date, meals, waterMl: 500 }];
-}
-
-const SEED_LOGS: Record<string, DailyLog> = Object.fromEntries([
-  buildSeedLog(4),
-  buildSeedLog(3),
-  buildSeedLog(2),
-  buildSeedLog(1),
-]);
+// ─── First-launch demo content (removed Nov 13) ─────────────────────────────
+// Installs used to start with 5 demo recurring meals (these ids), 4 days of
+// demo "eaten" history and a demo library. Onboarding now comes first, so no
+// real user ever benefited — and a brand-new account uploaded every meal the
+// demo templates generated (75 fake meals on the first production sign-up).
+// New installs start empty, like resetUserData(); the ids stay only to clean
+// old installs (persist v8) and so nothing generated from them is ever synced.
+const DEMO_TEMPLATE_IDS = ['tpl-1', 'tpl-2', 'tpl-3', 'tpl-4', 'tpl-5'];
+const DEMO_LIBRARY_IDS = DEMO_TEMPLATE_IDS.map(id => `lib-${id}`);
 
 // ─── Initial grocery state ────────────────────────────────────────────────────
 
@@ -727,16 +638,6 @@ const INITIAL_GROCERY: GroceryState = {
   hasSeenTip: false,
   cartOldWeekItems: [],
 };
-
-const SEED_LIBRARY: SavedMeal[] = SEED_TEMPLATES.map(t => ({
-  id:         `lib-${t.id}`,
-  name:        t.name,
-  calories:    t.calories,
-  ingredients: t.ingredients,
-  macros:      t.macros,
-  usageCount:  0,
-  lastUsed:    toIsoDate(new Date()),
-}));
 
 // ─── Storage fallback (prevents runtime crashes if native module missing) ─────
 
@@ -816,12 +717,14 @@ const appStorage = Platform.OS === 'web' ? webStorage : nativeStorage;
 export const useMealStore = create<AppStore>()(
   persist(
     (set, get) => ({
-      logs:         SEED_LOGS,
+      // A new install starts like a clean account (resetUserData) — no demo
+      // meals, history or streak (see DEMO_TEMPLATE_IDS).
+      logs:         {},
       goals:        DEFAULT_GOALS,
       profile:      DEFAULT_PROFILE,
-      streak:       5,
-      templates:    SEED_TEMPLATES,
-      library:      SEED_LIBRARY,
+      streak:       0,
+      templates:    [],
+      library:      [],
       grocery:      INITIAL_GROCERY,
       recipes:      RECIPE_SEED,
       savedRecipes: [],
@@ -2463,7 +2366,7 @@ export const useMealStore = create<AppStore>()(
     }),
     {
       name:    'meal-app-store-v2',
-      version: 7,
+      version: 8,
       // Assign UUIDs to any records (meals + saved recipes + saved plans) with a
       // non-UUID id, so their local id can double as the Supabase primary key. v4
       // re-runs this to heal meals created by UI paths that briefly still
@@ -2475,6 +2378,36 @@ export const useMealStore = create<AppStore>()(
       // templateId references are left intact (local-only).
       migrate: (persisted, _version) => {
         const p = (persisted ?? {}) as Partial<AppStore>;
+        // v8: remove the old first-launch demo content (DEMO_TEMPLATE_IDS): its
+        // templates and library items, its sample history (seed: true), and the
+        // not-eaten meals its templates put on days. A demo meal the user ticked
+        // as eaten stays as an ordinary eaten meal (link to the gone template
+        // dropped, as on the server, so it keeps syncing). The sample history's
+        // 500 ml of water goes too (the user's own taps stay); a day left with
+        // no meals and no water is removed, so the user's own repeating meals
+        // can fill it later. Runs before sync starts: nothing is deleted on the
+        // server.
+        if (p.templates) p.templates = p.templates.filter(t => !DEMO_TEMPLATE_IDS.includes(t.id));
+        if (p.library) p.library = p.library.filter(m => !DEMO_LIBRARY_IDS.includes(m.id));
+        if (p.logs) {
+          const isDemoMeal = (m: MealEntry) => !!m.templateId && DEMO_TEMPLATE_IDS.includes(m.templateId);
+          for (const [date, log] of Object.entries(p.logs)) {
+            if (!log?.meals) continue;
+            const hadDemoHistory = log.meals.some(m => m.seed);
+            const touched = hadDemoHistory || log.meals.some(isDemoMeal);
+            if (!touched) continue;
+            const meals = log.meals
+              .filter(m => !m.seed && !(isDemoMeal(m) && m.status !== 'completed'))
+              .map(m => {
+                if (!isDemoMeal(m)) return m;
+                const { templateId: _demo, ...eaten } = m;
+                return eaten;
+              });
+            const waterMl = hadDemoHistory ? Math.max(0, (log.waterMl ?? 0) - 500) : log.waterMl;
+            if (meals.length === 0 && !(waterMl > 0)) delete p.logs[date];
+            else p.logs[date] = { ...log, meals, waterMl };
+          }
+        }
         // v7: plans activated before startDate existed applied to every past
         // weekday too. Start them today so no further past days fill. Meals
         // already back-filled aren't auto-removed: sync drops the meal->template

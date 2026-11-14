@@ -223,8 +223,9 @@ class SyncEngine {
 
       // A different account on this install must not push the previous user's
       // local cache; wipe local user data and pull the new account fresh. On
-      // restore the phone holds only the first-launch demo seeds: clear them so
-      // they don't mix into the real account and hydrateActivePlanIfNeeded can
+      // restore the phone holds nothing of the user's (a fresh install starts
+      // empty; older installs could hold the removed demo content): clear it so
+      // it doesn't mix into the real account and hydrateActivePlanIfNeeded can
       // rebuild the real plan.
       if (mode === 'switch' || mode === 'restore') {
         useMealStore.getState().resetUserData();
