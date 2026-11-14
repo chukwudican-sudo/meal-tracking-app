@@ -257,8 +257,10 @@ These come straight from months of his feedback. Violating them is the #1 thing 
   (`reminders.ts#computeReminders`: pending planned meals, rolling 7 days, cap 60 for iOS's 64 limit;
   diff-scheduled by `ReminderSync`, cancelled on logout). *Bell inbox* = `announcements` table (read-only to users)
   + Expo push to `push_tokens` (written only via `register_push_token`/`unregister_push_token` RPCs) by the
-  `send-announcement` function (ANNOUNCE_SECRET, `scripts/send-announcement.mjs`); `PushSync` + `useInboxStore`
-  (unread = newer than this phone's lastSeenAt). expo-notifications is loaded only via `getNotifications()` (older dev
+  `send-announcement` function (ANNOUNCE_SECRET, `scripts/send-announcement.mjs`; default = dev, `--prod` = production
+  with `.env` PROD_ANNOUNCE_SECRET, dry-runs then asks for a typed "yes"); `PushSync` + `useInboxStore`
+  (unread = newer than this phone's lastSeenAt). The inbox shows past announcements to every user, new ones included:
+  delete a test announcement from production after testing. expo-notifications is loaded only via `getNotifications()` (older dev
   builds lack it and crash on import). RN has no `AbortSignal.timeout`: use `lib/timeoutSignal.ts`.
 - **Crash reporting (Sentry, Nov 14):** `lib/monitoring.ts` (imported FIRST in `app/_layout.tsx`) — errors only (no
   tracing, sessions, replay), no user id/email, console breadcrumbs dropped, URLs scrubbed of queries and UUIDs, device
