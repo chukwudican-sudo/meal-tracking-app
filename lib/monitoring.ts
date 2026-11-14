@@ -12,8 +12,11 @@
 // logs are not sent (some of ours print ids); URLs in breadcrumbs lose their
 // query (photo access tokens, Supabase filters) and any UUID (meal-photo paths
 // carry the user's id); native network breadcrumbs are off (the JS scrubber
-// can't see them); the device name is dropped. The Sentry org also has
-// "prevent storing IP addresses" and the default scrubbers on.
+// can't see them); the device name is dropped; no identifiers at all — the
+// per-install "user" id and the device hash are removed and the server is told
+// not to infer an IP (which it would otherwise geolocate to a city). The Sentry
+// org also has "prevent storing IP addresses", the default scrubbers and a
+// rule removing $user.geo.** (covers pure native crashes too).
 //
 // The DSN is public by design (it can only send events). No DSN = reporting
 // off. Dev builds don't report unless EXPO_PUBLIC_SENTRY_DEV=1 (a test).
@@ -50,6 +53,9 @@ if (enabled) {
     beforeSend(event) {
       event.breadcrumbs = event.breadcrumbs?.map(scrubBreadcrumb);
       if (event.contexts?.device) delete event.contexts.device.name;
+      if (event.contexts?.app) delete (event.contexts.app as Record<string, unknown>).device_app_hash;
+      // ip_address null = "don't infer"; no id (Sentry adds a per-install one).
+      event.user = { ip_address: null } as Sentry.User;
       return event;
     },
   });
