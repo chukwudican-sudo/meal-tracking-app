@@ -260,6 +260,16 @@ These come straight from months of his feedback. Violating them is the #1 thing 
   `send-announcement` function (ANNOUNCE_SECRET, `scripts/send-announcement.mjs`); `PushSync` + `useInboxStore`
   (unread = newer than this phone's lastSeenAt). expo-notifications is loaded only via `getNotifications()` (older dev
   builds lack it and crash on import). RN has no `AbortSignal.timeout`: use `lib/timeoutSignal.ts`.
+- **Crash reporting (Sentry, Nov 14):** `lib/monitoring.ts` (imported FIRST in `app/_layout.tsx`) — errors only (no
+  tracing, sessions, replay), no user id/email, console breadcrumbs dropped, URLs scrubbed of queries and UUIDs, device
+  name dropped; org has IP storage off + default scrubbers + `email` as a sensitive field. App Store label: "Crash
+  Data, not linked to you" — keep it true: never `Sentry.setUser`, never put ids/emails in `reportError(…, extra)`.
+  Report unexpected failures with `reportError(error, 'where')` (network errors skipped, max 3 per kind per launch).
+  `app/_layout.tsx` exports `ErrorBoundary = CrashScreen` ("Something went wrong — Try again"): React 19 render errors
+  bypass Sentry's global handler, so this is what catches + reports them. Dev doesn't report unless
+  `EXPO_PUBLIC_SENTRY_DEV=1`. EAS env: production has `EXPO_PUBLIC_SENTRY_DSN` + `SENTRY_AUTH_TOKEN` (secret, source
+  maps); development has `SENTRY_DISABLE_AUTO_UPLOAD=true` (else the dev build fails). Sentry org `macrotri`, project
+  `react-native` (US).
 - **External data is untrusted** (Open Food Facts barcode lookups, AI output): validate numbers (finite, ≥0, capped),
   cap string lengths, timeouts on every network call.
 - Comments: match the surrounding density; the codebase explains *why* (constraints, past bugs), not *what*.

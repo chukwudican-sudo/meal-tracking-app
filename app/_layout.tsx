@@ -17,6 +17,12 @@ import { ReminderSync } from '@/lib/notifications/ReminderSync';
 import { PushSync } from '@/lib/notifications/PushSync';
 import { configurePurchases } from '@/lib/purchases';
 import { AIConsentHost } from '@/components/AIConsentHost';
+import { CrashScreen } from '@/components/CrashScreen';
+
+// App-wide safety net: a screen that throws while rendering shows CrashScreen
+// ("Something went wrong — Try again") instead of closing the app, and the
+// crash is reported to Sentry.
+export const ErrorBoundary = CrashScreen;
 
 export const unstable_settings = {
   anchor: '(tabs)',
