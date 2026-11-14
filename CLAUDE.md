@@ -60,6 +60,11 @@ npx expo start --dev-client --tunnel # only when phone + Mac can't see each othe
 
 - The repo root is **nested**: `MEALTRACKINGAPP/meal-app/meal-app`. Running Metro from the outer `meal-app` folder fails /
   serves a stale bundle — this has caused "my fix isn't showing" confusion before.
+- **Which server a build talks to (Nov 13):** the dev client loads JS from Metro, so it uses the local `.env` (dev
+  project). EAS builds can't see `.env` (gitignored) — they get `EXPO_PUBLIC_*` values from **EAS Environment
+  variables** (expo.dev → project → Environment variables) for the profile's `environment` in `eas.json`:
+  `development` → development, **`preview` → production** (installable release build for testing against prod before
+  TestFlight), `production` → production. Without them `lib/supabase.ts` throws at launch.
 - New dev build: `npx eas-cli@latest build --profile development --platform ios` (plain `npx eas` fetches an
   unrelated npm package and fails; Alex runs it in his own terminal — it asks for Apple login/2FA) (or `npx expo run:ios` if Xcode is installed — it
   wasn't as of June). Needed whenever a native module/plugin/app.json native field changes.

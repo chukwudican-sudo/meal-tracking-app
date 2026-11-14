@@ -10,7 +10,7 @@
     "newArchEnabled": true,
     "ios": {
       "bundleIdentifier": "com.alex.mealapp",
-      "supportsTablet": true,
+      "supportsTablet": false,
       "infoPlist": {
         "NSCameraUsageDescription": "Used to scan meals and barcodes for adding to your day.",
         "NSPhotoLibraryUsageDescription": "Used to upload meal photos for AI identification.",
@@ -68,7 +68,12 @@
         }
       ],
       "@react-native-community/datetimepicker",
-      "expo-secure-store",
+      [
+        "expo-secure-store",
+        {
+          "faceIDPermission": false
+        }
+      ],
       "expo-notifications"
     ],
     "experiments": {
