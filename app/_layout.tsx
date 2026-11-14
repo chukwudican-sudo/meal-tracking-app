@@ -13,11 +13,15 @@ import { SyncProvider } from '@/lib/sync/SyncProvider';
 import { ReminderSync } from '@/lib/notifications/ReminderSync';
 import { PushSync } from '@/lib/notifications/PushSync';
 import { configurePurchases } from '@/lib/purchases';
+import { initMonitoring, wrapRoot } from '@/lib/monitoring';
 import { AIConsentHost } from '@/components/AIConsentHost';
 
 export const unstable_settings = {
   anchor: '(tabs)',
 };
+
+// Crash reporting first, so anything that fails during start-up is reported.
+initMonitoring();
 
 // Configure the RevenueCat SDK once, at module load — before AuthProvider's
 // first session lookup resolves, so identity sync (lib/auth.tsx) always finds
@@ -34,7 +38,7 @@ const fullScreenSlide = {
   animation: 'slide_from_right',
 } as const;
 
-export default function RootLayout() {
+function RootLayout() {
   return (
     // SafeAreaProvider must wrap the entire app so that every SafeAreaView
     // and useSafeAreaInsets() call from react-native-safe-area-context can
@@ -117,3 +121,5 @@ export default function RootLayout() {
     </SafeAreaProvider>
   );
 }
+
+export default wrapRoot(RootLayout);

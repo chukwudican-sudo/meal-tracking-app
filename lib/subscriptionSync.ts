@@ -3,6 +3,7 @@
 // webhook — see that function for why. Not an AI call: no consent sheet.
 // Never throws.
 
+import { reportError } from '@/lib/monitoring';
 import { supabase } from '@/lib/supabase';
 
 // 'pro' = the server now has Pro for this account; 'not_pro' = RevenueCat
@@ -35,12 +36,14 @@ export function syncSubscriptionWithServer(): Promise<SyncResult> {
       console.info(`[subscriptionSync] took ${Date.now() - startedAt}ms (error=${!!error})`);
       if (error) {
         console.warn('[subscriptionSync] failed:', error);
+        reportError(error, 'subscription.sync');
         return 'error';
       }
       const pro = (data as { pro?: unknown } | null)?.pro;
       return pro === true ? 'pro' : pro === false ? 'not_pro' : 'error';
     } catch (e) {
       console.warn('[subscriptionSync] failed:', e);
+      reportError(e, 'subscription.sync');
       return 'error';
     }
   })();

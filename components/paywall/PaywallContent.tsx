@@ -38,6 +38,7 @@ import {
 import { PRO_ENTITLEMENT_ID, useEntitlementStore } from '@/store/useEntitlementStore';
 import { usePaywallStore } from '@/store/usePaywallStore';
 import { syncSubscriptionWithServer } from '@/lib/subscriptionSync';
+import { reportError } from '@/lib/monitoring';
 import { PRIVACY_URL, TERMS_URL } from '@/constants/legal';
 import type { PurchasesPackage } from 'react-native-purchases';
 
@@ -141,6 +142,7 @@ export function PaywallContent({ onExit }: { onExit: () => void }) {
     } catch (e) {
       if (!(e instanceof PurchaseCancelledError)) {
         console.warn('[paywall] purchase failed:', e);
+        reportError(e, 'purchase');
         Alert.alert('Purchase failed', 'Something went wrong completing this purchase. Please try again.');
       } else {
         console.info('[paywall] handlePurchase: user cancelled');

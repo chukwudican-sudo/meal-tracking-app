@@ -7,6 +7,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { profileHasData, useMealStore } from '@/store/useMealStore';
 import { supabase } from '@/lib/supabase';
+import { reportError } from '@/lib/monitoring';
 import { outbox } from './outbox';
 import { projector } from './projector';
 import { fetchServerProfile, pullSince, pushItem, serverNow } from './repository';
@@ -348,6 +349,8 @@ class SyncEngine {
       // visible trace in the console at all.
       // eslint-disable-next-line no-console
       console.warn(`[sync] reconcile failed for ${userId}: ${this.lastError}`);
+      // Offline is expected; a failure while online is worth knowing about.
+      if (this.online) reportError(e, 'sync.reconcile');
       this.setStatus('error');
     }
   }
@@ -414,6 +417,9 @@ class SyncEngine {
             `[sync] push failed — ${item.table}.${item.op} (${item.entityKey})` +
               `${deadLettered ? ' [DEAD-LETTERED after max attempts]' : ''}: ${msg}`,
           );
+          // Retries are normal (offline, a blip); a write that gave up means
+          // data not reaching the server — report that one (no ids attached).
+          if (deadLettered) reportError(e, 'sync.push', { table: item.table, op: item.op });
         }
       }
     } finally {

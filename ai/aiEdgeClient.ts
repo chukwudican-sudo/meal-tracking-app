@@ -12,6 +12,7 @@ import { newId } from '@/lib/sync/uuid';
 import type { Ingredient } from '@/store/types';
 import type { MealDraft } from './types';
 import { ensureAIConsent } from '@/lib/aiConsent';
+import { reportError } from '@/lib/monitoring';
 
 export type AIErrorCode =
   | 'invalid_input'
@@ -198,6 +199,7 @@ async function toAIError(error: unknown, opts: InvokeAIOptions, make: MakeError)
 
   const msg = (error as { message?: string })?.message ?? 'Something went wrong.';
   console.warn(`${opts.logPrefix} falling back to generic error:`, msg);
+  reportError(error, 'ai', { fn: opts.logPrefix });
   return make('unknown', msg);
 }
 
