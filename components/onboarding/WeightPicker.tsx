@@ -1,4 +1,4 @@
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 
 import { KG_PER_LB, LBS_PER_KG } from '@/constants/onboardingCalc';
 import { COLORS } from '@/constants/theme';

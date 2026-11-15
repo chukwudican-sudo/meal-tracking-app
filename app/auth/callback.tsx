@@ -23,10 +23,9 @@ export default function AuthCallbackScreen() {
   const handledRef = useRef(false);
   const cancelledRef = useRef(false);
 
-  const handleUrl = useCallback(async (incoming: string, source: string) => {
+  const handleUrl = useCallback(async (incoming: string) => {
     if (handledRef.current) return;
     handledRef.current = true;
-    console.info(`[auth/callback] handling url from ${source} at ${new Date().toISOString()}:`, incoming);
     const { error: err } = await exchangeCodeFromUrl(incoming);
     if (cancelledRef.current) return;
     if (err) {
@@ -38,9 +37,8 @@ export default function AuthCallbackScreen() {
 
   // Live listener path: fires whenever the OS hands the running app a deep link.
   useEffect(() => {
-    console.info(`[auth/callback] effect fired at ${new Date().toISOString()}, url=`, url);
     if (!url) return;
-    void handleUrl(url, 'useURL');
+    void handleUrl(url);
   }, [url, handleUrl]);
 
   // Fallback path: if the link arrived before the useURL() listener caught it
@@ -49,8 +47,7 @@ export default function AuthCallbackScreen() {
   useEffect(() => {
     (async () => {
       const initial = await Linking.getInitialURL();
-      console.info(`[auth/callback] getInitialURL at ${new Date().toISOString()}:`, initial);
-      if (initial) void handleUrl(initial, 'getInitialURL');
+      if (initial) void handleUrl(initial);
     })();
     return () => {
       cancelledRef.current = true;

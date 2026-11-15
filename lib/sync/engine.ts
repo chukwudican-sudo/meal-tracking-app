@@ -239,7 +239,7 @@ class SyncEngine {
       // otherwise stay parked forever even after the schema is fixed. Launch/login
       // is the natural point to give them a fresh set of attempts.
       const requeued = outbox.requeueDeadLetters();
-      if (requeued > 0) {
+      if (__DEV__ && requeued > 0) {
         // eslint-disable-next-line no-console
         console.info(`[sync] requeued ${requeued} dead-lettered write(s) for retry`);
       }
@@ -266,7 +266,7 @@ class SyncEngine {
         const pullStart = Date.now();
         const snap = await pullSince(userId, since);
         // eslint-disable-next-line no-console
-        console.info(
+        if (__DEV__) console.info(
           `[sync] reconcile pull done mode=${mode} ${fullPull ? 'full' : 'delta'} ` +
             `took=${Date.now() - pullStart}ms user=${userId.slice(0, 8)}`,
         );

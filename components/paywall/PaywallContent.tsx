@@ -104,11 +104,12 @@ export function PaywallContent({ onExit }: { onExit: () => void }) {
   // resumes without a second tap, once the paywall is gone and the server
   // agrees (usePaywallStore.succeed, lib/paywall.ts#runPendingSuccess).
   useEffect(() => {
-    console.info('[paywall] isPro effect fired, isPro =', isPro);
     if (!isPro) return;
-    console.info('[paywall] isPro is true — syncing server + closing; resume runs after both');
     succeed(syncSubscriptionWithServer());
     onExit();
+    // Only on the change to Pro: re-running for a new onExit/succeed identity
+    // would start a second sync and close twice.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isPro]);
 
   const headline = reason === 'scan_limit'
@@ -132,24 +133,17 @@ export function PaywallContent({ onExit }: { onExit: () => void }) {
   const handlePurchase = async () => {
     const pkg = selected === 'yearly' ? packages.yearly : packages.monthly;
     if (!pkg || purchasing) return;
-    console.info('[paywall] handlePurchase: starting, pkg =', pkg.identifier);
     setPurchasing(true);
     try {
-      const info = await purchasePackage(pkg);
-      console.info('[paywall] handlePurchase: purchasePackage resolved');
-      console.info('[paywall]   entitlements.active keys:', Object.keys(info.entitlements.active));
-      console.info('[paywall]   isPro in store now:', useEntitlementStore.getState().isPro);
+      await purchasePackage(pkg);
     } catch (e) {
       if (!(e instanceof PurchaseCancelledError)) {
         console.warn('[paywall] purchase failed:', e);
         reportError(e, 'purchase');
         Alert.alert('Purchase failed', 'Something went wrong completing this purchase. Please try again.');
-      } else {
-        console.info('[paywall] handlePurchase: user cancelled');
       }
     } finally {
       setPurchasing(false);
-      console.info('[paywall] handlePurchase: finally, purchasing=false');
     }
   };
 
@@ -262,7 +256,7 @@ export function PaywallContent({ onExit }: { onExit: () => void }) {
 
         <Text style={styles.finePrint}>
           Subscriptions auto-renew unless cancelled at least 24 hours before the end
-          of the current period. Manage or cancel anytime in your device's App
+          of the current period. Manage or cancel anytime in your device&apos;s App
           Store account settings.
         </Text>
         <View style={styles.legalRow}>

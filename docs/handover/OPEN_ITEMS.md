@@ -87,9 +87,7 @@ Still open:
    subscriptions renew every 5 min (monthly) up to 5 times, then expire on their own — there is no way to cancel early.
 7. Restore Purchases flow test; re-signup after delete gets a new user id → old subscription needs Restore (understood
    and accepted by Alex, no code change).
-8. Remove debug `console.info/log` before release: `app/paywall.tsx` (10), `lib/purchases.ts` (6),
-   `app/auth/callback.tsx` (3), `lib/auth.tsx` (3), `lib/sync/engine.ts` (2), `ai/aiEdgeClient.ts` (1),
-   `lib/sync/repository.ts` (1). Some were added on purpose for the purchase-chain and deep-link debugging.
+8. ~~Remove debug `console.info/log` before release~~ — DONE Nov 14: traces removed, timing logs kept under `__DEV__`.
 9. Choose the free premade recipes — currently 12 of 60 (3 per category) have `isFree` in `constants/recipeSeed.ts`; the
    picks were the agent's, not Alex's.
 10. Android: no Play Console yet; `Purchases.showManageSubscriptions()` is iOS-only (Android needs the Play URL).
@@ -174,7 +172,7 @@ Still open:
     `meal_logs.nutrients`. One-time upload per account per install (`sync:upgrade-nov6:<uid>`, 'same' mode only;
     that pull keeps this phone's settings over the server's).
 32. `supabase/config.toml` has drifted from the live dashboard (auth block) — either update it or note it's unused.
-33. 3 pre-existing tsc errors (`app/profile.tsx:64`, `hooks/useRecipeActions.ts:100,119`).
+33. ~~3 pre-existing tsc errors~~ — DONE Nov 14 (tsc and lint both clean).
 34. Dead code to delete (confirm first): `components/EditMealScreen.tsx`, `components/DayDetailModal.tsx`,
     `components/grocery/PlannedIngredientsSection.tsx` (none are imported anywhere — only mentioned in comments),
     `app/meal/[id].tsx`, `app/modal.tsx`, `app/auth/callback.tsx` once no old signup links can be outstanding

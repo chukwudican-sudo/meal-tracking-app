@@ -465,7 +465,10 @@ export interface AppStore {
   // Auto-save a recipe (idempotent on `recipeId` when source==='premade',
   // otherwise on `id`). Returns the resulting saved recipe.
   ensureRecipeSaved: (recipe: Omit<SavedRecipe, 'id' | 'addedAt' | 'favourited'> & { id?: string; favourited?: boolean }) => SavedRecipe;
-  toggleFavouriteRecipe: (recipe: Omit<SavedRecipe, 'id' | 'addedAt' | 'favourited'> & { id?: string }) => SavedRecipe;
+  // source is optional: a new favourite without one is saved as 'manual'.
+  toggleFavouriteRecipe: (
+    recipe: Omit<SavedRecipe, 'id' | 'addedAt' | 'favourited' | 'source'> & { id?: string; source?: SavedRecipeSource },
+  ) => SavedRecipe;
   removeSavedRecipe: (id: string) => void;
   // Mark a saved recipe as viewed so its "NEW" tag clears.
   markRecipeViewed: (id: string) => void;

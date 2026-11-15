@@ -63,7 +63,7 @@ export default function ProfileScreen() {
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Save',
-          onPress: (input) => {
+          onPress: (input?: string) => {
             const raw = (input ?? '').trim();
             const value = Number(raw);
             if (!Number.isFinite(value) || value <= 0) return;

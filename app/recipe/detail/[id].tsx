@@ -2,7 +2,6 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Animated,
   Dimensions,
   KeyboardAvoidingView,

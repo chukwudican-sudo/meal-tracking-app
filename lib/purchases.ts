@@ -125,16 +125,10 @@ export class PurchaseCancelledError extends Error {
 
 export async function purchasePackage(pkg: PurchasesPackage): Promise<CustomerInfo> {
   try {
-    console.info('[purchases] purchasePackage: calling Purchases.purchasePackage...');
     const { customerInfo } = await Purchases.purchasePackage(pkg);
-    console.info('[purchases] purchasePackage: SDK returned customerInfo');
-    console.info('[purchases]   active entitlements:', Object.keys(customerInfo.entitlements.active));
-    console.info('[purchases]   pushing to entitlement store...');
     useEntitlementStore.getState()._setFromCustomerInfo(customerInfo);
-    console.info('[purchases]   store isPro now:', useEntitlementStore.getState().isPro);
     return customerInfo;
   } catch (e) {
-    console.info('[purchases] purchasePackage: caught error:', e);
     if ((e as { userCancelled?: boolean } | null)?.userCancelled) {
       throw new PurchaseCancelledError();
     }

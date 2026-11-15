@@ -33,7 +33,7 @@ export function syncSubscriptionWithServer(): Promise<SyncResult> {
         body: {},
         timeout: SYNC_TIMEOUT_MS,
       });
-      console.info(`[subscriptionSync] took ${Date.now() - startedAt}ms (error=${!!error})`);
+      if (__DEV__) console.info(`[subscriptionSync] took ${Date.now() - startedAt}ms (error=${!!error})`);
       if (error) {
         console.warn('[subscriptionSync] failed:', error);
         reportError(error, 'subscription.sync');

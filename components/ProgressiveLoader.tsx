@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Animated, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Animated, StyleSheet, View } from 'react-native';
 
 import { COLORS } from '@/constants/theme';
 

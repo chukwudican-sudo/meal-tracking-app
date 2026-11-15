@@ -50,7 +50,12 @@ export default function AccountDeleteConfirmScreen() {
     // with the same credentials is the existing idiom (see lib/auth.tsx).
     const authResult = await signInWithEmail(email, password);
     if (authResult.error) {
-      Alert.alert('Incorrect password', 'Please re-enter your current password and try again.');
+      // Only a refused password is "incorrect"; offline/server trouble says so.
+      if (authResult.invalidCredentials) {
+        Alert.alert('Incorrect password', 'Please re-enter your current password and try again.');
+      } else {
+        Alert.alert('Could not check your password', authResult.error);
+      }
       setDeleting(false);
       return;
     }

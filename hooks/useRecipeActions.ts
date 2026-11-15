@@ -97,7 +97,7 @@ export function useRecipeActions() {
           { text: 'Cancel', style: 'cancel' },
           {
             text: 'Add',
-            onPress: (input) => {
+            onPress: (input?: string) => {
               const dateIso = (input ?? '').trim() || defaultIso;
               const template = addRecipeToPlan(recipe, dateIso, '12:00');
               showUndo({

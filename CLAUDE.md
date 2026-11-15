@@ -78,8 +78,8 @@ npm run dev -- --tunnel     # only when phone + Mac can't see each other (café 
   unrelated npm package and fails; Alex runs it in his own terminal — it asks for Apple login/2FA) (or `npx expo run:ios` if Xcode is installed — it
   wasn't as of June). Needed whenever a native module/plugin/app.json native field changes.
 - Checks before calling anything done: `npx tsc --noEmit` and `npm run lint`.
-  **Known pre-existing tsc errors (3, ignore unless fixing them on purpose):** `app/profile.tsx:64` (Alert.prompt param
-  implicit any) and `hooks/useRecipeActions.ts:100,119` (implicit any + `RecipeInput.source` possibly undefined).
+  **Both are clean (0 errors, 0 warnings) since Nov 14** — keep them that way; any new error is yours.
+  Debug logging: no step-by-step `console.info` traces; timing logs only under `if (__DEV__)`.
   Don't trust editor lint panels alone — once they reported 0 errors on a file with 30 real type errors.
 - Supabase CLI: `npx supabase ...` (already logged in + linked on this Mac). `supabase/functions` and `scripts/` are
   excluded from the app tsconfig (they're Deno / Node).
@@ -316,7 +316,7 @@ RevenueCat webhook full lifecycle (purchase → `active`, renewals, expiry → `
    sign-in won't always give a name). He said "separate pass" — ask before doing it.
 3. Launch blockers: real Terms/Privacy URLs (placeholders `example.com`), production RevenueCat key + App Store Connect
    products under `com.alex.mealapp`, production Supabase project (+ its SMTP), Apple Sign-In (required by App Store
-   when offering other social logins), remove debug `console.info` logs (paywall, purchases, auth/callback, auth).
+   when offering other social logins).
 
 ## 8. Claude Code quick reference (for Alex)
 

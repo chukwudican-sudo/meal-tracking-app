@@ -27,6 +27,8 @@ import {
   getPendingCredentials,
   savePendingPassword,
 } from './pendingCredentials';
+import { APP_NAME } from '@/constants/app';
+import { reportError } from '@/lib/monitoring';
 import { withTimeout } from '@/lib/timeoutSignal';
 
 // Deep links Supabase sends the user back to. These must be added to the
@@ -56,6 +58,9 @@ export interface AuthResult {
   rateLimited?: boolean;
   // Seconds the caller should wait before retrying, when known.
   retryAfterSeconds?: number;
+  // Sign-in only: the email/password pair was refused (not a network or
+  // server problem), so a screen re-checking a password can say "incorrect".
+  invalidCredentials?: boolean;
   // True when a sign-up targeted an email that already has an account. With
   // email confirmation on, Supabase hides this to prevent enumeration, so we
   // detect it ourselves — the caller should send the user to log in rather than
@@ -108,13 +113,46 @@ export async function signUpWithEmail(email: string, password: string): Promise<
   return { error: null, needsVerification };
 }
 
+const SIGN_IN_TIMEOUT_MS = 15_000;
+const SIGN_IN_OFFLINE = "Couldn't reach the server. Check your connection and try again.";
+
+// Sign-in failures in plain words. Wrong email and wrong password get the same
+// message on purpose (Supabase doesn't tell them apart either, so nobody can
+// use the login screen to find out which emails have accounts).
+function signInFailure(error: AuthError): AuthResult {
+  const code = (error as { code?: string }).code;
+  if (code === 'invalid_credentials' || /invalid login credentials/i.test(error.message)) {
+    return { error: 'Incorrect email or password.', invalidCredentials: true };
+  }
+  if (code === 'email_not_confirmed') {
+    return { error: `This email isn't verified yet. Check your inbox for the email from ${APP_NAME}.` };
+  }
+  if (error.status === 429 || code === 'over_request_rate_limit') {
+    return { error: 'Too many attempts. Please wait a minute and try again.' };
+  }
+  // Status 0 = no HTTP answer (offline / dropped connection). Supabase uses the
+  // same error type for 5xx server failures; those are reported, not blamed on
+  // the user's connection.
+  if (error.name === 'AuthRetryableFetchError' && !error.status) return { error: SIGN_IN_OFFLINE };
+  reportError(error, 'auth.signIn');
+  return { error: 'Could not sign in right now. Please try again in a moment.' };
+}
+
 export async function signInWithEmail(email: string, password: string): Promise<AuthResult> {
-  const { data, error } = await supabase.auth.signInWithPassword({
-    email: email.trim(),
-    password,
-  });
-  if (error) return { error: error.message };
-  return { error: null, userId: data.user?.id };
+  try {
+    const { data, error } = await withTimeout(
+      supabase.auth.signInWithPassword({ email: email.trim(), password }),
+      SIGN_IN_TIMEOUT_MS,
+      'timeout',
+    );
+    if (error) return signInFailure(error);
+    return { error: null, userId: data.user?.id };
+  } catch {
+    // Timed out (no answer in 15 s) or the request itself threw: never leave
+    // the button spinning. A very late success still signs in; the user can
+    // simply tap Log in again.
+    return { error: SIGN_IN_OFFLINE };
+  }
 }
 
 // Verify the 6-digit signup code from the confirmation email. On success this
@@ -266,15 +304,12 @@ function parseRetryAfterSeconds(message: string): number | null {
 // Deep links from email confirmation / password reset arrive as
 // `mealapp://auth/...?code=<pkce_code>` (mealapp-dev:// in Macrotri Dev). Exchange that code for a session.
 export async function exchangeCodeFromUrl(url: string): Promise<AuthResult> {
-  console.info(`[exchangeCodeFromUrl] start ${new Date().toISOString()}`);
   const { queryParams } = Linking.parse(url);
   const code = typeof queryParams?.code === 'string' ? queryParams.code : null;
   if (!code) {
-    console.info(`[exchangeCodeFromUrl] end ${new Date().toISOString()} — no code param`);
     return { error: 'This link is missing its auth code or has expired.' };
   }
   const { error } = await supabase.auth.exchangeCodeForSession(code);
-  console.info(`[exchangeCodeFromUrl] end ${new Date().toISOString()} — exchangeCodeForSession error=`, error?.message ?? null);
   return { error: error ? error.message : null };
 }
 

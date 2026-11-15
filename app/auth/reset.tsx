@@ -136,7 +136,7 @@ export default function ResetPasswordScreen() {
           <View style={styles.centered}>
             <Ionicons name="checkmark-circle-outline" size={56} color={COLORS.green} />
             <Text style={[styles.title, { textAlign: 'center', marginTop: 16 }]}>Password updated</Text>
-            <Text style={styles.bodyText}>You're all set. You can continue using the app.</Text>
+            <Text style={styles.bodyText}>You&apos;re all set. You can continue using the app.</Text>
             <View style={{ flex: 1 }} />
             <TouchableOpacity style={styles.primaryBtn} onPress={() => router.replace('/(tabs)')}>
               <Text style={styles.primaryBtnText}>Continue</Text>

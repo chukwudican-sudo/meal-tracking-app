@@ -220,7 +220,7 @@ export async function invokeAIFunction(
     body,
     timeout: INVOKE_TIMEOUT_MS,
   });
-  console.info(`${opts.logPrefix} invoke took ${Date.now() - startedAt}ms (error=${!!error})`);
+  if (__DEV__) console.info(`${opts.logPrefix} invoke took ${Date.now() - startedAt}ms (error=${!!error})`);
 
   if (error) throw await toAIError(error, opts, make);
   if (!data) throw make('unknown', 'No response returned.');

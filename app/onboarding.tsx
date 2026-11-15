@@ -144,7 +144,6 @@ export default function OnboardingScreen() {
     const next = steps[Math.max(0, Math.min(steps.length - 1, index + delta))];
     setStepId(next);
   };
-  const goTo = (id: StepId) => setStepId(id);
 
   // ─── Targets (pure; computed for the results screens) ──────────────────────
   const targets = useMemo(() => {
@@ -835,7 +834,7 @@ function AccountStep({
       ) : null}
 
       <Text style={styles.legal}>
-        By continuing, you agree to {appName}'s{' '}
+        By continuing, you agree to {appName}&apos;s{' '}
         <Text style={styles.legalLink} onPress={() => { void openTerms(); }} accessibilityRole="link">Terms & Conditions</Text>
         {' '}and{' '}
         <Text style={styles.legalLink} onPress={() => { void openPrivacy(); }} accessibilityRole="link">Privacy Policy</Text>
@@ -851,7 +850,7 @@ function ConfirmStep({ onDone }: { onDone: () => void }) {
       <View style={styles.checkCircle}>
         <Ionicons name="checkmark" size={56} color="#000" />
       </View>
-      <Text style={[styles.bigTitle, { marginTop: 20 }]}>You're all set!</Text>
+      <Text style={[styles.bigTitle, { marginTop: 20 }]}>You&apos;re all set!</Text>
     </View>
   );
 }
@@ -861,7 +860,7 @@ function SetupLoadingStep({ onDone }: { onDone: () => void }) {
   return (
     <View style={[styles.body, styles.centered]}>
       <Ionicons name="sparkles-outline" size={56} color={COLORS.green} />
-      <Text style={[styles.bigTitle, { marginTop: 20 }]}>We're setting everything up for you</Text>
+      <Text style={[styles.bigTitle, { marginTop: 20 }]}>We&apos;re setting everything up for you</Text>
       <Text style={styles.bodyText}>Customizing your health plan...</Text>
       <ActivityIndicator color={COLORS.green} size="large" style={{ marginTop: 24 }} />
     </View>
@@ -961,11 +960,11 @@ function ActivationStep({ onBuild, onLater }: { onBuild: () => void; onLater: ()
       <View style={{ flex: 1 }} />
       <Ionicons name="restaurant-outline" size={56} color={COLORS.green} />
       <Text style={[styles.bigTitle, { marginTop: 20 }]}>Ready to build your first meal plan?</Text>
-      <Text style={styles.bodyText}>We'll suggest meals based on your goals, preferences, and targets.</Text>
+      <Text style={styles.bodyText}>We&apos;ll suggest meals based on your goals, preferences, and targets.</Text>
       <View style={{ flex: 1 }} />
       <PrimaryButton label="Build My Plan" onPress={onBuild} />
       <TouchableOpacity onPress={onLater} style={styles.textLink}>
-        <Text style={styles.textLinkText}>I'll do this later</Text>
+        <Text style={styles.textLinkText}>I&apos;ll do this later</Text>
       </TouchableOpacity>
     </View>
   );
@@ -1120,12 +1119,10 @@ async function confirmLoginData(
   if (outcome === 'empty') {
     const { lastError } = engine.getSnapshot();
     const reason = lastError ?? 'the pull completed but no profile came back for this account';
-    // eslint-disable-next-line no-console
     console.warn(`[login] no profile restored for ${userId}: ${reason}`);
     return { ok: false, error: reason };
   }
 
-  // eslint-disable-next-line no-console
   console.warn(`[login] account pull timed out for ${userId}`);
   return { ok: false, error: "We couldn't load your account data. Check your connection and try again." };
 }

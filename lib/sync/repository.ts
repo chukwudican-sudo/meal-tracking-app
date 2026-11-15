@@ -541,7 +541,7 @@ export async function pullSince(userId: string, since: string | null): Promise<S
   // whether a profile came back, and the resolved active plan. This is the line
   // to check first if a login pull is slow or returns unexpectedly empty data.
   // eslint-disable-next-line no-console
-  console.info(
+  if (__DEV__) console.info(
     `[sync:pull] ${since == null ? 'full' : 'delta'} user=${userId.slice(0, 8)} ` +
       `total=${Date.now() - pullStart}ms hasProfile=${!!snapshot.profile} ` +
       `plans=${snapshot.plans?.length ?? '-'} activePlan=${snapshot.activePlanName ?? '-'}`,
