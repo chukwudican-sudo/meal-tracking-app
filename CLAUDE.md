@@ -48,14 +48,18 @@ Deeper material lives in `docs/handover/` — read the relevant file before touc
 - Other: expo-camera, expo-image-picker, expo-image-manipulator, expo-secure-store,
   expo-crypto, NetInfo, react-native-svg, datetimepicker, Ionicons/MaterialCommunityIcons via `@expo/vector-icons`.
 - Bundle id / package: **`com.alex.mealapp`** (iOS + Android). URL scheme: `mealapp`. EAS project id in `app.json`.
+  **App variants (Nov 14, `app.config.js`):** the dev build is a separate app, **"Macrotri Dev"** —
+  `com.alex.mealapp.dev`, scheme `mealapp-dev`, own storage — when `APP_VARIANT=development` (set by the eas.json
+  development profile and by `npm run dev`). Unset = the real app (preview/TestFlight/App Store). Both apps can be
+  installed side by side; no deleting to switch.
 
 ## 3. Running it
 
 ```bash
 cd /Users/alex/Documents/MEALTRACKINGAPP/meal-app/meal-app   # the INNER meal-app folder (has package.json)
-npx expo start --dev-client          # normal dev loop (dev build already installed on the iPhone)
-npx expo start --dev-client --clear  # after changing .env (EXPO_PUBLIC_* is baked at bundle time) or weird cache issues
-npx expo start --dev-client --tunnel # only when phone + Mac can't see each other (café Wi-Fi client isolation, hotspot)
+npm run dev                 # normal dev loop (= APP_VARIANT=development expo start --dev-client --scheme mealapp-dev; "Macrotri Dev" on the iPhone)
+npm run dev -- --clear      # after changing .env (EXPO_PUBLIC_* is baked at bundle time) or weird cache issues
+npm run dev -- --tunnel     # only when phone + Mac can't see each other (café Wi-Fi client isolation, hotspot)
 ```
 
 - The repo root is **nested**: `MEALTRACKINGAPP/meal-app/meal-app`. Running Metro from the outer `meal-app` folder fails /

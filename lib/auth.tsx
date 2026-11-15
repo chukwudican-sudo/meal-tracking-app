@@ -13,6 +13,7 @@ import {
   type ReactNode,
 } from 'react';
 import { AppState } from 'react-native';
+import Constants from 'expo-constants';
 import * as Linking from 'expo-linking';
 import type { AuthError, Session, User } from '@supabase/supabase-js';
 
@@ -30,11 +31,15 @@ import { withTimeout } from '@/lib/timeoutSignal';
 
 // Deep links Supabase sends the user back to. These must be added to the
 // project's Auth "Redirect URLs" allow-list in the Supabase dashboard.
-// Use the app's fixed custom scheme rather than Linking.createURL() so the
+// Use the app's own custom scheme rather than Linking.createURL() so the
 // redirect is deterministic (createURL yields an exp:// URL under Expo Go and
-// must never override the intended production/standalone deep link).
-export const EMAIL_CONFIRM_REDIRECT = 'mealapp://auth/callback';
-export const PASSWORD_RESET_REDIRECT = Linking.createURL('auth/reset');
+// must never override the intended production/standalone deep link). The
+// scheme comes from the app config: mealapp, or mealapp-dev in the "Macrotri
+// Dev" build (app.config.js), so a link opens the app that asked for it.
+const configScheme = Constants.expoConfig?.scheme;
+const APP_SCHEME = (Array.isArray(configScheme) ? configScheme[0] : configScheme) || 'mealapp';
+export const EMAIL_CONFIRM_REDIRECT = `${APP_SCHEME}://auth/callback`;
+export const PASSWORD_RESET_REDIRECT = `${APP_SCHEME}://auth/reset`;
 
 export interface AuthResult {
   error: string | null;
@@ -64,7 +69,7 @@ export async function signUpWithEmail(email: string, password: string): Promise<
     password,
     // Explicit deep link so the confirmation email points at the app rather
     // than the dashboard's default Site URL.
-    options: { emailRedirectTo: 'mealapp://auth/callback' },
+    options: { emailRedirectTo: EMAIL_CONFIRM_REDIRECT },
   });
   if (error) return { error: error.message };
 
@@ -259,7 +264,7 @@ function parseRetryAfterSeconds(message: string): number | null {
 }
 
 // Deep links from email confirmation / password reset arrive as
-// `mealapp://auth/...?code=<pkce_code>`. Exchange that code for a session.
+// `mealapp://auth/...?code=<pkce_code>` (mealapp-dev:// in Macrotri Dev). Exchange that code for a session.
 export async function exchangeCodeFromUrl(url: string): Promise<AuthResult> {
   console.info(`[exchangeCodeFromUrl] start ${new Date().toISOString()}`);
   const { queryParams } = Linking.parse(url);

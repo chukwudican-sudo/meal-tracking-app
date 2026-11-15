@@ -157,8 +157,9 @@ the first time they're used after a fresh purchase.
 2. **Auth → URL Configuration → Redirect URLs**: add
    - `mealapp://auth/callback`
    - `mealapp://auth/reset`
-   - (While testing in Expo Go the app also opens on an `exp://…/--/auth/*`
-     URL; add that host too, or use a dev build so the `mealapp://` scheme is used.)
+   - **Dev project only** (the "Macrotri Dev" build, see `app.config.js`):
+     `mealapp-dev://auth/callback` and `mealapp-dev://auth/reset`. Never add
+     these to production.
 3. **Make yourself an admin**: Auth → Users → your user → edit
    **app_metadata** to include `{"is_admin": true}`. `public.is_admin()` reads
    this claim, so premade content + `premade_recipe_access` become writable
