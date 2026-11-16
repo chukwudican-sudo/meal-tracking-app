@@ -21,6 +21,7 @@ import { createAdminClient, getAuthedUser } from '../_shared/auth.ts';
 import { consumeFreeScan, resolveEntitlement } from '../_shared/entitlement.ts';
 import { isRateLimited, logAiUsage } from '../_shared/rateLimit.ts';
 import { callGeminiJSON, GeminiTimeoutError } from '../_shared/gemini.ts';
+import { recordAiEvent } from '../_shared/aiEvents.ts';
 
 // Single, easily-changeable model handle. Pinned to gemini-3.6-flash —
 // gemini-2.5-flash was dropped after hitting "This model ... is no longer
@@ -38,6 +39,8 @@ const RATE_LIMIT = 30; // calls per hour, per user
 const RATE_WINDOW_MS = 60 * 60 * 1000;
 const MAX_DESCRIPTION_LEN = 2000;
 const FUNCTION_NAME = 'estimate-nutrition';
+// Bump on any prompt/schema change so ai_events can compare versions.
+const PROMPT_VERSION = 'estimate-2026-11-15';
 const LOG_PREFIX = `[${FUNCTION_NAME}]`;
 
 const MEAL_TYPES = ['Breakfast', 'Lunch', 'Dinner', 'Snacks'] as const;
@@ -77,6 +80,52 @@ const RESPONSE_SCHEMA = {
   ],
 };
 
+// "AI decides, code calculates": the meal totals the app shows are the sum of
+// the ingredients, so they always add up (the model's own totals can drift
+// from its items — measured Nov 15). Untrusted numbers are made finite,
+// non-negative and capped.
+const MAX_ITEM_CALORIES = 5000;
+const MAX_ITEM_GRAMS = 1000;
+
+function clampNum(v: unknown, max: number): number {
+  const n = typeof v === 'number' ? v : Number(v);
+  return Number.isFinite(n) ? Math.min(Math.max(n, 0), max) : 0;
+}
+
+const MACRO_KEYS = ['calories', 'protein', 'carbs', 'fats'] as const;
+const isNum = (v: unknown) => v != null && v !== '' && Number.isFinite(Number(v));
+
+const round1 = (n: number) => Math.round(n * 10) / 10;
+
+function withItemTotals(estimate: unknown): unknown {
+  if (!estimate || typeof estimate !== 'object') return estimate;
+  const e = estimate as Record<string, unknown>;
+  const items = Array.isArray(e.ingredients)
+    ? (e.ingredients as unknown[]).filter((i): i is Record<string, unknown> => !!i && typeof i === 'object')
+    : [];
+  // Nothing usable (e.g. [null]): an empty list, never junk the app can't read.
+  if (items.length === 0) return Array.isArray(e.ingredients) ? { ...e, ingredients: [] } : estimate;
+  const ingredients = items.map(i => ({
+    ...i,
+    calories: Math.round(clampNum(i.calories, MAX_ITEM_CALORIES)),
+    protein: round1(clampNum(i.protein, MAX_ITEM_GRAMS)),
+    carbs: round1(clampNum(i.carbs, MAX_ITEM_GRAMS)),
+    fats: round1(clampNum(i.fats, MAX_ITEM_GRAMS)),
+  }));
+  // A garbled item would count as 0 and undercount the meal: keep the model's
+  // totals then (only possible if structured output breaks).
+  if (items.some(i => MACRO_KEYS.some(k => !isNum(i[k])))) return { ...e, ingredients };
+  const sum = (k: typeof MACRO_KEYS[number]) => ingredients.reduce((a, i) => a + i[k], 0);
+  return {
+    ...e,
+    ingredients,
+    calories: Math.round(sum('calories')),
+    protein: round1(sum('protein')),
+    carbs: round1(sum('carbs')),
+    fats: round1(sum('fats')),
+  };
+}
+
 interface ProfileContext {
   dietary_preferences: string[];
   allergies: string[];
@@ -102,7 +151,11 @@ function buildPrompt(description: string, p: ProfileContext): { system: string; 
     'You are a nutrition estimation assistant. Given a free-text description of ' +
     'a meal, estimate its nutrition as accurately as possible for a single ' +
     'serving as described. Break the meal into its component ingredients with ' +
-    'per-ingredient calories and macros that sum close to the meal totals. ' +
+    'per-ingredient calories and macros; the meal totals must equal the sum of ' +
+    'the ingredients. If the description gives no amount, assume one typical ' +
+    'single serving as commonly served at home or in a restaurant; "small" means ' +
+    'about 0.75 of that, "large" about 1.5 and "double" 2. Put the amount you ' +
+    'assumed in each ingredient\'s quantity and unit. ' +
     'Pick the closest meal_type from Breakfast, Lunch, Dinner, Snacks. ' +
     'health_rating is an integer 1 (very unhealthy) to 10 (very healthy) based ' +
     'on nutritional quality. Use the user context only to inform reasonable ' +
@@ -197,6 +250,10 @@ Deno.serve(async (req: Request) => {
 
   const { system, userText } = buildPrompt(description, profile);
 
+  // ai_events: the typed description and the result (no profile data).
+  const startedAt = Date.now();
+  const event = { userId: user.id, functionName: FUNCTION_NAME, promptVersion: PROMPT_VERSION, startedAt, input: { description } };
+
   let estimate: unknown;
   try {
     estimate = await callGeminiJSON({
@@ -206,8 +263,15 @@ Deno.serve(async (req: Request) => {
       userText,
       responseSchema: RESPONSE_SCHEMA,
       logPrefix: LOG_PREFIX,
+      // Default thinking on purpose. Tested Nov 15 (12 meals, 3 rounds):
+      // thinkingLevel 'low' was ~3x faster (~1.8 s vs ~5.6 s) but counted
+      // mixed/larger plates 10-25% LOWER (salmon + sweet potato, fried rice,
+      // a large plate of pasta) — undercounting is the worst error for a
+      // calorie tracker. A "weigh in grams first" prompt didn't fix it. Retest
+      // with ai_events data before changing (scan/fix use 'low'; text differs).
     });
   } catch (e) {
+    recordAiEvent(admin, { ...event, success: false, errorCode: e instanceof GeminiTimeoutError ? 'timeout' : 'ai_failed' });
     console.error(`${LOG_PREFIX} Gemini call failed:`, e);
     const message =
       e instanceof GeminiTimeoutError
@@ -215,6 +279,15 @@ Deno.serve(async (req: Request) => {
         : 'Could not estimate this meal. Please try again.';
     return errorResponse('ai_failed', message, 502);
   }
+
+  const result = withItemTotals(estimate);
+  // Keep the model's own totals next to the summed ones for analysis.
+  const raw = (estimate && typeof estimate === 'object') ? estimate as Record<string, unknown> : {};
+  recordAiEvent(admin, {
+    ...event,
+    success: true,
+    output: { ...(result as object), ai_totals: { calories: raw.calories, protein: raw.protein, carbs: raw.carbs, fats: raw.fats } },
+  });
 
   // Only charge the call (rate-limit log + free scan) once it succeeded, so our
   // own failures/timeouts don't burn the user's quota or free scans.
@@ -226,5 +299,5 @@ Deno.serve(async (req: Request) => {
     await consumeFreeScan(admin, user.id);
   }
 
-  return jsonResponse(estimate, 200);
+  return jsonResponse(result, 200);
 });

@@ -213,12 +213,15 @@ These come straight from months of his feedback. Violating them is the #1 thing 
   users) must check `supabase.auth.getSession()` first and return empty (done in `useInboxStore`,
   `lib/macroFoodOptions`). Every new function: `revoke all … from public, anon, authenticated`, then grant `execute`
   to the roles that need it (server-only RPCs: `service_role` only). Otherwise the app gets "permission denied".
-- **AI quality log (`ai_events`):** scan-meal and fix-meal record every outcome (input, before/after, prompt version,
+- **AI quality log (`ai_events`):** scan-meal, fix-meal and estimate-nutrition (Nov 15) record every outcome (input, before/after, prompt version,
   latency, error) via `_shared/aiEvents.ts#recordAiEvent` — private table (RLS, no policies), no photos, rows cascade
   on account delete. **Bump a function's `PROMPT_VERSION` on any prompt/schema change.** To analyse a test, read it
   with the secret key (`SUPABASE_SECRET_KEY`) from `.env` (read-only). Other AI functions can adopt it one at a time.
 - **Gemini speed:** `callGeminiJSON({ thinkingLevel })` — scan-meal and fix-meal use `'low'` (scan 8.7s -> ~2.6s,
   fix 4.8s -> ~1.6s, accuracy held); unset = model default (medium). Gemini 3 uses `thinkingLevel`, not `thinkingBudget`.
+  **estimate-nutrition stays on the default on purpose** (tested Nov 15, 12 meals x 3 rounds: 'low' was ~3x faster
+  but counted mixed/larger plates 10-25% lower; a grams-first prompt didn't fix it). It records to `ai_events` now
+  (`PROMPT_VERSION estimate-2026-11-15`), totals = sum of ingredients in code, and "small/large" = 0.75x/1.5x.
 - **"AI decides, code calculates":** fix-meal's model only labels each item (`unchanged` / `amount` / `replaced` /
   `added` + `source_index`); `applyEdits` copies unchanged items verbatim, scales amount-only changes proportionally,
   and totals = sum of items. Don't let the model do arithmetic the server can do.
