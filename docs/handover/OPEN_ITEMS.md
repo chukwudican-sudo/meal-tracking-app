@@ -114,7 +114,8 @@ Still open:
 18. App icon, splash, screenshots, App Store listing, privacy nutrition labels (camera, photos, mic, health-ish data,
     **and "user content used for analytics"** — the `ai_events` log).
 18b. **AI history privacy** (before launch): privacy-policy line ("we use your AI inputs to improve accuracy"), and a
-    scheduled clean-up deleting `ai_events` rows older than 90 days (pg_cron).
+    scheduled clean-up deleting `ai_events` rows older than 90 days (pg_cron) — DONE Nov 15: nightly job
+    `ai-data-retention` (migration `20261115010000`; also prunes `ai_usage_log` after 30 days).
 18c. **Active plan is identified by name** (`activePlanName`). Since Nov 6 every new/renamed plan gets a unique name
     (`uniquePlanName`, "My Plan — Nov 6 (2)"), so this is safe going forward; two older duplicates still exist on the
     test account ("My Plan — Jul 28"). An id-based pointer was judged not worth the risk once names are unique.

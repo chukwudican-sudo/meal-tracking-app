@@ -215,7 +215,8 @@ These come straight from months of his feedback. Violating them is the #1 thing 
   to the roles that need it (server-only RPCs: `service_role` only). Otherwise the app gets "permission denied".
 - **AI quality log (`ai_events`):** scan-meal, fix-meal and estimate-nutrition (Nov 15) record every outcome (input, before/after, prompt version,
   latency, error) via `_shared/aiEvents.ts#recordAiEvent` — private table (RLS, no policies), no photos, rows cascade
-  on account delete. **Bump a function's `PROMPT_VERSION` on any prompt/schema change.** To analyse a test, read it
+  on account delete and are **deleted after 90 days** by the nightly pg_cron job `ai-data-retention` (migration
+  `20261115010000`, which also prunes `ai_usage_log` after 30 days). **Bump a function's `PROMPT_VERSION` on any prompt/schema change.** To analyse a test, read it
   with the secret key (`SUPABASE_SECRET_KEY`) from `.env` (read-only). Other AI functions can adopt it one at a time.
 - **Gemini speed:** `callGeminiJSON({ thinkingLevel })` — scan-meal and fix-meal use `'low'` (scan 8.7s -> ~2.6s,
   fix 4.8s -> ~1.6s, accuracy held); unset = model default (medium). Gemini 3 uses `thinkingLevel`, not `thinkingBudget`.
