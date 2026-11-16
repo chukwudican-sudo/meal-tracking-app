@@ -7,11 +7,32 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 export type AdminClient = ReturnType<typeof createClient>;
 
+// The admin client uses the project's new secret key (sb_secret_…), which the
+// platform injects as SUPABASE_SECRET_KEYS (JSON, { name: key }). It acts as the
+// service_role Postgres role (bypasses RLS). The legacy SUPABASE_SERVICE_ROLE_KEY
+// (a JWT) is deprecated by Supabase by the end of 2026 — never fall back to it,
+// or a function would silently keep depending on a key that is going away.
+const SECRET_KEY_NAME = 'default';
+
+function secretKey(): string | null {
+  const raw = Deno.env.get('SUPABASE_SECRET_KEYS');
+  if (!raw) return null;
+  try {
+    const key = (JSON.parse(raw) as Record<string, unknown>)[SECRET_KEY_NAME];
+    return typeof key === 'string' && key ? key : null;
+  } catch {
+    return null;
+  }
+}
+
 export function createAdminClient(): AdminClient | null {
   const supabaseUrl = Deno.env.get('SUPABASE_URL');
-  const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
-  if (!supabaseUrl || !serviceKey) return null;
-  return createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
+  const key = secretKey();
+  if (!supabaseUrl || !key) {
+    console.error(`[auth] SUPABASE_URL or the "${SECRET_KEY_NAME}" secret key (SUPABASE_SECRET_KEYS) is missing`);
+    return null;
+  }
+  return createClient(supabaseUrl, key, { auth: { persistSession: false } });
 }
 
 // verify_jwt (config.toml, default true) already rejects unauthenticated

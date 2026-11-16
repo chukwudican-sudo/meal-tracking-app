@@ -99,8 +99,8 @@ npx supabase functions deploy recipe-assistant
 npx supabase db push
 ```
 
-`SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are injected by the platform —
-the function uses the service role to read the trigger-protected
+`SUPABASE_URL` and `SUPABASE_SECRET_KEYS` are injected by the platform —
+the function uses the `default` secret key (service_role access, `_shared/auth.ts`) to read the trigger-protected
 `subscription_status` and to write `ai_usage_log`. `verify_jwt = true`
 (config.toml) rejects unauthenticated calls at the gateway.
 

@@ -15,7 +15,7 @@
  *   GEMINI_API_KEY             the same key stored as a Supabase Edge Function
  *                              secret; needed locally because this admin script
  *                              calls Gemini directly rather than via an edge fn.
- *   SUPABASE_SERVICE_ROLE_KEY  Supabase → Settings → API → service_role secret
+ *   SUPABASE_SECRET_KEY  Supabase → Project Settings → API Keys → Secret keys → default
  *   EXPO_PUBLIC_SUPABASE_URL   (already present) the project URL
  *
  * Calls Gemini directly (mirrors supabase/functions/_shared/gemini.ts) in
@@ -59,11 +59,12 @@ loadDotEnv();
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY ?? '';
 const SUPABASE_URL =
   process.env.SUPABASE_URL ?? process.env.EXPO_PUBLIC_SUPABASE_URL ?? '';
-const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ?? '';
+// The new secret key (sb_secret_…); the legacy service_role key ends in 2026.
+const SECRET_KEY = process.env.SUPABASE_SECRET_KEY ?? '';
 
-if (!GEMINI_API_KEY || !SUPABASE_URL || !SERVICE_ROLE_KEY) {
+if (!GEMINI_API_KEY || !SUPABASE_URL || !SECRET_KEY) {
   console.error(
-    'Missing GEMINI_API_KEY / EXPO_PUBLIC_SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY. ' +
+    'Missing GEMINI_API_KEY / EXPO_PUBLIC_SUPABASE_URL / SUPABASE_SECRET_KEY. ' +
       'Add them to meal-app/.env (see .env.example) and re-run.',
   );
   process.exit(1);
@@ -123,7 +124,7 @@ const TABLES = ['macro_proteins', 'macro_carbs', 'macro_fats'] as const;
 
 type Row = { id: string; name: string };
 
-const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
+const supabase = createClient(SUPABASE_URL, SECRET_KEY, {
   auth: { persistSession: false, autoRefreshToken: false },
 });
 

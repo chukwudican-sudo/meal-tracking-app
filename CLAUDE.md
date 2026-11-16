@@ -198,7 +198,10 @@ These come straight from months of his feedback. Violating them is the #1 thing 
   PaywallModalHost), or the sheet would open hidden behind the modal.
   Error handling everywhere: `not_premium` → `openPaywall({ reason:'scan_limit' | 'premium_feature', onSuccess: retry })`;
   `rate_limited` / `ai_failed` / `unauthorized` → toast with the server message. Long waits → `ProgressiveLoader`.
-- **Edge functions:** follow the shared skeleton in `supabase/functions/_shared/` (see BACKEND.md §4). Profile data is
+- **Edge functions:** follow the shared skeleton in `supabase/functions/_shared/` (see BACKEND.md §4). The admin
+  client uses the new **secret key named `default`** (`SUPABASE_SECRET_KEYS`, Nov 15) — never the legacy
+  `SUPABASE_SERVICE_ROLE_KEY` (Supabase retires legacy keys ~early 2027). Never delete or rename the `default` secret
+  key on either project: every function would return 500 "Server not configured". Profile data is
   always read server-side, never trusted from the client. **Editing anything in `_shared/` means redeploying every
   function that imports it** (each bundles its own copy). `constants/entitlements.ts` is imported by the Deno
   `revenuecat-webhook` via relative path — keep it dependency-free and redeploy the webhook if it changes.
@@ -213,7 +216,7 @@ These come straight from months of his feedback. Violating them is the #1 thing 
 - **AI quality log (`ai_events`):** scan-meal and fix-meal record every outcome (input, before/after, prompt version,
   latency, error) via `_shared/aiEvents.ts#recordAiEvent` — private table (RLS, no policies), no photos, rows cascade
   on account delete. **Bump a function's `PROMPT_VERSION` on any prompt/schema change.** To analyse a test, read it
-  with the service key from `.env` (read-only). Other AI functions can adopt it one at a time.
+  with the secret key (`SUPABASE_SECRET_KEY`) from `.env` (read-only). Other AI functions can adopt it one at a time.
 - **Gemini speed:** `callGeminiJSON({ thinkingLevel })` — scan-meal and fix-meal use `'low'` (scan 8.7s -> ~2.6s,
   fix 4.8s -> ~1.6s, accuracy held); unset = model default (medium). Gemini 3 uses `thinkingLevel`, not `thinkingBudget`.
 - **"AI decides, code calculates":** fix-meal's model only labels each item (`unchanged` / `amount` / `replaced` /

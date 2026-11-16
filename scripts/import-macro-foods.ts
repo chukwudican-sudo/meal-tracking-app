@@ -7,7 +7,7 @@
  *
  * Requires (read from meal-app/.env, git-ignored — never commit real values):
  *   USDA_API_KEY               a standard api.data.gov key (not DEMO_KEY)
- *   SUPABASE_SERVICE_ROLE_KEY  Supabase → Settings → API → service_role secret
+ *   SUPABASE_SECRET_KEY  Supabase → Project Settings → API Keys → Secret keys → default
  *   EXPO_PUBLIC_SUPABASE_URL   (already present) the project URL
  *
  * Pipeline: enumerate all Foundation + SR Legacy reference foods, keep only the
@@ -61,7 +61,8 @@ loadDotEnv();
 const USDA_API_KEY = process.env.USDA_API_KEY ?? '';
 const SUPABASE_URL =
   process.env.SUPABASE_URL ?? process.env.EXPO_PUBLIC_SUPABASE_URL ?? '';
-const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ?? '';
+// The new secret key (sb_secret_…); the legacy service_role key ends in 2026.
+const SECRET_KEY = process.env.SUPABASE_SECRET_KEY ?? '';
 
 function requireEnv(name: string, value: string) {
   if (!value) {
@@ -74,7 +75,7 @@ function requireEnv(name: string, value: string) {
 
 requireEnv('USDA_API_KEY', USDA_API_KEY);
 requireEnv('EXPO_PUBLIC_SUPABASE_URL (or SUPABASE_URL)', SUPABASE_URL);
-requireEnv('SUPABASE_SERVICE_ROLE_KEY', SERVICE_ROLE_KEY);
+requireEnv('SUPABASE_SECRET_KEY', SECRET_KEY);
 
 // ─── categorization config ─────────────────────────────────────────────────
 type MacroGroup = 'proteins' | 'carbs' | 'fats';
@@ -381,7 +382,7 @@ async function main() {
       `(skipped ${skippedGroup} out-of-group, ${skippedNoMacro} without macros)`,
   );
 
-  const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
+  const supabase = createClient(SUPABASE_URL, SECRET_KEY, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
 

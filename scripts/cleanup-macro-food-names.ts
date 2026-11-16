@@ -10,7 +10,7 @@
  *   npm run cleanup:macro-foods -- --dry-run   # preview only, no writes
  *
  * Requires the same env as import-macro-foods.ts: EXPO_PUBLIC_SUPABASE_URL and
- * SUPABASE_SERVICE_ROLE_KEY in meal-app/.env.
+ * SUPABASE_SECRET_KEY in meal-app/.env.
  *
  * Design goal: be safe by default. Only a curated, verified list of genuine
  * prep/processing noise (cooking state, coating, sodium/moisture/grade specs,
@@ -60,11 +60,12 @@ loadDotEnv();
 
 const SUPABASE_URL =
   process.env.SUPABASE_URL ?? process.env.EXPO_PUBLIC_SUPABASE_URL ?? '';
-const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ?? '';
+// The new secret key (sb_secret_…); the legacy service_role key ends in 2026.
+const SECRET_KEY = process.env.SUPABASE_SECRET_KEY ?? '';
 
-if (!SUPABASE_URL || !SERVICE_ROLE_KEY) {
+if (!SUPABASE_URL || !SECRET_KEY) {
   console.error(
-    'Missing EXPO_PUBLIC_SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY. Add them to meal-app/.env and re-run.',
+    'Missing EXPO_PUBLIC_SUPABASE_URL / SUPABASE_SECRET_KEY. Add them to meal-app/.env and re-run.',
   );
   process.exit(1);
 }
@@ -254,7 +255,7 @@ function canonicalize(rawName: string): string {
 // ─── Supabase I/O ────────────────────────────────────────────────────────────
 type Row = { id: string; name: string };
 
-const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
+const supabase = createClient(SUPABASE_URL, SECRET_KEY, {
   auth: { persistSession: false, autoRefreshToken: false },
 });
 

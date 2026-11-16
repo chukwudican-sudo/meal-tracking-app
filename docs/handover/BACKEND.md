@@ -16,10 +16,11 @@ which has the copy-paste deploy commands and the dashboard checklist.
 | `EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | app | public by design; RLS is the only protection |
 | `EXPO_PUBLIC_REVENUECAT_API_KEY` | app | **Test Store** key, shared iOS+Android. Ends in letter **O** (`…NXO`); an older plan file has a typo ending in zero → that caused a 401 "Invalid API Key". |
 | `EXPO_PUBLIC_OPENAI_API_KEY` | legacy `ai/aiClient.ts` | empty → legacy flows run in stub mode. Never ship a real key in the bundle. |
-| `USDA_API_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `GEMINI_API_KEY` | `scripts/*.ts` only | local one-off tooling; never bundled |
+| `USDA_API_KEY`, `SUPABASE_SECRET_KEY` (new `sb_secret_` key, dev), `GEMINI_API_KEY` | `scripts/*.ts` only | local one-off tooling; never bundled |
 
 Supabase **function secrets** (set with `npx supabase secrets set`): `GEMINI_API_KEY`, `REVENUECAT_WEBHOOK_SECRET`.
-`SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` are injected by the platform. The Gemini key was once pasted into a chat —
+`SUPABASE_URL` / `SUPABASE_SECRET_KEYS` are injected by the platform; functions use the `default` secret key
+(`_shared/auth.ts`), never the legacy `SUPABASE_SERVICE_ROLE_KEY` (deprecated by Supabase by the end of 2026). The Gemini key was once pasted into a chat —
 rotating it was recommended.
 
 After changing any `EXPO_PUBLIC_*` value: restart Metro with `--clear` (values are baked into the bundle).
