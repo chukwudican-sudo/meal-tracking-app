@@ -89,6 +89,10 @@ export function profileToUsersRow(
     ...(profile.aiConsent !== undefined
       ? { ai_consent: profile.aiConsent, ai_consent_at: profile.aiConsentAt ?? null }
       : {}),
+    // Health-data consent record: same rule, only once this phone has one.
+    ...(profile.healthConsentAt
+      ? { health_consent_at: profile.healthConsentAt, health_consent_version: profile.healthConsentVersion ?? null }
+      : {}),
     // NOTE: free_scans_remaining and subscription_* are trigger-protected on
     // the server and must never be sent from the client.
   };
@@ -122,6 +126,9 @@ export function usersRowToProfileGoals(row: Record<string, any>): {
     remindMinutesBefore: REMIND_MINUTES.has(row.remind_minutes_before) ? row.remind_minutes_before : undefined,
     aiConsent: typeof row.ai_consent === 'boolean' ? row.ai_consent : undefined,
     aiConsentAt: typeof row.ai_consent === 'boolean' && typeof row.ai_consent_at === 'string' ? row.ai_consent_at : undefined,
+    healthConsentAt: typeof row.health_consent_at === 'string' ? row.health_consent_at : undefined,
+    healthConsentVersion: typeof row.health_consent_at === 'string' && typeof row.health_consent_version === 'string'
+      ? row.health_consent_version : undefined,
   };
   // Use undefined (not 0) for missing targets so a near-empty server row never
   // zeroes out locally-computed goals during the merge (stripUndefined skips them).

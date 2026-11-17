@@ -213,8 +213,9 @@ These come straight from months of his feedback. Violating them is the #1 thing 
   users) must check `supabase.auth.getSession()` first and return empty (done in `useInboxStore`,
   `lib/macroFoodOptions`). Every new function: `revoke all … from public, anon, authenticated`, then grant `execute`
   to the roles that need it (server-only RPCs: `service_role` only). Otherwise the app gets "permission denied".
-- **AI quality log (`ai_events`):** scan-meal, fix-meal and estimate-nutrition (Nov 15) record every outcome (input, before/after, prompt version,
-  latency, error) via `_shared/aiEvents.ts#recordAiEvent` — private table (RLS, no policies), no photos, rows cascade
+- **AI quality log (`ai_events`):** six functions record every outcome (input, before/after, prompt version,
+  latency, error) — scan-meal, fix-meal, fix-recipe, generate-recipe-concept, generate-recipe-steps and
+  estimate-nutrition (Nov 15); the other five AI functions don't — via `_shared/aiEvents.ts#recordAiEvent` — private table (RLS, no policies), no photos, rows cascade
   on account delete and are **deleted after 90 days** by the nightly pg_cron job `ai-data-retention` (migration
   `20261115010000`, which also prunes `ai_usage_log` after 30 days). **Bump a function's `PROMPT_VERSION` on any prompt/schema change.** To analyse a test, read it
   with the secret key (`SUPABASE_SECRET_KEY`) from `.env` (read-only). Other AI functions can adopt it one at a time.
@@ -273,6 +274,21 @@ These come straight from months of his feedback. Violating them is the #1 thing 
   (unread = newer than this phone's lastSeenAt). The inbox shows past announcements to every user, new ones included:
   delete a test announcement from production after testing. expo-notifications is loaded only via `getNotifications()` (older dev
   builds lack it and crash on import). RN has no `AbortSignal.timeout`: use `lib/timeoutSignal.ts`.
+- **18+ and health-data consent (Nov 16, legal research in `reports/`, local only):** minimum age 18. The onboarding
+  birthday wheel stops at 18 years ago (`lib/ageSignal.ts#latestAllowedBirthday`; profile age edit refuses <18). US
+  law (Texas, California AB 1043 from Jan 1 2027) also requires asking Apple's age signal: `components/AgeGate.tsx`
+  runs `checkAgeSignal()` once per install at launch — only when Apple says it's required (iOS 26.2+) or, if that
+  can't be told, the App Store account is US; under 18 = the whole app is covered by an "adults only" screen
+  (no exit button: App Review treats self-exit as a crash). Declined = not asked again on that install.
+  Native code: the local Expo module `modules/age-signal` (DeclaredAgeRange + StoreKit storefront; entitlement
+  `com.apple.developer.declared-age-range` in app.json — EAS can't enable it: tick "Declared Age Range" on BOTH App
+  IDs at developer.apple.com). Builds are pinned to EAS image `macos-sequoia-15.6-xcode-26.2` (eas.json): the
+  "is age assurance required here?" API needs the iOS 26.2 SDK; on Xcode 26.0 it compiles out and the app falls back
+  to "App Store country = USA" — and dev/TestFlight builds report the sandbox storefront USA even for Canadians. No age is sent anywhere; only the install's outcome (`ageSignal:v1` = checked|minor)
+  stays on the phone. Health-data consent: onboarding step `consent` (before the first health question, one
+  "I agree" button; Lifesum/BetterMe pattern), saved as
+  `profile.healthConsentAt/Version` → users.health_consent_at/_version; bump `HEALTH_CONSENT_VERSION`
+  (constants/legal.ts) when that text changes.
 - **Crash reporting (Sentry, Nov 14):** `lib/monitoring.ts` (imported FIRST in `app/_layout.tsx`) — errors only (no
   tracing, sessions, replay), no user id/email, console breadcrumbs dropped, URLs scrubbed of queries and UUIDs, device
   name dropped; org has IP storage off + default scrubbers + `email` as a sensitive field. App Store label: "Crash

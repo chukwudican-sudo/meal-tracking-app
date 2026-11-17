@@ -10,7 +10,7 @@ import { openPrivacy, openSupportEmail, openTerms } from '@/lib/openLink';
 const ITEMS: { label: string; onPress: () => void }[] = [
   { label: 'Contact Support',  onPress: () => { void openSupportEmail(); } },
   { label: 'Send Feedback',    onPress: () => router.push('/settings/feedback') },
-  { label: 'Terms of Service', onPress: () => { void openTerms(); } },
+  { label: 'Terms of Use', onPress: () => { void openTerms(); } },
   { label: 'Privacy Policy',   onPress: () => { void openPrivacy(); } },
 ];
 

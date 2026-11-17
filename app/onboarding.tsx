@@ -40,10 +40,12 @@ import { requestReminderPermission } from '@/lib/notifications/reminders';
 import { useMealStore } from '@/store/useMealStore';
 import { openPrivacy, openTerms } from '@/lib/openLink';
 import { HealthNote } from '@/components/HealthNote';
+import { HEALTH_CONSENT_VERSION } from '@/constants/legal';
+import { latestAllowedBirthday } from '@/lib/ageSignal';
 
 
 type StepId =
-  | 'welcome' | 'carousel' | 'firstName' | 'goal' | 'gender' | 'birthday'
+  | 'welcome' | 'carousel' | 'consent' | 'firstName' | 'goal' | 'gender' | 'birthday'
   | 'height' | 'weight' | 'pause' | 'targetWeight' | 'activity' | 'pace'
   | 'dietary' | 'allergies' | 'nutrients' | 'processing' | 'account'
   | 'accountConfirm' | 'setupLoading' | 'resultsTimeline' | 'resultsNutrition'
@@ -89,6 +91,8 @@ interface Answers {
   nutrients: NutrientKey[];
   notificationsAllowed: boolean | null;
   email: string;
+  // When the health-data consent screen was accepted (record of consent).
+  healthConsentAt: string | null;
 }
 
 const DEFAULT_ANSWERS: Answers = {
@@ -108,6 +112,7 @@ const DEFAULT_ANSWERS: Answers = {
   nutrients: [],
   notificationsAllowed: null,
   email: '',
+  healthConsentAt: null,
 };
 
 export default function OnboardingScreen() {
@@ -127,7 +132,7 @@ export default function OnboardingScreen() {
 
   // The ordered flow. Conditional screens are only present for weight goals.
   const steps = useMemo<StepId[]>(() => {
-    const s: StepId[] = ['welcome', 'carousel', 'firstName', 'goal', 'gender', 'birthday', 'height', 'weight', 'pause'];
+    const s: StepId[] = ['welcome', 'carousel', 'consent', 'firstName', 'goal', 'gender', 'birthday', 'height', 'weight', 'pause'];
     if (isWeightGoal) s.push('targetWeight');
     s.push('activity');
     if (isWeightGoal) s.push('pace');
@@ -191,6 +196,9 @@ export default function OnboardingScreen() {
       trackedNutrients: answers.nutrients,
       notificationsAllowed: answers.notificationsAllowed ?? false,
       mealRemindersEnabled: answers.notificationsAllowed ?? false,
+      ...(answers.healthConsentAt
+        ? { healthConsentAt: answers.healthConsentAt, healthConsentVersion: HEALTH_CONSENT_VERSION }
+        : {}),
       onboardingComplete: true,
       pendingFirstPlan: true,
     });
@@ -267,6 +275,15 @@ export default function OnboardingScreen() {
         return <WelcomeStep onStart={() => go(1)} onLogin={() => setMode('login')} />;
       case 'carousel':
         return <CarouselStep onNext={() => go(1)} />;
+      case 'consent':
+        return (
+          <ConsentStep
+            onAgree={() => {
+              patch({ healthConsentAt: new Date().toISOString() });
+              go(1);
+            }}
+          />
+        );
 
       case 'firstName':
         return (
@@ -336,7 +353,9 @@ export default function OnboardingScreen() {
                 value={answers.birthday ?? new Date(1998, 0, 1)}
                 mode="date"
                 display="spinner"
-                maximumDate={new Date()}
+                // 18+: the wheel simply stops at 18 years ago (like other
+                // nutrition apps); younger birthdays can't be picked.
+                maximumDate={latestAllowedBirthday()}
                 themeVariant="dark"
                 onChange={(_, d) => d && patch({ birthday: d })}
               />
@@ -492,7 +511,6 @@ export default function OnboardingScreen() {
       case 'account':
         return (
           <AccountStep
-            appName={APP_NAME}
             email={answers.email}
             onEmailChange={e => patch({ email: e })}
             onContinue={() => go(1)}
@@ -570,6 +588,32 @@ export default function OnboardingScreen() {
 }
 
 // ─── Shared layout pieces ──────────────────────────────────────────────────────
+
+// Health-data consent (Nov 2026), before the first health question, in the
+// traditional nutrition-app pattern (Lifesum, BetterMe, Flo: its own early
+// screen, first-person sentences stating the purpose, a Privacy Policy link,
+// one "I agree" button; back is the way out). Canada (sensitive data), Quebec, Connecticut and
+// Washington/Nevada expect a clear yes before health data is collected.
+function ConsentStep({ onAgree }: { onAgree: () => void }) {
+  return (
+    <View style={styles.body}>
+      <View style={styles.consentIcon}>
+        <Ionicons name="shield-checkmark-outline" size={44} color={COLORS.green} />
+      </View>
+      <Text style={[styles.title, { marginTop: 28 }]}>We need your OK to get started</Text>
+      <Text style={styles.consentText}>
+        I agree that {APP_NAME} may use my health info (weight, goals, diet, allergies and meals) to build and track my nutrition plan, as described in the{' '}
+        <Text style={styles.legalLink} onPress={() => { void openPrivacy(); }} accessibilityRole="link">Privacy Policy</Text>
+        .
+      </Text>
+      <Text style={styles.consentText}>
+        I know it&apos;s never sold or used for ads, and I can withdraw any time by deleting my account.
+      </Text>
+      <View style={{ flex: 1 }} />
+      <PrimaryButton label="I agree" onPress={onAgree} />
+    </View>
+  );
+}
 
 function StepTitle({ title, explain }: { title: string; explain?: string }) {
   return (
@@ -754,8 +798,8 @@ function ProcessingStep({ onDone }: { onDone: () => void }) {
 }
 
 function AccountStep({
-  appName, email, onEmailChange, onContinue, onExistingAccount,
-}: { appName: string; email: string; onEmailChange: (e: string) => void; onContinue: () => void; onExistingAccount: () => void }) {
+  email, onEmailChange, onContinue, onExistingAccount,
+}: { email: string; onEmailChange: (e: string) => void; onContinue: () => void; onExistingAccount: () => void }) {
   // Email is the only sign-up for v1 (Apple 2.1: no "coming soon" Apple/Google
   // buttons; 4.8: Sign in with Apple is only required alongside other social logins).
   const emailForm = true;
@@ -834,10 +878,11 @@ function AccountStep({
       ) : null}
 
       <Text style={styles.legal}>
-        By continuing, you agree to {appName}&apos;s{' '}
-        <Text style={styles.legalLink} onPress={() => { void openTerms(); }} accessibilityRole="link">Terms & Conditions</Text>
+        By continuing, you agree to our{' '}
+        <Text style={styles.legalLink} onPress={() => { void openTerms(); }} accessibilityRole="link">Terms of Use</Text>
         {' '}and{' '}
         <Text style={styles.legalLink} onPress={() => { void openPrivacy(); }} accessibilityRole="link">Privacy Policy</Text>
+        .
       </Text>
     </ScrollView>
   );
@@ -1239,6 +1284,11 @@ const styles = StyleSheet.create({
   // Account
   legal: { color: COLORS.textMuted, fontSize: 12, textAlign: 'center', marginTop: 24, lineHeight: 18 },
   legalLink: { color: COLORS.green },
+  consentIcon: {
+    width: 96, height: 96, borderRadius: 48, marginTop: 48,
+    backgroundColor: 'rgba(74,222,128,0.12)', alignItems: 'center', justifyContent: 'center',
+  },
+  consentText: { color: COLORS.textSecondary, fontSize: 15, lineHeight: 22, marginTop: 14 },
 
   checkCircle: {
     width: 96, height: 96, borderRadius: 48, backgroundColor: COLORS.green,

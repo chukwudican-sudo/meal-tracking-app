@@ -147,6 +147,12 @@ export interface UserProfile {
   // undefined = never asked. aiConsentAt = when that answer was given.
   aiConsent?: boolean;
   aiConsentAt?: string;
+
+  // Health-data consent (onboarding, Nov 2026): when it was given and which
+  // version of the text (constants/legal.ts HEALTH_CONSENT_VERSION). The
+  // record of consent; withdrawing = deleting the account.
+  healthConsentAt?: string;
+  healthConsentVersion?: string;
 }
 
 // ─── Recurrence & templates ───────────────────────────────────────────────────

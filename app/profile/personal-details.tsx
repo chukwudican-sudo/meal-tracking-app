@@ -1,10 +1,12 @@
 import { router } from 'expo-router';
 import { useMemo, useState } from 'react';
-import { StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
 import { FormPage, FormSection, RadioRow, useIsDirty } from '@/components/profile/FormPage';
 import { MealSlotModal } from '@/components/plans/MealSlotModal';
+import { APP_NAME } from '@/constants/app';
 import { COLORS } from '@/constants/theme';
+import { MINIMUM_AGE } from '@/lib/ageSignal';
 import {
   ACTIVITY_HINT,
   ACTIVITY_LABEL,
@@ -72,6 +74,11 @@ export default function PersonalDetailsScreen() {
 
   const handleSave = () => {
     const ageNum = Number(age);
+    // 18+ like the onboarding birthday wheel.
+    if (age.trim() && Number.isFinite(ageNum) && ageNum > 0 && ageNum < MINIMUM_AGE) {
+      Alert.alert('Check your age', `${APP_NAME} is for adults ${MINIMUM_AGE} and over.`);
+      return false;
+    }
     const heightNum = Number(heightStr);
     const weightNum = Number(weightStr);
 

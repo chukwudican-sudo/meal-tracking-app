@@ -15,6 +15,9 @@
         "NSCameraUsageDescription": "Used to scan meals and barcodes for adding to your day.",
         "NSPhotoLibraryUsageDescription": "Used to upload meal photos for AI identification.",
         "ITSAppUsesNonExemptEncryption": false
+      },
+      "entitlements": {
+        "com.apple.developer.declared-age-range": true
       }
     },
     "android": {

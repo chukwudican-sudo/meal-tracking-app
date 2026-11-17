@@ -17,6 +17,7 @@ import { ReminderSync } from '@/lib/notifications/ReminderSync';
 import { PushSync } from '@/lib/notifications/PushSync';
 import { configurePurchases } from '@/lib/purchases';
 import { AIConsentHost } from '@/components/AIConsentHost';
+import { AgeGate } from '@/components/AgeGate';
 import { CrashScreen } from '@/components/CrashScreen';
 
 // App-wide safety net: a screen that throws while rendering shows CrashScreen
@@ -118,6 +119,8 @@ function RootLayout() {
           <ToastHost />
           {/* AI permission sheet (Apple 5.1.2); modals carry their own host. */}
           <AIConsentHost active />
+          {/* 18+: Apple's age signal, once per install, US only (lib/ageSignal.ts). */}
+          <AgeGate />
         </View>
         </SyncProvider>
         </AuthProvider>
