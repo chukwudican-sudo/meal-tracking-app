@@ -204,7 +204,8 @@ These come straight from months of his feedback. Violating them is the #1 thing 
   key on either project: every function would return 500 "Server not configured". Profile data is
   always read server-side, never trusted from the client. **Editing anything in `_shared/` means redeploying every
   function that imports it** (each bundles its own copy). `constants/entitlements.ts` is imported by the Deno
-  `revenuecat-webhook` via relative path — keep it dependency-free and redeploy the webhook if it changes.
+  `revenuecat-webhook` via relative path (and, through `_shared/subscription.ts`, by sync-subscription and
+  delete-account) — keep it dependency-free and redeploy those three if it changes.
 - **Database grants — locked unless granted (Nov 12, migration `20261112010000_explicit_grants_auto_rls`):** new
   tables get NO automatic grants (Supabase's current default) and RLS is switched on automatically (`ensure_rls` event
   trigger). Every migration that creates a table must, in the same file: enable RLS, write its policies, and

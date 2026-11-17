@@ -62,7 +62,7 @@ export default function PrivacyScreen() {
       <FormSection label="WHAT GEMINI RECEIVES">
         <InfoRow icon="camera-outline" color={COLORS.blue} text="The photo or text you send, only when you use an AI feature" first />
         <InfoRow icon="leaf-outline" color={COLORS.purple} text="Your diet preferences, allergies and goals" />
-        <InfoRow icon="lock-closed-outline" color={COLORS.red} text="Never your name, email, weight, height or age" />
+        <InfoRow icon="lock-closed-outline" color={COLORS.red} text="We never add your name, email, weight, height or age" />
       </FormSection>
 
       <FormSection label="YOUR DATA">

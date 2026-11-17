@@ -72,7 +72,7 @@ export function AIConsentHost({ active }: { active: boolean }) {
 
           <View style={styles.never}>
             <Ionicons name="lock-closed-outline" size={14} color={COLORS.textSecondary} />
-            <Text style={styles.neverText}>Never your name, email, weight, height or age</Text>
+            <Text style={styles.neverText}>We never add your name, email, weight, height or age</Text>
           </View>
 
           <Text style={styles.fine}>

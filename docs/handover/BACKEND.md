@@ -18,7 +18,8 @@ which has the copy-paste deploy commands and the dashboard checklist.
 | `EXPO_PUBLIC_OPENAI_API_KEY` | legacy `ai/aiClient.ts` | empty → legacy flows run in stub mode. Never ship a real key in the bundle. |
 | `USDA_API_KEY`, `SUPABASE_SECRET_KEY` (new `sb_secret_` key, dev), `GEMINI_API_KEY` | `scripts/*.ts` only | local one-off tooling; never bundled |
 
-Supabase **function secrets** (set with `npx supabase secrets set`): `GEMINI_API_KEY`, `REVENUECAT_WEBHOOK_SECRET`.
+Supabase **function secrets** (set with `npx supabase secrets set`): `GEMINI_API_KEY`, `REVENUECAT_WEBHOOK_SECRET`,
+`REVENUECAT_SECRET_API_KEY` (V1 REST: sync-subscription, the webhook's TRANSFER check, delete-account), `ANNOUNCE_SECRET`.
 `SUPABASE_URL` / `SUPABASE_SECRET_KEYS` are injected by the platform; functions use the `default` secret key
 (`_shared/auth.ts`), never the legacy `SUPABASE_SERVICE_ROLE_KEY` (deprecated by Supabase by the end of 2026). The Gemini key was once pasted into a chat —
 rotating it was recommended.
@@ -51,7 +52,9 @@ Migrations (`supabase/migrations/`, applied with `npx supabase db push` — Alex
 (`is_free`), `ai_usage_log`. Plus the 3 macro tables.
 
 Conventions: UUID PKs, `timestamptz` UTC, text + CHECK instead of enums, **every FK to `auth.users` cascades on delete**
-(verified Aug 23 — that's why `delete-account` only needs `auth.admin.deleteUser`). No Supabase Storage is used.
+(verified Aug 23 — that's why `delete-account` only needs `auth.admin.deleteUser` for the database). Outside the
+database it also removes the user's meal photos (Storage bucket `meal-photos/<uid>/`, first) and, after the account is
+gone, their RevenueCat customer (best effort, Nov 16). `scripts/export-user-data.mjs` exports one account (privacy requests).
 
 **RLS:** owner tables `user_id = auth.uid()`; child tables check via parent; premade recipes readable by all, writable
 by admin only; `ai_usage_log` insert/select own rows only; `users` select/update own row (`id = auth.uid()`).

@@ -13,11 +13,13 @@
 // plan_slots -> plan_day_meals, recipes -> recipe_ingredients/recipe_steps,
 // saved_recipes, meal_logs -> meal_log_ingredients, kitchen_items,
 // cart_items, planned_ingredients, weight_logs, progress_daily,
-// ai_usage_log). Deleting the auth.users row removes all of it transitively
+// ai_usage_log, ai_events, push_tokens, sync_deletions, meal_templates,
+// user_feedback). Deleting the auth.users row removes all of it transitively
 // — there is no per-table cleanup to do here, and adding any would just be
 // redundant code that could silently drift from the real schema over time.
-// The app also doesn't use Supabase Storage anywhere, so there are no
-// orphaned files to worry about either.
+// Two things live outside the database and are removed here first: the
+// user's meal photos (Supabase Storage, meal-photos/<user id>/) and their
+// customer record at RevenueCat (Nov 16, promised by the Privacy Policy).
 //
 // Deploy with:
 //   supabase functions deploy delete-account
@@ -25,6 +27,10 @@
 import { handlePreflight } from '../_shared/cors.ts';
 import { errorResponse, jsonResponse } from '../_shared/errors.ts';
 import { createAdminClient, getAuthedUser } from '../_shared/auth.ts';
+import { deleteRevenueCatCustomer } from '../_shared/subscription.ts';
+
+// The client waits 15 s (lib/deleteAccount.ts): two RevenueCat tries fit.
+const RC_DELETE_TIMEOUT_MS = 5000;
 
 Deno.serve(async (req: Request) => {
   const preflight = handlePreflight(req);
@@ -49,6 +55,28 @@ Deno.serve(async (req: Request) => {
   if (error) {
     console.error('[delete-account] deleteUser failed:', error);
     return errorResponse('server_error', 'Could not delete your account. Please try again.', 500);
+  }
+
+  // RevenueCat's copy (purchase history under this account id), only once the
+  // account is really gone: deleting it first and then failing deleteUser
+  // would leave a live account whose phone shows no Pro. Best effort with one
+  // retry: the deletion has succeeded, so a RevenueCat outage is logged (for a
+  // manual clean-up) and never shown to the user.
+  const rcKey = Deno.env.get('REVENUECAT_SECRET_API_KEY');
+  if (!rcKey) {
+    console.error('[delete-account] REVENUECAT_SECRET_API_KEY missing — RevenueCat customer not deleted');
+  } else {
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        const outcome = await deleteRevenueCatCustomer(user.id, rcKey, RC_DELETE_TIMEOUT_MS);
+        console.info(`[delete-account] RevenueCat customer ${outcome}`);
+        break;
+      } catch (e) {
+        if (attempt === 2) {
+          console.error(`[delete-account] RevenueCat delete failed for ${user.id} — remove it by hand:`, e);
+        }
+      }
+    }
   }
 
   return jsonResponse({ success: true }, 200);

@@ -257,7 +257,7 @@ export function PaywallContent({ onExit }: { onExit: () => void }) {
         <Text style={styles.finePrint}>
           Subscriptions auto-renew unless cancelled at least 24 hours before the end
           of the current period. Manage or cancel anytime in your device&apos;s App
-          Store account settings.
+          Store account settings. AI features have fair-use limits.
         </Text>
         <View style={styles.legalRow}>
           <Text style={styles.legalLink} onPress={() => Linking.openURL(TERMS_URL)}>

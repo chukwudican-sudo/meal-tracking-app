@@ -86,3 +86,27 @@ export async function fetchRevenueCatPro(
     expiryIso: Number.isFinite(expires) ? new Date(expires).toISOString() : null,
   };
 }
+
+// Account deletion (Nov 16): removes the customer RevenueCat keeps for this
+// user (app user id = Supabase user id, purchase history; no name or email),
+// as the Privacy Policy promises. DELETE /v1/subscribers/{app_user_id}.
+// 'deleted' or 'not_found' (never bought/opened the paywall) both mean done;
+// anything else throws so the caller can log it. Apple keeps its own records.
+export async function deleteRevenueCatCustomer(
+  userId: string,
+  secretKey: string,
+  timeoutMs = REVENUECAT_TIMEOUT_MS,
+): Promise<'deleted' | 'not_found'> {
+  const res = await fetch(`https://api.revenuecat.com/v1/subscribers/${encodeURIComponent(userId)}`, {
+    method: 'DELETE',
+    // Content-Type too: RevenueCat has refused a bare DELETE with code 7227.
+    headers: { Authorization: `Bearer ${secretKey}`, Accept: 'application/json', 'Content-Type': 'application/json' },
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  if (res.status === 404) return 'not_found';
+  if (!res.ok) {
+    const detail = await res.text().catch(() => '');
+    throw new Error(`RevenueCat delete ${res.status}: ${detail.slice(0, 200)}`);
+  }
+  return 'deleted';
+}
