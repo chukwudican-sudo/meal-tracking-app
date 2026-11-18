@@ -241,12 +241,24 @@ These come straight from months of his feedback. Violating them is the #1 thing 
   is_active=false) and restores `goalsBeforePlan` (saved when a plan's numbers overwrote goals).
   **Plan numbers (Nov 10): a plan is a fixed product you pick.** Its calories/macros are never typed — they're worked
   out from its meals × portions (`lib/planNutrition.ts#planNutrition`, store `planNutritionOf`, same resolver that builds
-  the meals). Premade plans reach their calories with per-meal `servings` (quarter steps, `rotateDays` portions). A plan
+  the meals). Premade plans reach their calories with `servings` set per recipe in `constants/planSeed.ts` (quarter
+  steps, 0.5–2×, next to each recipe; retuned Nov 18 so every day lands within ~±80 kcal of the plan's number; levels
+  1,700–2,600 kcal; Keto days < 40 g carbs, Low Carb < 100 g — the check script enforces the range and carb limits).
+  Sizing plans to the user's own calories is parked until
+  after launch (work saved in `reports/Plan sizing WIP (parked Nov 18).patch`, local only). A plan
   with a `category` (premade, or a customized copy of one) sets the goals to those real numbers while running; built
   plans keep the user's goals. Plan meals/templates carry `servings`; swaps keep the slot's portion. Customize
   Save = `saveCustomizedPlan`: premade → user's own copy "My <name>" (UUID, unique name), then re-applies from today.
   Placeholder slots `EMPTY_SLOT`/`REMOVED_SLOT` (`constants/planSlots.ts`) are never meals. The active plan is still
   matched **by name** (`activePlanName`) — known limitation.
+- **Built-in recipe numbers (Nov 18):** each recipe in `constants/recipeSeed.ts` is ONE serving; its calories/macros
+  are the sum of its ingredients from USDA FoodData Central (`scripts/recipe-nutrition/ingredients.json`: SR Legacy,
+  in the form the recipe measures — raw, or canned/cooked where it says so; the stir-fry vegetable blend is FNDDS;
+  curry paste has no USDA entry, label estimate). Never type them by hand: change an ingredient, then
+  `npm run check:recipe-nutrition` (exits 1 on any mismatch; `-- --json` prints the computed values). Copies made
+  before Nov 18 keep the old numbers: the 6 server-seeded premade recipe rows (`constants/premadeRecipes.ts`, migration
+  `20260714010300`; follow-up migration planned), bookmarked built-in recipes (`savedRecipes`), an already-running
+  premade plan's meals and goals, and "My <plan>" copies — pre-launch these exist only on test accounts.
 - **Recipes:** one recipe page (`app/recipe/[id]`) for every recipe — `NutritionTiles` (big calorie tile + macro
   tiles, also on the full page), key ingredients (main foods first), footer Fix | View Full Recipe (Fix only on the
   user's own recipes, `isOwnRecipe`; built-in ones are reference content). Custom Recipe goes straight there: the idea

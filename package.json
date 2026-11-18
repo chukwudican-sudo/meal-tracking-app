@@ -12,7 +12,8 @@
     "lint": "expo lint",
     "import:macro-foods": "tsx scripts/import-macro-foods.ts",
     "cleanup:macro-foods": "tsx scripts/cleanup-macro-food-names.ts",
-    "score:macro-familiarity": "tsx scripts/score-macro-familiarity.ts"
+    "score:macro-familiarity": "tsx scripts/score-macro-familiarity.ts",
+    "check:recipe-nutrition": "tsx scripts/recipe-nutrition/check.ts"
   },
   "dependencies": {
     "@expo/ngrok": "^4.1.3",

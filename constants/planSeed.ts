@@ -19,10 +19,16 @@ const DINNER = (recipeId: string, name: string): PlanDayMeal => ({
   slotName: 'Dinner', time: '19:00', recipeId, recipeName: name,
 });
 
-// Portions per meal type (quarter steps, default 1). A plan reaches its
-// calories with portions — its numbers are then worked out from the meals
-// (lib/planNutrition.ts), never typed here.
-type Portions = Partial<Record<'breakfast' | 'lunch' | 'dinner' | 'snack', number>>;
+// Each recipe's portion in a plan (quarter steps, default 1) sits next to it.
+// A plan reaches its calories with portions — its numbers are then worked out
+// from the meals (lib/planNutrition.ts), never typed here. Portions are set
+// per recipe, not per meal type, so every day lands near the plan's number
+// (Nov 18 retune with USDA recipe values: per-type portions swung some days
+// ±400 kcal; per recipe keeps every day within ~±80). Kept between 0.5× and
+// 2× (a double portion at most — 2.5 wraps isn't a meal) with a usual meal
+// split (breakfast ~25%, lunch ~35%, dinner ~30%, snacks ~10% each).
+// `npm run check:recipe-nutrition` enforces the range and the carb limits.
+type PlanOption = { id: string; name: string; servings?: number };
 
 function withPortion(m: PlanDayMeal, servings: number | undefined): PlanDayMeal {
   return servings && servings !== 1 ? { ...m, servings } : m;
@@ -31,12 +37,11 @@ function withPortion(m: PlanDayMeal, servings: number | undefined): PlanDayMeal 
 // Build a 7-day pattern by rotating breakfast/lunch/dinner options.
 // Indices supply variety while keeping macro profiles within the same family.
 function rotateDays(
-  breakfasts: { id: string; name: string }[],
-  lunches: { id: string; name: string }[],
-  dinners: { id: string; name: string }[],
-  snacks: { id: string; name: string }[],
+  breakfasts: PlanOption[],
+  lunches: PlanOption[],
+  dinners: PlanOption[],
+  snacks: PlanOption[],
   includeSnacks: { am: boolean; pm: boolean },
-  portions: Portions = {},
 ): PlanDayMeal[][] {
   return Array.from({ length: 7 }, (_, day) => {
     const bf = breakfasts[day % breakfasts.length];
@@ -44,11 +49,11 @@ function rotateDays(
     const dn = dinners[day % dinners.length];
     const am = snacks[day % snacks.length];
     const pm = snacks[(day + 1) % snacks.length];
-    const meals: PlanDayMeal[] = [withPortion(BREAKFAST(bf.id, bf.name), portions.breakfast)];
-    if (includeSnacks.am) meals.push(withPortion(MIDMORN(am.id, am.name), portions.snack));
-    meals.push(withPortion(LUNCH(ln.id, ln.name), portions.lunch));
-    if (includeSnacks.pm) meals.push(withPortion(AFTERNOON(pm.id, pm.name), portions.snack));
-    meals.push(withPortion(DINNER(dn.id, dn.name), portions.dinner));
+    const meals: PlanDayMeal[] = [withPortion(BREAKFAST(bf.id, bf.name), bf.servings)];
+    if (includeSnacks.am) meals.push(withPortion(MIDMORN(am.id, am.name), am.servings));
+    meals.push(withPortion(LUNCH(ln.id, ln.name), ln.servings));
+    if (includeSnacks.pm) meals.push(withPortion(AFTERNOON(pm.id, pm.name), pm.servings));
+    meals.push(withPortion(DINNER(dn.id, dn.name), dn.servings));
     return meals;
   });
 }
@@ -69,26 +74,25 @@ export const PLAN_SEED: PlanTemplate[] = [
     days: rotateDays(
       [
         { id: 'rcp-bf-oats-berries',      name: 'Oats & Berries' },
-        { id: 'rcp-bf-greek-yogurt-bowl', name: 'Greek Yogurt Bowl' },
-        { id: 'rcp-bf-avocado-toast',     name: 'Avocado Toast' },
+        { id: 'rcp-bf-greek-yogurt-bowl', name: 'Greek Yogurt Bowl', servings: 1.25 },
+        { id: 'rcp-bf-avocado-toast',     name: 'Avocado Toast', servings: 1.5 },
       ],
       [
-        { id: 'rcp-ln-chicken-caesar', name: 'Chicken Caesar Salad' },
-        { id: 'rcp-ln-turkey-sandwich', name: 'Turkey Sandwich' },
-        { id: 'rcp-ln-quinoa-bowl',    name: 'Quinoa Power Bowl' },
+        { id: 'rcp-ln-chicken-caesar', name: 'Chicken Caesar Salad', servings: 1.25 },
+        { id: 'rcp-ln-turkey-sandwich', name: 'Turkey Sandwich', servings: 2 },
+        { id: 'rcp-ln-quinoa-bowl',    name: 'Quinoa Power Bowl', servings: 1.25 },
       ],
       [
-        { id: 'rcp-dn-salmon-rice',      name: 'Salmon & Rice' },
-        { id: 'rcp-dn-chicken-stir-fry', name: 'Chicken Stir-Fry' },
-        { id: 'rcp-dn-pasta-primavera',  name: 'Pasta Primavera' },
+        { id: 'rcp-dn-salmon-rice',      name: 'Salmon & Rice', servings: 0.75 },
+        { id: 'rcp-dn-chicken-stir-fry', name: 'Chicken Stir-Fry', servings: 0.75 },
+        { id: 'rcp-dn-pasta-primavera',  name: 'Pasta Primavera', servings: 0.75 },
       ],
       [
-        { id: 'rcp-sn-yogurt-honey',    name: 'Greek Yogurt with Honey' },
+        { id: 'rcp-sn-yogurt-honey',    name: 'Greek Yogurt with Honey', servings: 0.75 },
         { id: 'rcp-sn-apple-almonds',   name: 'Apple & Almonds' },
-        { id: 'rcp-sn-hummus-carrots',  name: 'Hummus & Carrots' },
+        { id: 'rcp-sn-hummus-carrots',  name: 'Hummus & Carrots', servings: 1.25 },
       ],
       { am: true, pm: true },
-      { breakfast: 1.25, lunch: 1, dinner: 1.25, snack: 1.25 },
     ),
     savedAt: '2024-01-01T00:00:00.000Z',
     source: 'premade',
@@ -101,23 +105,22 @@ export const PLAN_SEED: PlanTemplate[] = [
     category: 'Balanced',
     days: rotateDays(
       [
-        { id: 'rcp-bf-greek-yogurt-bowl', name: 'Greek Yogurt Bowl' },
-        { id: 'rcp-bf-avocado-toast',     name: 'Avocado Toast' },
-        { id: 'rcp-bf-veggie-omelette',   name: 'Veggie Omelette' },
+        { id: 'rcp-bf-greek-yogurt-bowl', name: 'Greek Yogurt Bowl', servings: 1.5 },
+        { id: 'rcp-bf-avocado-toast',     name: 'Avocado Toast', servings: 1.5 },
+        { id: 'rcp-bf-veggie-omelette',   name: 'Veggie Omelette', servings: 2 },
       ],
       [
-        { id: 'rcp-ln-quinoa-bowl',     name: 'Quinoa Power Bowl' },
-        { id: 'rcp-ln-turkey-sandwich', name: 'Turkey Sandwich' },
-        { id: 'rcp-ln-tuna-wrap',       name: 'Tuna Wrap' },
+        { id: 'rcp-ln-quinoa-bowl',     name: 'Quinoa Power Bowl', servings: 1.5 },
+        { id: 'rcp-ln-turkey-sandwich', name: 'Turkey Sandwich', servings: 2 },
+        { id: 'rcp-ln-tuna-wrap',       name: 'Tuna Wrap', servings: 2 },
       ],
       [
-        { id: 'rcp-dn-pasta-primavera',  name: 'Pasta Primavera' },
+        { id: 'rcp-dn-pasta-primavera',  name: 'Pasta Primavera', servings: 0.75 },
         { id: 'rcp-dn-salmon-rice',      name: 'Salmon & Rice' },
-        { id: 'rcp-dn-veggie-curry',     name: 'Veggie Curry' },
+        { id: 'rcp-dn-veggie-curry',     name: 'Veggie Curry', servings: 1.25 },
       ],
       [{ id: 'rcp-sn-apple-almonds', name: 'Apple & Almonds' }],
       { am: false, pm: false },
-      { breakfast: 1.25, lunch: 1.75, dinner: 1.25 },
     ),
     savedAt: '2024-01-01T00:00:00.000Z',
     source: 'premade',
@@ -133,25 +136,24 @@ export const PLAN_SEED: PlanTemplate[] = [
     days: rotateDays(
       [
         { id: 'rcp-bf-protein-pancakes',  name: 'Protein Pancakes' },
-        { id: 'rcp-bf-greek-yogurt-bowl', name: 'Greek Yogurt Bowl' },
-        { id: 'rcp-bf-veggie-omelette',   name: 'Veggie Omelette' },
+        { id: 'rcp-bf-greek-yogurt-bowl', name: 'Greek Yogurt Bowl', servings: 2 },
+        { id: 'rcp-bf-veggie-omelette',   name: 'Veggie Omelette', servings: 1.25 },
       ],
       [
-        { id: 'rcp-ln-chicken-caesar', name: 'Chicken Caesar Salad' },
-        { id: 'rcp-ln-tuna-wrap',      name: 'Tuna Wrap' },
-        { id: 'rcp-ln-turkey-sandwich', name: 'Turkey Sandwich' },
+        { id: 'rcp-ln-chicken-caesar', name: 'Chicken Caesar Salad', servings: 1.25 },
+        { id: 'rcp-ln-tuna-wrap',      name: 'Tuna Wrap', servings: 2 },
+        { id: 'rcp-ln-turkey-sandwich', name: 'Turkey Sandwich', servings: 2 },
       ],
       [
         { id: 'rcp-dn-chicken-stir-fry', name: 'Chicken Stir-Fry' },
-        { id: 'rcp-dn-salmon-rice',      name: 'Salmon & Rice' },
+        { id: 'rcp-dn-salmon-rice',      name: 'Salmon & Rice', servings: 0.75 },
         { id: 'rcp-dn-beef-tacos',       name: 'Beef Tacos' },
       ],
       [
-        { id: 'rcp-sn-protein-smoothie', name: 'Protein Smoothie' },
-        { id: 'rcp-sn-yogurt-honey',     name: 'Greek Yogurt with Honey' },
+        { id: 'rcp-sn-protein-smoothie', name: 'Protein Smoothie', servings: 0.75 },
+        { id: 'rcp-sn-yogurt-honey',     name: 'Greek Yogurt with Honey', servings: 1.5 },
       ],
       { am: true, pm: true },
-      { lunch: 1.25, dinner: 1.5, snack: 1.5 },
     ),
     savedAt: '2024-01-01T00:00:00.000Z',
     source: 'premade',
@@ -164,20 +166,19 @@ export const PLAN_SEED: PlanTemplate[] = [
     category: 'High Protein',
     days: rotateDays(
       [
-        { id: 'rcp-bf-greek-yogurt-bowl', name: 'Greek Yogurt Bowl' },
-        { id: 'rcp-bf-veggie-omelette',   name: 'Veggie Omelette' },
+        { id: 'rcp-bf-greek-yogurt-bowl', name: 'Greek Yogurt Bowl', servings: 1.5 },
+        { id: 'rcp-bf-veggie-omelette',   name: 'Veggie Omelette', servings: 1.25 },
       ],
       [
         { id: 'rcp-ln-chicken-caesar', name: 'Chicken Caesar Salad' },
-        { id: 'rcp-ln-tuna-wrap',      name: 'Tuna Wrap' },
+        { id: 'rcp-ln-tuna-wrap',      name: 'Tuna Wrap', servings: 2 },
       ],
       [
-        { id: 'rcp-dn-salmon-rice',      name: 'Salmon & Rice' },
-        { id: 'rcp-dn-chicken-stir-fry', name: 'Chicken Stir-Fry' },
+        { id: 'rcp-dn-salmon-rice',      name: 'Salmon & Rice', servings: 0.5 },
+        { id: 'rcp-dn-chicken-stir-fry', name: 'Chicken Stir-Fry', servings: 0.75 },
       ],
-      [{ id: 'rcp-sn-protein-smoothie', name: 'Protein Smoothie' }],
+      [{ id: 'rcp-sn-protein-smoothie', name: 'Protein Smoothie', servings: 0.75 }],
       { am: false, pm: true },
-      { lunch: 0.75, dinner: 1.25, snack: 1.25 },
     ),
     savedAt: '2024-01-01T00:00:00.000Z',
     source: 'premade',
@@ -195,26 +196,25 @@ export const PLAN_SEED: PlanTemplate[] = [
     days: rotateDays(
       [
         { id: 'rcp-bf-veggie-omelette', name: 'Veggie Omelette' },
-        { id: 'rcp-bf-egg-muffins',     name: 'Spinach & Feta Egg Muffins' },
+        { id: 'rcp-bf-egg-muffins',     name: 'Spinach & Feta Egg Muffins', servings: 1.75 },
       ],
       [
-        { id: 'rcp-ln-greek-salad-chicken',   name: 'Greek Salad with Chicken' },
+        { id: 'rcp-ln-greek-salad-chicken',   name: 'Greek Salad with Chicken', servings: 1.25 },
         { id: 'rcp-ln-chicken-caesar',        name: 'Chicken Caesar Salad' },
-        { id: 'rcp-ln-chicken-lettuce-wraps', name: 'Chicken Avocado Lettuce Wraps' },
+        { id: 'rcp-ln-chicken-lettuce-wraps', name: 'Chicken Avocado Lettuce Wraps', servings: 1.5 },
       ],
       [
-        { id: 'rcp-dn-baked-salmon-veg',      name: 'Baked Salmon with Vegetables' },
-        { id: 'rcp-dn-garlic-butter-steak',   name: 'Garlic Butter Steak & Asparagus' },
-        { id: 'rcp-dn-creamy-tuscan-chicken', name: 'Creamy Tuscan Chicken' },
-        { id: 'rcp-dn-lemon-salmon-greens',   name: 'Lemon Herb Salmon with Greens' },
+        { id: 'rcp-dn-baked-salmon-veg',      name: 'Baked Salmon with Vegetables', servings: 0.75 },
+        { id: 'rcp-dn-garlic-butter-steak',   name: 'Garlic Butter Steak & Asparagus', servings: 0.75 },
+        { id: 'rcp-dn-creamy-tuscan-chicken', name: 'Creamy Tuscan Chicken', servings: 0.75 },
+        { id: 'rcp-dn-lemon-salmon-greens',   name: 'Lemon Herb Salmon with Greens', servings: 0.75 },
       ],
       [
         { id: 'rcp-sn-boiled-eggs',   name: 'Boiled Eggs' },
         { id: 'rcp-sn-guacamole-veg', name: 'Guacamole & Veg Sticks' },
-        { id: 'rcp-sn-edamame',       name: 'Steamed Edamame' },
+        { id: 'rcp-sn-edamame',       name: 'Steamed Edamame', servings: 1.5 },
       ],
       { am: true, pm: true },
-      { lunch: 0.75, dinner: 1.25 },
     ),
     savedAt: '2024-01-01T00:00:00.000Z',
     source: 'premade',
@@ -229,23 +229,22 @@ export const PLAN_SEED: PlanTemplate[] = [
     category: 'High Fiber',
     days: rotateDays(
       [
-        { id: 'rcp-bf-oats-berries',  name: 'Oats & Berries' },
-        { id: 'rcp-bf-avocado-toast', name: 'Avocado Toast' },
+        { id: 'rcp-bf-oats-berries',  name: 'Oats & Berries', servings: 0.75 },
+        { id: 'rcp-bf-avocado-toast', name: 'Avocado Toast', servings: 1.5 },
       ],
       [
-        { id: 'rcp-ln-quinoa-bowl',     name: 'Quinoa Power Bowl' },
-        { id: 'rcp-ln-veggie-stir-fry', name: 'Veggie Stir-Fry' },
+        { id: 'rcp-ln-quinoa-bowl',     name: 'Quinoa Power Bowl', servings: 1.25 },
+        { id: 'rcp-ln-veggie-stir-fry', name: 'Veggie Stir-Fry', servings: 1.25 },
       ],
       [
         { id: 'rcp-dn-veggie-curry',    name: 'Veggie Curry' },
-        { id: 'rcp-dn-pasta-primavera', name: 'Pasta Primavera' },
+        { id: 'rcp-dn-pasta-primavera', name: 'Pasta Primavera', servings: 0.75 },
       ],
       [
         { id: 'rcp-sn-hummus-carrots', name: 'Hummus & Carrots' },
         { id: 'rcp-sn-apple-almonds',  name: 'Apple & Almonds' },
       ],
       { am: true, pm: true },
-      { dinner: 1.5 },
     ),
     savedAt: '2024-01-01T00:00:00.000Z',
     source: 'premade',
@@ -264,24 +263,23 @@ export const PLAN_SEED: PlanTemplate[] = [
     days: rotateDays(
       [
         { id: 'rcp-bf-veggie-omelette', name: 'Veggie Omelette' },
-        { id: 'rcp-bf-egg-muffins',     name: 'Spinach & Feta Egg Muffins' },
+        { id: 'rcp-bf-egg-muffins',     name: 'Spinach & Feta Egg Muffins', servings: 1.75 },
       ],
       [
-        { id: 'rcp-ln-chicken-lettuce-wraps', name: 'Chicken Avocado Lettuce Wraps' },
-        { id: 'rcp-ln-tuna-stuffed-avocado',  name: 'Tuna-Stuffed Avocado' },
-        { id: 'rcp-ln-greek-salad-chicken',   name: 'Greek Salad with Chicken' },
+        { id: 'rcp-ln-chicken-lettuce-wraps', name: 'Chicken Avocado Lettuce Wraps', servings: 1.25 },
+        { id: 'rcp-ln-tuna-stuffed-avocado',  name: 'Tuna-Stuffed Avocado', servings: 0.75 },
+        { id: 'rcp-ln-greek-salad-chicken',   name: 'Greek Salad with Chicken', servings: 1.25 },
       ],
       [
         { id: 'rcp-dn-garlic-butter-steak',   name: 'Garlic Butter Steak & Asparagus' },
-        { id: 'rcp-dn-lemon-salmon-greens',   name: 'Lemon Herb Salmon with Greens' },
-        { id: 'rcp-dn-creamy-tuscan-chicken', name: 'Creamy Tuscan Chicken' },
+        { id: 'rcp-dn-lemon-salmon-greens',   name: 'Lemon Herb Salmon with Greens', servings: 1.25 },
+        { id: 'rcp-dn-creamy-tuscan-chicken', name: 'Creamy Tuscan Chicken', servings: 0.75 },
       ],
       [
-        { id: 'rcp-sn-cheese-olives', name: 'Cheese & Olives' },
+        { id: 'rcp-sn-cheese-olives', name: 'Cheese & Olives', servings: 0.75 },
         { id: 'rcp-sn-boiled-eggs',   name: 'Boiled Eggs' },
       ],
       { am: true, pm: true },
-      { lunch: 0.75, dinner: 1.25 },
     ),
     savedAt: '2024-01-01T00:00:00.000Z',
     source: 'premade',
@@ -296,25 +294,24 @@ export const PLAN_SEED: PlanTemplate[] = [
     category: 'Mediterranean',
     days: rotateDays(
       [
-        { id: 'rcp-bf-greek-yogurt-bowl', name: 'Greek Yogurt Bowl' },
-        { id: 'rcp-bf-avocado-toast',     name: 'Avocado Toast' },
+        { id: 'rcp-bf-greek-yogurt-bowl', name: 'Greek Yogurt Bowl', servings: 1.25 },
+        { id: 'rcp-bf-avocado-toast',     name: 'Avocado Toast', servings: 2 },
         { id: 'rcp-bf-oats-berries',      name: 'Oats & Berries' },
       ],
       [
-        { id: 'rcp-ln-quinoa-bowl',     name: 'Quinoa Power Bowl' },
-        { id: 'rcp-ln-chicken-caesar',  name: 'Chicken Caesar Salad' },
+        { id: 'rcp-ln-quinoa-bowl',     name: 'Quinoa Power Bowl', servings: 1.25 },
+        { id: 'rcp-ln-chicken-caesar',  name: 'Chicken Caesar Salad', servings: 1.25 },
       ],
       [
-        { id: 'rcp-dn-salmon-rice',     name: 'Salmon & Rice' },
-        { id: 'rcp-dn-pasta-primavera', name: 'Pasta Primavera' },
+        { id: 'rcp-dn-salmon-rice',     name: 'Salmon & Rice', servings: 0.75 },
+        { id: 'rcp-dn-pasta-primavera', name: 'Pasta Primavera', servings: 0.75 },
         { id: 'rcp-dn-veggie-curry',    name: 'Veggie Curry' },
       ],
       [
-        { id: 'rcp-sn-hummus-carrots',  name: 'Hummus & Carrots' },
-        { id: 'rcp-sn-yogurt-honey',    name: 'Greek Yogurt with Honey' },
+        { id: 'rcp-sn-hummus-carrots',  name: 'Hummus & Carrots', servings: 0.75 },
+        { id: 'rcp-sn-yogurt-honey',    name: 'Greek Yogurt with Honey', servings: 0.5 },
       ],
       { am: true, pm: true },
-      { breakfast: 1.25, lunch: 1.25, dinner: 1.25, snack: 0.75 },
     ),
     savedAt: '2024-01-01T00:00:00.000Z',
     source: 'premade',
