@@ -96,8 +96,10 @@ Still open:
 
 11. ~~App name~~ — **Macrotri** (Oct 12). All UI reads `APP_NAME` from `constants/app.ts`; `app.json` name updated
     (home-screen name needs a new dev build). Still a placeholder: `APP_LOGO='🌱'` (replace with the real icon).
-12. Real **Terms / Privacy URLs** (`app/paywall.tsx` `TERMS_URL`/`PRIVACY_URL` = `https://example.com/...`) + the Settings
-    Help shells. Apple requires both on the paywall.
+12. **Terms / Privacy pages** — `constants/legal.ts` points at `https://macrotri.com/terms` and `/privacy` (Nov 17) and
+    `SUPPORT_EMAIL` is the real `support@macrotri.com` (Zoho Mail, Canada; MX/SPF/DKIM live, DMARC passes). LEFT: publish
+    those pages on macrotri.com (GitHub Pages) before any release build — until then the links land on GoDaddy's
+    parking page. Apple requires both links on the paywall.
 13. **Production RevenueCat**: App Store Connect subscription products under `com.alex.mealapp` (monthly $14.99, yearly
     $49.99), attach to the `Default` offering + `MealApp Pro` entitlement, swap `EXPO_PUBLIC_REVENUECAT_API_KEY` from the
     Test Store key to the `appl_` key.

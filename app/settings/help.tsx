@@ -3,7 +3,7 @@ import { StyleSheet, Text, TouchableOpacity } from 'react-native';
 
 import { FormPage, FormSection } from '@/components/profile/FormPage';
 import { COLORS } from '@/constants/theme';
-import { openPrivacy, openSupportEmail, openTerms } from '@/lib/openLink';
+import { openHealthData, openPrivacy, openSupportEmail, openTerms } from '@/lib/openLink';
 
 // Only things that work (Apple 2.1: no "coming soon"). FAQ and About Us come
 // back once they have real content.
@@ -12,6 +12,7 @@ const ITEMS: { label: string; onPress: () => void }[] = [
   { label: 'Send Feedback',    onPress: () => router.push('/settings/feedback') },
   { label: 'Terms of Use', onPress: () => { void openTerms(); } },
   { label: 'Privacy Policy',   onPress: () => { void openPrivacy(); } },
+  { label: 'Consumer Health Data Privacy Policy', onPress: () => { void openHealthData(); } },
 ];
 
 export default function HelpScreen() {
@@ -39,6 +40,6 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: COLORS.border,
   },
-  rowText: { color: COLORS.text, fontSize: 15 },
+  rowText: { flex: 1, marginRight: 12, color: COLORS.text, fontSize: 15 },
   rowArrow: { color: COLORS.textSecondary, fontSize: 22, fontWeight: '300' },
 });

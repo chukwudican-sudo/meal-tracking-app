@@ -338,7 +338,8 @@ RevenueCat webhook full lifecycle (purchase → `active`, renewals, expiry → `
 1. Both *Confirm signup* and *Reset password* email templates must contain `{{ .Token }}` (dev: done; prod: TODO).
 2. Deferred by Alex: widen `hasProfile()` login gate from `!!profile.firstName` to "users row exists" (Apple/Google
    sign-in won't always give a name). He said "separate pass" — ask before doing it.
-3. Launch blockers: real Terms/Privacy URLs (placeholders `example.com`), production RevenueCat key + App Store Connect
+3. Launch blockers: publish the Terms/Privacy pages at the macrotri.com paths in `constants/legal.ts` (support@macrotri.com
+   is live: Zoho Mail, Canada data center, Nov 17), production RevenueCat key + App Store Connect
    products under `com.alex.mealapp`, production Supabase project (+ its SMTP), Apple Sign-In (required by App Store
    when offering other social logins).
 

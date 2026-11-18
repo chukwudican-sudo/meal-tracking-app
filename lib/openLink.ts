@@ -3,7 +3,7 @@
 
 import { Linking } from 'react-native';
 
-import { PRIVACY_URL, SUPPORT_EMAIL, TERMS_URL } from '@/constants/legal';
+import { HEALTH_DATA_URL, PRIVACY_URL, SUPPORT_EMAIL, TERMS_URL } from '@/constants/legal';
 import { useToastStore } from '@/store/useToastStore';
 
 async function open(url: string, failMessage: string): Promise<void> {
@@ -16,6 +16,8 @@ async function open(url: string, failMessage: string): Promise<void> {
 
 export const openTerms = () => open(TERMS_URL, "Couldn't open the Terms. Please try again.");
 export const openPrivacy = () => open(PRIVACY_URL, "Couldn't open the Privacy Policy. Please try again.");
+export const openHealthData = () =>
+  open(HEALTH_DATA_URL, "Couldn't open the Consumer Health Data Privacy Policy. Please try again.");
 // Apple's help page "Share your age range with apps" (the adults-only screen).
 export const openAppleAgeRangeHelp = () =>
   open('https://support.apple.com/122770', "Couldn't open Apple's help page. Please try again.");

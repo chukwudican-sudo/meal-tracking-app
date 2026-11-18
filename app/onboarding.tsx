@@ -38,7 +38,7 @@ import { engine } from '@/lib/sync/engine';
 import type { ActivityLevel, NutrientKey } from '@/store/types';
 import { requestReminderPermission } from '@/lib/notifications/reminders';
 import { useMealStore } from '@/store/useMealStore';
-import { openPrivacy, openTerms } from '@/lib/openLink';
+import { openHealthData, openPrivacy, openTerms } from '@/lib/openLink';
 import { HealthNote } from '@/components/HealthNote';
 import { HEALTH_CONSENT_VERSION } from '@/constants/legal';
 import { latestAllowedBirthday } from '@/lib/ageSignal';
@@ -604,6 +604,8 @@ function ConsentStep({ onAgree }: { onAgree: () => void }) {
       <Text style={styles.consentText}>
         I agree that {APP_NAME} may use my health info (weight, goals, diet, allergies and meals) to build and track my nutrition plan, as described in the{' '}
         <Text style={styles.legalLink} onPress={() => { void openPrivacy(); }} accessibilityRole="link">Privacy Policy</Text>
+        {' '}and the{' '}
+        <Text style={styles.legalLink} onPress={() => { void openHealthData(); }} accessibilityRole="link">Consumer Health Data Privacy Policy</Text>
         .
       </Text>
       <Text style={styles.consentText}>
