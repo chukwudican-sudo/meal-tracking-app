@@ -40,7 +40,9 @@ Deeper material lives in `docs/handover/` — read the relevant file before touc
   `tmsydkqpskwcsrrbuqst`, same MealApp Pro org, West US Oregon, Micro) created Nov 12: all migrations applied and
   schema verified identical to dev; secrets, functions, auth settings, SMTP and the food tables are still TODO (see
   the roadmap). The repo stays **linked to dev**; target prod per command with `--remote=tmsydkqpskwcsrrbuqst`
-  (`db push`, `functions deploy`, `secrets set`, read-only `db query --read-only`).
+  (`db push`, `functions deploy`, `secrets set`, read-only `db query --read-only`). **This CLI targets the LOCAL
+  database unless told otherwise:** dev = `db push --remote`; always add `--skip-vault` (config.toml is stale) and
+  `--dry-run` first.
 - **AI:** Google Gemini **`gemini-3.6-flash`**, called only from edge functions (key is a Supabase secret).
   No client-side AI remains (the legacy OpenAI client was deleted Oct 28). Voice = the keyboard's own dictation;
   a dedicated on-device voice button is planned after launch.
@@ -258,9 +260,10 @@ These come straight from months of his feedback. Violating them is the #1 thing 
   are the sum of its ingredients from USDA FoodData Central (`scripts/recipe-nutrition/ingredients.json`: SR Legacy,
   in the form the recipe measures — raw, or canned/cooked where it says so; the stir-fry vegetable blend is FNDDS;
   curry paste has no USDA entry, label estimate). Never type them by hand: change an ingredient, then
-  `npm run check:recipe-nutrition` (exits 1 on any mismatch; `-- --json` prints the computed values). Copies made
-  before Nov 18 keep the old numbers: the 6 server-seeded premade recipe rows (`constants/premadeRecipes.ts`, migration
-  `20260714010300`; follow-up migration planned), bookmarked built-in recipes (`savedRecipes`), an already-running
+  `npm run check:recipe-nutrition` (exits 1 on any mismatch; `-- --json` prints the computed values). The 6
+  server-seeded premade recipe rows (`constants/premadeRecipes.ts`) got the new numbers by migration `20261119010000`
+  (dev + prod, Nov 19) — a bookmarked one restored from the server reads them; change a recipe's numbers there too.
+  Copies made before Nov 18 keep the old numbers: bookmarked built-in recipes (`savedRecipes`), an already-running
   premade plan's meals and goals, and "My <plan>" copies — pre-launch these exist only on test accounts.
 - **Recipes:** one recipe page (`app/recipe/[id]`) for every recipe — `NutritionTiles` (big calorie tile + macro
   tiles, also on the full page), key ingredients (main foods first), footer Fix | View Full Recipe (Fix only on the
