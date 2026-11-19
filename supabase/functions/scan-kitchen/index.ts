@@ -15,6 +15,7 @@
 
 import { handlePreflight } from '../_shared/cors.ts';
 import { errorResponse, jsonResponse } from '../_shared/errors.ts';
+import { aiConsentGiven, consentRequiredResponse } from '../_shared/aiConsent.ts';
 import { createAdminClient, getAuthedUser } from '../_shared/auth.ts';
 import { consumeFreeScan, resolveEntitlement } from '../_shared/entitlement.ts';
 import { isRateLimited, logAiUsage } from '../_shared/rateLimit.ts';
@@ -162,7 +163,7 @@ Deno.serve(async (req: Request) => {
   const [profileResult, rateLimitResult] = await Promise.all([
     admin
       .from('users')
-      .select('subscription_status, free_scans_remaining, dietary_preferences, allergies')
+      .select('ai_consent, subscription_status, free_scans_remaining, dietary_preferences, allergies')
       .eq('id', user.id)
       .single(),
     isRateLimited(admin, user.id, FUNCTION_NAME, RATE_LIMIT, RATE_WINDOW_MS).catch((e) => {
@@ -175,6 +176,8 @@ Deno.serve(async (req: Request) => {
   if (profileErr || !profileRow) {
     return errorResponse('ai_failed', 'Could not load your profile', 500);
   }
+  // Apple 5.1.2: nothing goes to Gemini without the user's yes (_shared/aiConsent.ts).
+  if (!aiConsentGiven(profileRow)) return consentRequiredResponse();
 
   // Entitlement gate: subscribers are unlimited; everyone else spends a free
   // scan (consumed only on success, below). The app uses not_premium to trigger

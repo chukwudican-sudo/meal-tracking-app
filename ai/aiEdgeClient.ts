@@ -11,7 +11,8 @@ import { supabase } from '@/lib/supabase';
 import { newId } from '@/lib/sync/uuid';
 import type { Ingredient } from '@/store/types';
 import type { MealDraft } from './types';
-import { ensureAIConsent } from '@/lib/aiConsent';
+import { ensureAIConsent, saveAIConsentToServer } from '@/lib/aiConsent';
+import { useMealStore } from '@/store/useMealStore';
 import { reportError } from '@/lib/monitoring';
 
 export type AIErrorCode =
@@ -21,6 +22,7 @@ export type AIErrorCode =
   | 'rate_limited'
   | 'ai_failed'
   | 'consent_declined' // the user chose "Not now" on the AI permission sheet
+  | 'consent_required' // the server has no "yes" on the account (users.ai_consent)
   | 'unknown';
 
 // Base class for every AI edge-function error so the UI can branch generically
@@ -215,14 +217,25 @@ export async function invokeAIFunction(
   if (!(await ensureAIConsent())) {
     throw make('consent_declined', 'AI features are off. You can turn them on in Settings → Privacy & AI.');
   }
-  const startedAt = Date.now();
-  const { data, error } = await supabase.functions.invoke(functionName, {
-    body,
-    timeout: INVOKE_TIMEOUT_MS,
-  });
-  if (__DEV__) console.info(`${opts.logPrefix} invoke took ${Date.now() - startedAt}ms (error=${!!error})`);
+  const invoke = async () => {
+    const startedAt = Date.now();
+    const res = await supabase.functions.invoke(functionName, { body, timeout: INVOKE_TIMEOUT_MS });
+    if (__DEV__) console.info(`${opts.logPrefix} invoke took ${Date.now() - startedAt}ms (error=${!!res.error})`);
+    return res;
+  };
 
-  if (error) throw await toAIError(error, opts, make);
+  let { data, error } = await invoke();
+  if (error) {
+    const err = await toAIError(error, opts, make);
+    // The server hasn't got this phone's "yes" yet (saving it failed, e.g.
+    // offline when allowed): send it now and try once more.
+    const retry = err.code === 'consent_required'
+      && useMealStore.getState().profile.aiConsent === true
+      && (await saveAIConsentToServer());
+    if (!retry) throw err;
+    ({ data, error } = await invoke());
+    if (error) throw await toAIError(error, opts, make);
+  }
   if (!data) throw make('unknown', 'No response returned.');
   return data as Record<string, unknown>;
 }

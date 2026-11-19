@@ -106,7 +106,7 @@ export default function WhatCanIMakeScreen() {
     }
     if (
       e instanceof AIError &&
-      (e.code === 'rate_limited' || e.code === 'ai_failed' || e.code === 'unauthorized')
+      (e.code === 'rate_limited' || e.code === 'ai_failed' || e.code === 'unauthorized' || e.code === 'consent_required')
     ) {
       showToast(e.message || 'Could not suggest recipes right now. Please try again.');
       return;

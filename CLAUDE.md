@@ -83,7 +83,9 @@ npm run dev -- --tunnel     # only when phone + Mac can't see each other (café 
   **Both are clean (0 errors, 0 warnings) since Nov 14** — keep them that way; any new error is yours.
   Debug logging: no step-by-step `console.info` traces; timing logs only under `if (__DEV__)`.
   Don't trust editor lint panels alone — once they reported 0 errors on a file with 30 real type errors.
-- Supabase CLI: `npx supabase ...` (already logged in + linked on this Mac). `supabase/functions` and `scripts/` are
+- Supabase CLI: `npx supabase ...` (already logged in + linked on this Mac). `supabase/config.toml`: only its `[functions.*]`
+  blocks are live (deploy reads verify_jwt); the rest is local-stack defaults — **never `supabase config push`** (it would
+  turn email confirmation off and drop the redirect URLs on a live project). Compare with `config diff`. `supabase/functions` and `scripts/` are
   excluded from the app tsconfig (they're Deno / Node).
 
 ## 4. Repo map
@@ -196,6 +198,10 @@ These come straight from months of his feedback. Violating them is the #1 thing 
   **AI permission (Apple 5.1.2, Nov 10):** `invokeAIFunction` first awaits `lib/aiConsent.ts#ensureAIConsent` (sheet
   `components/AIConsentHost`, answer on `profile.aiConsent`/`aiConsentAt`, synced as users.ai_consent/_at; Settings →
   Privacy & AI). "Not now" throws code `consent_declined`: every catch returns early on `isAIConsentDeclined(e)`.
+  **The server checks it too (Nov 19):** all 11 AI functions select `ai_consent` and return `consent_required` (403)
+  unless it's true (`_shared/aiConsent.ts`) — a new AI function must do the same. So the answer is written to the
+  account the moment it's given (`setAIConsent` → `saveAIConsentToServer`, used by the sheet and Settings), and
+  `invokeAIFunction` re-saves + retries once on `consent_required` when this phone says yes.
   **Any new RN Modal that can start an AI request must mount `<AIConsentHost active={visible} />` inside it** (like
   PaywallModalHost), or the sheet would open hidden behind the modal.
   Error handling everywhere: `not_premium` → `openPaywall({ reason:'scan_limit' | 'premium_feature', onSuccess: retry })`;

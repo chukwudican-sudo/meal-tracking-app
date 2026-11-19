@@ -115,7 +115,7 @@ export function KitchenScanModal({ visible, onClose }: Props) {
     }
     if (
       e instanceof AIError &&
-      (e.code === 'rate_limited' || e.code === 'ai_failed' || e.code === 'unauthorized')
+      (e.code === 'rate_limited' || e.code === 'ai_failed' || e.code === 'unauthorized' || e.code === 'consent_required')
     ) {
       showToast(e.message || 'The AI scanner is temporarily unavailable. Please try again.');
       return;

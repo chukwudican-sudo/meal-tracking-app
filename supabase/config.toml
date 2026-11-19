@@ -1,3 +1,20 @@
+# WHAT THIS FILE IS (Nov 19, 2026) — read before using any `supabase config` command.
+#
+# LIVE: the [functions.*] blocks at the bottom. `supabase functions deploy` reads
+# them (verify_jwt: revenuecat-webhook and send-announcement MUST stay false).
+#
+# NOT LIVE: every other section ([api], [db], [auth], [storage]…) holds the CLI's
+# local test-stack defaults, NOT the hosted settings. The hosted settings (auth,
+# SMTP, OTP, redirect URLs, rate limits) are managed in each project's dashboard
+# (dev and production are set by hand to match — see the roadmap, p06).
+#
+# NEVER run `supabase config push` from this file: it would overwrite a live
+# project's login settings with these defaults (checked Nov 19 on dev: email
+# confirmation OFF, the mealapp:// redirect URLs removed, email limit 30 → 2/h,
+# TOTP MFA off). To compare instead (read-only):
+#   npx supabase config diff                      # dev (linked)
+#   npx supabase config diff --remote=<prod ref>  # production
+#
 # For detailed configuration reference documentation, visit:
 # https://supabase.com/docs/guides/local-development/cli/config
 # A string used to distinguish different Supabase projects on the same host. Defaults to the

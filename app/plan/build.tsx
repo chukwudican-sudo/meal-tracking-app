@@ -1620,7 +1620,7 @@ export default function BuildPlanScreen() {
     }
     if (
       e instanceof AIError &&
-      (e.code === 'rate_limited' || e.code === 'ai_failed' || e.code === 'unauthorized')
+      (e.code === 'rate_limited' || e.code === 'ai_failed' || e.code === 'unauthorized' || e.code === 'consent_required')
     ) {
       showToast(e.message || 'Could not generate a suggestion right now. Please try again.');
       return;

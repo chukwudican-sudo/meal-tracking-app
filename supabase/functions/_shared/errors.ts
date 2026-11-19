@@ -13,6 +13,7 @@ export type AIErrorCode =
   | 'not_premium'
   | 'rate_limited'
   | 'ai_failed'
+  | 'consent_required' // users.ai_consent isn't true (_shared/aiConsent.ts)
   | 'server_error';
 
 export function jsonResponse(body: unknown, status: number): Response {

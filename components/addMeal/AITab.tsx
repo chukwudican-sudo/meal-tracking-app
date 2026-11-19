@@ -82,6 +82,10 @@ export function AITab({ date, onLogged }: Props) {
       setNote('Your session expired. Please sign in again.');
       return;
     }
+    if (e instanceof AIError && e.code === 'consent_required') {
+      setNote(e.message); // the server's "AI features are off…" (lib/aiConsent)
+      return;
+    }
     setNote('Something went wrong. Try again.');
   }
 

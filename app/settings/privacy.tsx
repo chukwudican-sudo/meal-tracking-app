@@ -7,6 +7,7 @@ import { Linking, StyleSheet, Switch, Text, TouchableOpacity, View } from 'react
 
 import { FormPage, FormSection } from '@/components/profile/FormPage';
 import { PRIVACY_URL } from '@/constants/legal';
+import { setAIConsent } from '@/lib/aiConsent';
 import { COLORS } from '@/constants/theme';
 import { useMealStore } from '@/store/useMealStore';
 
@@ -22,7 +23,6 @@ function formatDay(iso?: string): string | null {
 export default function PrivacyScreen() {
   const aiConsent = useMealStore(s => s.profile.aiConsent);
   const aiConsentAt = useMealStore(s => s.profile.aiConsentAt);
-  const setAiConsent = useMealStore(s => s.setAiConsent);
 
   // Saved on tap, like iOS Settings.
   const on = aiConsent === true;
@@ -46,7 +46,8 @@ export default function PrivacyScreen() {
           </View>
           <Switch
             value={on}
-            onValueChange={setAiConsent}
+            // Saved here and on the account at once (the AI functions check it).
+            onValueChange={allowed => void setAIConsent(allowed)}
             trackColor={{ true: COLORS.green, false: COLORS.elevated }}
             thumbColor="#fff"
             accessibilityLabel="Allow AI features"

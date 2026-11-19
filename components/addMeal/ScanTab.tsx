@@ -205,6 +205,10 @@ export function ScanTab({ context, onDraftReady, onClose }: Props) {
       showToast(e.message || 'The AI scanner is temporarily unavailable. Please try again.');
       return;
     }
+    if (e instanceof AIError && e.code === 'consent_required') {
+      showToast(e.message); // the server's "AI features are off…" (lib/aiConsent)
+      return;
+    }
     showToast('Could not scan this meal. Try again.');
   }
 
