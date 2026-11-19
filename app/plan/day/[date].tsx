@@ -122,11 +122,15 @@ export default function DayDetailScreen() {
 
   const heading = formatDayHeading(date);
 
-  const handleSwap = (slot: MealSlot) => {
+  // `meal` = what the slot shows (none = empty slot): the swap replaces exactly
+  // that meal. Plan meals carry no slotId, so matching by slot alone missed them
+  // and the new recipe was added next to the old meal (both counted).
+  const handleSwap = (slot: MealSlot, meal: MealEntry | undefined) => {
     setPendingSwap({
       type: 'daily',
       date,
       slotId: slot.id,
+      mealId: meal?.id,
       slotName: slot.name,
       time: slot.time,
       category: slotNameToCategory(slot.name),
@@ -247,7 +251,7 @@ export default function DayDetailScreen() {
             key={slot.id}
             slot={slot}
             meal={meal}
-            onSwap={() => handleSwap(slot)}
+            onSwap={() => handleSwap(slot, meal)}
             onEdit={meal ? () => openMealEditSession(date, 'plan', meal) : undefined}
             onRemove={meal ? () => handleRemove(meal) : undefined}
           />

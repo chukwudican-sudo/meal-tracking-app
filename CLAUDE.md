@@ -247,7 +247,10 @@ These come straight from months of his feedback. Violating them is the #1 thing 
   Sizing plans to the user's own calories is parked until
   after launch (work saved in `reports/Plan sizing WIP (parked Nov 18).patch`, local only). A plan
   with a `category` (premade, or a customized copy of one) sets the goals to those real numbers while running; built
-  plans keep the user's goals. Plan meals/templates carry `servings`; swaps keep the slot's portion. Customize
+  plans keep the user's goals. Plan meals/templates carry `servings`. A swap of a plan meal (Day Detail, or a slot in
+  Customize) keeps the slot's CALORIES — the new recipe's portion = old kcal ÷ new kcal, quarter steps, 0.5–2×
+  (`lib/planNutrition.ts#swapPortion`, Nov 18, Eat This Much-style); the user's own meals keep their multiplier. A day's swap replaces exactly the meal it was
+  started on (`PendingSwap.mealId`; plan meals have no slotId); a recipe put into an empty slot is the user's own (`isAdHoc`). Customize
   Save = `saveCustomizedPlan`: premade → user's own copy "My <name>" (UUID, unique name), then re-applies from today.
   Placeholder slots `EMPTY_SLOT`/`REMOVED_SLOT` (`constants/planSlots.ts`) are never meals. The active plan is still
   matched **by name** (`activePlanName`) — known limitation.

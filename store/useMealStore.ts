@@ -30,7 +30,7 @@ import type {
 import { RECIPE_SEED } from '@/constants/recipeSeed';
 import { isPlaceholderSlot } from '@/constants/planSlots';
 import {
-  planNutrition, planSetsGoals, portionOf, scaleIngredients, scaleMacros, type PlanNutrition,
+  planNutrition, planSetsGoals, portionOf, scaleIngredients, scaleMacros, swapPortion, type PlanNutrition,
 } from '@/lib/planNutrition';
 import { PLAN_SEED } from '@/constants/planSeed';
 import { DEFAULT_TRACKED_NUTRIENTS } from '@/constants/nutrients';
@@ -185,8 +185,9 @@ export function isTemplateApplicableOnDate(template: MealTemplate, date: string)
 // plan creates and the plan's displayed/goal numbers, so the two can never
 // disagree. Premade recipes first, then the user's saved/AI recipes (by id,
 // source id, or name); an unknown recipe gets deterministic non-zero
-// nutrition so plan meals always count on Home.
-function planMealResolver(recipes: RecipeTemplate[], savedRecipes: SavedRecipe[]) {
+// nutrition so plan meals always count on Home. Customize swaps use it too
+// (lib/recipeSwap.ts) to read the replaced slot's calories.
+export function planMealResolver(recipes: RecipeTemplate[], savedRecipes: SavedRecipe[]) {
   const recipeById = new Map(recipes.map(r => [r.id, r]));
   const savedById = new Map(savedRecipes.map(r => [r.id, r]));
   const savedByRecipeId = new Map(
@@ -1700,8 +1701,8 @@ export const useMealStore = create<AppStore>()(
         const state = get();
         const today = toIsoDate(new Date());
 
-        // The user's own templates and meals stay; the plan's go — including
-        // slots filled from Day Detail.
+        // The user's own templates and meals stay (a recipe put into an empty
+        // Day Detail slot is theirs); the plan's go — swapped plan meals too.
         const { templates, logs } = withoutPlanFromToday(state.templates, state.logs, today);
 
         set({
@@ -2020,16 +2021,25 @@ export const useMealStore = create<AppStore>()(
       swapMealInDay: (date, slot, recipe) => {
         set(state => {
           const log = state.logs[date] ?? { date, meals: [], waterMl: 0 };
-          // Identify the existing entry for this slot: match slotId first,
-          // then fall back to time (legacy entries that predate slotId).
-          // The time fallback (legacy slots without slotId) must never match a
-          // meal the user added themselves.
-          const matchIdx = log.meals.findIndex(m =>
-            slot.slotId ? m.slotId === slot.slotId : !m.isAdHoc && m.time === slot.time,
-          );
-          // The swapped-in recipe takes the replaced meal's portion, so a
-          // plan day stays near its numbers (1.5× dinner → 1.5× the new one).
-          const portion = matchIdx >= 0 ? (log.meals[matchIdx].servings ?? 1) : 1;
+          // The meal the swap was started on (Day Detail's slot card, the meal
+          // popup) is replaced — exactly that one. Without an id (older
+          // callers): match slotId, then time (legacy entries that predate
+          // slotId); that time fallback must never match the user's own meal.
+          const matchIdx = slot.mealId
+            ? log.meals.findIndex(m => m.id === slot.mealId)
+            : log.meals.findIndex(m =>
+              slot.slotId ? m.slotId === slot.slotId : !m.isAdHoc && m.time === slot.time,
+            );
+          // A plan meal's slot keeps its calories: the swapped-in recipe is
+          // sized to them (lib/planNutrition.ts#swapPortion), so the day stays
+          // near the plan's numbers. Plan meals are the ones not marked as the
+          // user's own (isAdHoc syncs; templateId doesn't). The user's own
+          // meals keep their multiplier, as before.
+          const replaced = matchIdx >= 0 ? log.meals[matchIdx] : undefined;
+          const portion = !replaced
+            ? 1
+            : (!replaced.isAdHoc ? swapPortion(replaced.calories, recipe.calories) : null)
+              ?? replaced.servings ?? 1;
           const nextEntry: MealEntry = {
             id: matchIdx >= 0
               ? log.meals[matchIdx].id
@@ -2039,10 +2049,17 @@ export const useMealStore = create<AppStore>()(
             calories: Math.round(recipe.calories * portion),
             ingredients: cloneIngredients(scaleIngredients(recipe.ingredients, portion)),
             macros: scaleMacros(recipe.macros, portion),
-            status: matchIdx >= 0 ? log.meals[matchIdx].status : 'pending',
+            // A filled empty slot follows the rule for any meal the user adds:
+            // a past day or an earlier time today counts as eaten, later waits.
+            status: replaced ? replaced.status : initialMealStatus(date, slot.time),
             slotId: slot.slotId,
             category: recipe.category,
             ...(portion !== 1 ? { servings: portion } : {}),
+            // Whose meal it is carries over: a swapped plan meal stays the
+            // plan's, the user's own stays theirs. A recipe put into an empty
+            // slot is the user's own addition (like Add to Today): it shows
+            // "Added" and is kept when a plan ends (and today's when one starts).
+            ...(!replaced || replaced.isAdHoc ? { isAdHoc: true } : {}),
           };
           const meals = matchIdx >= 0
             ? log.meals.map((m, i) => (i === matchIdx ? nextEntry : m))

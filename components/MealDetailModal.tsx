@@ -23,6 +23,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { COLORS } from '@/constants/theme';
 import { getNutrientMeta } from '@/constants/nutrients';
 import { rateMealGrade } from '@/utils/mealRating';
+import { slotForMeal, slotNameToCategory } from '@/utils/mealSlots';
 import { AIError, aiErrorMessage } from '@/ai/aiEdgeClient';
 import { fixMeal } from '@/ai/fixMeal';
 import { openPaywall } from '@/lib/paywall';
@@ -80,6 +81,7 @@ export function MealDetailModal() {
   const savedRecipes = useMealStore(s => s.savedRecipes);
   const goals = useMealStore(s => s.goals);
   const trackedNutrients = useMealStore(s => s.profile.trackedNutrients ?? []);
+  const mealSlots = useMealStore(s => s.profile.mealSlots);
 
   const updateMealDraft = useMealStore(s => s.updateMealDraft);
   const commitMealEditSession = useMealStore(s => s.commitMealEditSession);
@@ -286,13 +288,20 @@ export function MealDetailModal() {
         {
           text: 'Swap instead',
           onPress: () => {
-            const cat = draft.category;
+            // The recipe list opens on the slot's meal type (Dinner…), like
+            // Day Detail's Swap button; the meal's own tag only as a fallback.
+            // From the meal as saved: unsaved popup edits (a changed time) are
+            // discarded below, so they mustn't steer the swap.
+            const saved = useMealStore.getState().logs[session!.date]?.meals.find(m => m.id === draft.id) ?? draft;
+            const slot = slotForMeal(saved, mealSlots);
+            const cat = (slot ? slotNameToCategory(slot.name) : undefined) ?? saved.category;
             setPendingSwap({
               type: 'daily',
               date: session!.date,
-              slotId: draft.slotId,
-              slotName: cat ?? 'Meal',
-              time: draft.time,
+              slotId: saved.slotId,
+              mealId: saved.id,
+              slotName: slot?.name ?? cat ?? 'Meal',
+              time: saved.time,
               category: cat,
             });
             discardAndClose();

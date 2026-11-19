@@ -24,6 +24,24 @@ export function portionOf(m: Pick<PlanDayMeal, 'servings'>): number {
   return m.servings && m.servings > 0 ? clampPortion(m.servings) : 1;
 }
 
+// Plan portions stay real meals: half to a double portion (2.5 wraps isn't a
+// lunch). Premade plans keep to it (scripts/recipe-nutrition/check.ts checks
+// the seed) and so do swaps.
+export const PLAN_PORTION_MIN = 0.5;
+export const PLAN_PORTION_MAX = 2;
+
+// A swap in a plan keeps the slot's calories, not its multiplier (Nov 18,
+// Eat This Much-style): portions are set per recipe, so 0.5× of a 900-kcal
+// dinner copied onto a 250-kcal soup made a 127-kcal dinner. Quarter steps
+// within the plan range; null when either side has no calories (the caller
+// keeps the old multiplier).
+export function swapPortion(slotCalories: number, recipeCalories: number): number | null {
+  if (!Number.isFinite(slotCalories) || !Number.isFinite(recipeCalories)) return null;
+  if (slotCalories <= 0 || recipeCalories <= 0) return null;
+  const q = Math.round(slotCalories / recipeCalories / PORTION_STEP) * PORTION_STEP;
+  return Math.min(PLAN_PORTION_MAX, Math.max(PLAN_PORTION_MIN, q));
+}
+
 // "1.25×" style label; null at 1 (nothing to show).
 export function portionLabel(servings: number | undefined): string | null {
   const s = servings ?? 1;

@@ -338,9 +338,10 @@ export type PlanTemplate = MealPlan;
 
 // Set by Day Detail (daily) or Customize Plan (plan) before navigating to the
 // Saved Recipes page in swap mode. The Saved Recipes page reads this to know
-// where to put the chosen recipe, then clears it.
+// where to put the chosen recipe, then clears it. `mealId` = the exact meal the
+// swap was started on (none = an empty slot gets filled).
 export type PendingSwap =
-  | { type: 'daily'; date: string; slotName: string; slotId?: string; time: string; category?: RecipeCategory }
+  | { type: 'daily'; date: string; slotName: string; slotId?: string; mealId?: string; time: string; category?: RecipeCategory }
   | { type: 'plan'; dayIdx: number; slotName: string; time: string; category?: RecipeCategory };
 
 // Holds the in-progress Customize Plan draft so it survives the round-trip to
@@ -540,7 +541,7 @@ export interface AppStore {
   // Replace (or fill) the meal in the given slot for one specific day's log.
   swapMealInDay: (
     date: string,
-    slot: { slotId?: string; slotName: string; time: string },
+    slot: { slotId?: string; mealId?: string; slotName: string; time: string },
     recipe: Pick<SavedRecipe, 'name' | 'calories' | 'macros' | 'ingredients'> & { recipeId?: string; cookTimeMin?: number; steps?: string[]; category?: RecipeCategory; source?: SavedRecipeSource },
   ) => void;
 

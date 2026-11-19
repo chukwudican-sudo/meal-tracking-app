@@ -29,6 +29,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { PLAN_SEED } from '../../constants/planSeed';
+import { PLAN_PORTION_MAX, PLAN_PORTION_MIN } from '../../lib/planNutrition';
 import { RECIPE_SEED } from '../../constants/recipeSeed';
 
 type Entry = {
@@ -88,7 +89,9 @@ if (json) {
         const r = RECIPE_SEED.find(x => x.id === m.recipeId);
         if (!r) { planProblems.push(`${p.name} day ${di + 1}: unknown recipe ${m.recipeId}`); continue; }
         const s = m.servings ?? 1;
-        if (s < 0.5 || s > 2) planProblems.push(`${p.name} day ${di + 1}: ${m.recipeName} portion ${s}× (keep 0.5–2×)`);
+        if (s < PLAN_PORTION_MIN || s > PLAN_PORTION_MAX) {
+          planProblems.push(`${p.name} day ${di + 1}: ${m.recipeName} portion ${s}× (keep ${PLAN_PORTION_MIN}–${PLAN_PORTION_MAX}×)`);
+        }
         carbs += r.macros.carbs * s;
       }
       const limit = CARB_LIMIT[p.name];
