@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import {
+  ActivityIndicator,
   View,
   Text,
   ScrollView,
@@ -21,6 +22,7 @@ import { WeekStrip } from '@/components/WeekStrip';
 import { MealDetailModal } from '@/components/MealDetailModal';
 import { EmailVerificationBanner } from '@/components/EmailVerificationBanner';
 import { SyncStatusIcon } from '@/components/SyncStatusIcon';
+import { useDayFillReady } from '@/lib/sync/SyncProvider';
 import type { MealEntry } from '@/store/types';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -101,13 +103,17 @@ export default function HomeScreen() {
     logWater(viewingDate, deltaMl);
   };
 
-  // Populate today's meals and recalculate streak on first mount
+  // Fill the shown day from the plan, and recalc the streak, once this
+  // account's download is done (useDayFillReady: sync must see the new meals).
+  const dayFillReady = useDayFillReady();
   useEffect(() => {
-    const todayIso = toIsoDate(new Date());
-    resolveDayFromTemplates(todayIso);
-    markPastDueMealsAsMissed(todayIso);
-    recalcStreak();
-  }, [markPastDueMealsAsMissed, recalcStreak, resolveDayFromTemplates]);
+    if (!dayFillReady) return;
+    resolveDayFromTemplates(viewingDate);
+    markPastDueMealsAsMissed(viewingDate);
+  }, [dayFillReady, viewingDate, markPastDueMealsAsMissed, resolveDayFromTemplates]);
+  useEffect(() => {
+    if (dayFillReady) recalcStreak();
+  }, [dayFillReady, recalcStreak]);
 
   useEffect(() => {
     const sub = AppState.addEventListener('change', (state: AppStateStatus) => {
@@ -119,11 +125,7 @@ export default function HomeScreen() {
     return () => sub.remove();
   }, [markPastDueMealsAsMissed]);
 
-  const navigateTo = (date: string) => {
-    setViewingDate(date);
-    resolveDayFromTemplates(date);
-    markPastDueMealsAsMissed(date);
-  };
+  const navigateTo = (date: string) => setViewingDate(date);
 
 
   // ── Render ──────────────────────────────────────────────────────────────────
@@ -273,7 +275,13 @@ export default function HomeScreen() {
         </View>
 
         {/* Meal list */}
-        {sortedMeals.length === 0 ? (
+        {sortedMeals.length === 0 && !currentLog && !dayFillReady ? (
+          // The plan fills this day once the download is done (≤5s).
+          <View style={styles.emptyState}>
+            <ActivityIndicator color={COLORS.textSecondary} />
+            <Text style={[styles.emptySubtext, styles.loadingText]}>Loading your day…</Text>
+          </View>
+        ) : sortedMeals.length === 0 ? (
           <View style={styles.emptyState}>
             <Text style={styles.emptyIcon}>🍽️</Text>
             <Text style={styles.emptyText}>No meals for this day</Text>
@@ -550,5 +558,8 @@ const styles = StyleSheet.create({
   emptySubtext: {
     fontSize: 13,
     color: COLORS.textSecondary,
+  },
+  loadingText: {
+    marginTop: 12,
   },
 });

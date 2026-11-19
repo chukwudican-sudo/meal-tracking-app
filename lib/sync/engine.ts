@@ -63,6 +63,10 @@ export interface SyncStatus {
   // something has dead-lettered — i.e. worth showing the user. A normal fast
   // sync leaves this false and the indicator stays hidden.
   stuck: boolean;
+  // The account whose sign-in sync (reconcile) has finished — pulled, or
+  // ended without pulling (offline/failed) — in this app session. Screens
+  // that fill a day from the plan wait for it (useDayFillReady).
+  readyUserId: string | null;
 }
 
 // 'restore' = a first login on this install ('claim') where the server already
@@ -86,7 +90,8 @@ class SyncEngine {
   private reconcilePromise: Promise<void> | null = null;
 
   private listeners = new Set<() => void>();
-  private snapshot: SyncStatus = { status: 'idle', pending: 0, deadLetter: 0, lastError: null, stuck: false };
+  private snapshot: SyncStatus = { status: 'idle', pending: 0, deadLetter: 0, lastError: null, stuck: false, readyUserId: null };
+  private readyUserId: string | null = null;
 
   constructor() {
     // A live edit enqueues outside any flush cycle; react promptly so normal
@@ -116,6 +121,7 @@ class SyncEngine {
       return;
     }
     this.userId = userId;
+    this.readyUserId = null;
     this.reconcilePromise = this.reconcile(userId).finally(() => {
       this.reconcilePromise = null;
     });
@@ -175,6 +181,7 @@ class SyncEngine {
     }
 
     this.userId = null;
+    this.readyUserId = null;
     this.setStatus('idle');
   }
 
@@ -338,6 +345,9 @@ class SyncEngine {
       // projector is live, so any today meals this fills in are captured + synced
       // just like an in-app activation.
       useMealStore.getState().hydrateActivePlanIfNeeded();
+      // Days may be filled now (capture live, pull applied, plan rebuilt) —
+      // not after the upload below, which can take a while.
+      this.markFillReady(userId);
 
       await AsyncStorage.setItem(LAST_USER_KEY, userId);
       await this.flush();
@@ -352,7 +362,18 @@ class SyncEngine {
       // Offline is expected; a failure while online is worth knowing about.
       if (this.online) reportError(e, 'sync.reconcile');
       this.setStatus('error');
+    } finally {
+      // Capture is running and the pull (if any) is applied: a day filled from
+      // the plan now is seen and uploaded, and a day another phone already
+      // filled has arrived. Failed/offline too — waiting longer can't help.
+      this.markFillReady(userId);
     }
+  }
+
+  private markFillReady(userId: string): void {
+    if (this.userId !== userId || this.readyUserId === userId) return;
+    this.readyUserId = userId;
+    this.setStatus(this.baseStatus);
   }
 
   // ── outbox drain ────────────────────────────────────────────────────────────
@@ -476,7 +497,7 @@ class SyncEngine {
     // offline is expected, not a problem, so the indicator stays hidden until
     // connectivity is back and something still genuinely isn't syncing.
     const stuck = this.online && (deadLetter > 0 || pendingStuck);
-    this.snapshot = { status, pending, deadLetter, lastError: this.lastError, stuck };
+    this.snapshot = { status, pending, deadLetter, lastError: this.lastError, stuck, readyUserId: this.readyUserId };
     this.listeners.forEach(f => f());
     // If an item will cross the "stuck" threshold later, schedule a single
     // re-eval at that moment so the indicator flips on its own. Skip while

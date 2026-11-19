@@ -21,6 +21,9 @@ export function SyncProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (hydrated) return;
     const unsub = useMealStore.persist.onFinishHydration(() => setHydrated(true));
+    // Hydration may have finished between render and this effect (the
+    // listener would never fire, and nothing would sync that launch).
+    if (useMealStore.persist.hasHydrated()) setHydrated(true);
     return unsub;
   }, [hydrated]);
 
@@ -41,6 +44,7 @@ export function SyncProvider({ children }: { children: ReactNode }) {
       void engine.onSignIn(userId);
     } else if (!userId && currentUserId) {
       setCurrentUserId(null);
+      fillTimedOutFor = null; // a later sign-in waits for its own download
       void engine.onSignOut();
     }
   }, [session, initializing, hydrated, currentUserId]);
@@ -61,4 +65,35 @@ export function SyncProvider({ children }: { children: ReactNode }) {
 // Subscribe to live sync status (state, pending/dead-letter counts, last error).
 export function useSyncStatus(): SyncStatus {
   return useSyncExternalStore(engine.subscribe, engine.getSnapshot, engine.getSnapshot);
+}
+
+const DAY_FILL_WAIT_MS = 5_000;
+// The account the 5s wait already ran out for: later screens don't wait again.
+let fillTimedOutFor: string | null = null;
+const readyUserIdSnapshot = () => engine.getSnapshot().readyUserId;
+
+// When a screen may fill a day from the plan (resolveDayFromTemplates): once
+// the signed-in account's download has finished. Sync is then watching, so the
+// new meals upload, and a day another phone already filled has arrived instead
+// of being built twice — pull first, then make changes (the WatermelonDB
+// order). Home filled today at mount before, while sync wasn't watching yet:
+// those meals counted as uploaded and never were (Nov 19). No session = no
+// sync to wait for. Gives up after 5s so a slow network never leaves the day
+// empty (sync is watching by then; only the pull is late).
+export function useDayFillReady(): boolean {
+  const { session } = useAuth();
+  // Only this field: the whole status changes on every queued write.
+  const readyUserId = useSyncExternalStore(engine.subscribe, readyUserIdSnapshot, readyUserIdSnapshot);
+  const userId = session?.user?.id ?? null;
+  const synced = !userId || readyUserId === userId;
+  const [, setTimedOut] = useState(false);
+  useEffect(() => {
+    if (synced || !userId || fillTimedOutFor === userId) return;
+    const t = setTimeout(() => {
+      fillTimedOutFor = userId;
+      setTimedOut(true);
+    }, DAY_FILL_WAIT_MS);
+    return () => clearTimeout(t);
+  }, [synced, userId]);
+  return synced || fillTimedOutFor === userId;
 }

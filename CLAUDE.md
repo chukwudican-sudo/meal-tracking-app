@@ -278,6 +278,12 @@ These come straight from months of his feedback. Violating them is the #1 thing 
   or any onboarding answer) and the phone has none, it RESTORES (local leftovers cleared, server wins, nothing local
   uploaded over it); otherwise (new account) local data is uploaded as before. Decided by server data, not onboarding timing (signup gets a session before answers are saved).
   Never upload local defaults over a server profile — that wiped real profiles before Oct 30.
+- **Pull first, then fill days (Nov 19):** sync only sees changes made after its sign-in reconcile starts capturing,
+  so anything that fills a day from the plan automatically (`resolveDayFromTemplates` on Home / Day Detail) waits for
+  `useDayFillReady()` (lib/sync/SyncProvider: this account's download done, no session, or 5s). Filled at Home's
+  mount before, launch-day plan meals were baselined as uploaded and never sent. Any new automatic store change at
+  launch must wait the same way. Known gap (post-launch): plan meals get random ids per phone, so two phones filling
+  the same day before either syncs make duplicates — fix with calendar-style ids (series + date).
 - **Settings/profile forms (`components/profile/FormPage`):** switches and choices save on tap (no button); typed
   forms pass `dirty` (`useIsDirty`) → green **Save** top-right, grey until changed, "Discard changes?" on leaving
   unsaved. `onSave` returns `false` when validation refuses. Only Feedback keeps a bottom button (Submit).

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   ScrollView,
   StyleSheet,
@@ -20,6 +21,7 @@ import type { MealEntry, MealSlot } from '@/store/types';
 import { MealDetailModal } from '@/components/MealDetailModal';
 import { AddMealScreen } from '@/components/addMeal/AddMealScreen';
 import { slotNameToCategory } from '@/utils/mealSlots';
+import { useDayFillReady } from '@/lib/sync/SyncProvider';
 
 function formatDayHeading(iso: string): { title: string; subtitle: string } {
   const d = new Date(iso + 'T00:00:00');
@@ -58,10 +60,16 @@ export default function DayDetailScreen() {
 
   // Materialize the day's meals from the active plan's templates the first
   // time this day is opened. Days that already have a log (edited/completed)
-  // are left untouched by resolveDayFromTemplates.
+  // are left untouched by resolveDayFromTemplates. Once the account's download
+  // is done (useDayFillReady), so sync sees and uploads them.
+  const dayFillReady = useDayFillReady();
+  const hasLog = useMealStore(s => !!s.logs[date]);
+  // Until the day is filled, its slots would show as empty and tapping one
+  // would build the day without its plan meals: show loading instead (≤5s).
+  const waitingForFill = !dayFillReady && !hasLog;
   useEffect(() => {
-    if (date) resolveDayFromTemplates(date);
-  }, [date, resolveDayFromTemplates]);
+    if (date && dayFillReady) resolveDayFromTemplates(date);
+  }, [date, dayFillReady, resolveDayFromTemplates]);
   const removeMealFromDay = useMealStore(s => s.removeMealFromDay);
   const restoreMealToDay = useMealStore(s => s.restoreMealToDay);
   const removeDayMealWithScope = useMealStore(s => s.removeDayMealWithScope);
@@ -245,8 +253,15 @@ export default function DayDetailScreen() {
           </View>
         </View>
 
+        {waitingForFill ? (
+          <View style={styles.loadingDay}>
+            <ActivityIndicator color={COLORS.textSecondary} />
+            <Text style={styles.loadingDayText}>Loading your day…</Text>
+          </View>
+        ) : null}
+
         {/* Slot sections */}
-        {sections.map(({ slot, meal }) => (
+        {!waitingForFill && sections.map(({ slot, meal }) => (
           <SlotBlock
             key={slot.id}
             slot={slot}
@@ -461,6 +476,8 @@ const styles = StyleSheet.create({
 
   // Other / ad-hoc meals
   otherHeader: { color: COLORS.text, fontSize: 15, fontWeight: '700', marginTop: 4 },
+  loadingDay: { alignItems: 'center', paddingVertical: 40, gap: 12 },
+  loadingDayText: { color: COLORS.textSecondary, fontSize: 13 },
   mealRow: {
     flexDirection: 'row',
     alignItems: 'center',

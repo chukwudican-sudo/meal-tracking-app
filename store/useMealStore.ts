@@ -767,6 +767,11 @@ export const useMealStore = create<AppStore>()(
 
       // ── Water ──────────────────────────────────────────────────────────────
       logWater: (date, ml) => {
+        // Same as addMealToDay: water on a today/future day with no log yet
+        // would create it without the plan's meals, and they'd never appear
+        // (resolveDayFromTemplates skips days that have a log) — e.g. a water
+        // tap while Home waits for the download to fill the day.
+        if (!get().logs[date] && date >= toIsoDate(new Date())) get().resolveDayFromTemplates(date);
         set(state => {
           const log = state.logs[date] ?? { date, meals: [], waterMl: 0 };
           return {
