@@ -1,9 +1,8 @@
 // Client wrapper for the `recipe-assistant` edge function (in-recipe chat).
 //
-// Sends the recipe context (name, source, ingredients, steps) plus the full
-// chat history (last entry the new user message) to Supabase, which enforces
-// the subscription-mandatory gate + the steps-exist sequencing check for AI
-// recipes, and returns the assistant's reply. Deliberately unmetered
+// Sends the recipe context (name, ingredients, steps) plus the full chat
+// history (last entry the new user message) to Supabase, which enforces the
+// Pro subscription gate and returns the assistant's reply. Deliberately unmetered
 // server-side. Invoke/timeout/error-parsing plumbing is shared via
 // ./aiEdgeClient.
 
@@ -20,10 +19,6 @@ export class RecipeAssistantError extends AIError {
   }
 }
 
-// 'ai' triggers the server's steps-exist sequencing check; 'premade' skips it
-// (a subscriber already has full access to every premade recipe).
-export type RecipeAssistantSource = 'ai' | 'premade';
-
 export interface RecipeAssistantMessage {
   role: 'user' | 'assistant';
   text: string;
@@ -31,7 +26,6 @@ export interface RecipeAssistantMessage {
 
 export interface RecipeAssistantParams {
   recipeName: string;
-  recipeSource: RecipeAssistantSource;
   ingredients: Pick<Ingredient, 'name' | 'quantity' | 'unit'>[];
   steps: string[];
   messages: RecipeAssistantMessage[];
@@ -40,7 +34,6 @@ export interface RecipeAssistantParams {
 export async function recipeAssistant(params: RecipeAssistantParams): Promise<string> {
   const body = {
     recipeName: params.recipeName.trim().slice(0, 120),
-    recipeSource: params.recipeSource,
     ingredients: params.ingredients.map(i => ({
       name: String(i.name ?? '').trim().slice(0, 120),
       quantity: i.quantity,

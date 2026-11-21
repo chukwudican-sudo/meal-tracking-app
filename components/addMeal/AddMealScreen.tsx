@@ -24,7 +24,7 @@ import { useCloseOnOverlayReset } from '@/lib/overlays';
 import { MealDraftCard } from './MealDraftCard';
 import { FixResultScreen } from './FixResultScreen';
 import { DisclaimerScreen } from './DisclaimerScreen';
-import { PageHeader } from '@/components/PageHeader';
+import { HEADER_HEIGHT, PageHeader } from '@/components/PageHeader';
 import { PaywallModalHost } from '@/components/paywall/PaywallModalHost';
 import { ToastHost } from '@/components/ToastHost';
 import type { MealEntry } from '@/store/types';
@@ -144,7 +144,9 @@ export function AddMealScreen({ visible, date, onClose }: Props) {
           />
         )}
 
-        {/* Active tab content */}
+        {/* Active tab content. It starts below the safe area + header, so the
+            AI and Manual tabs' KeyboardAvoidingViews (which measure against
+            their parent, not the screen) get that distance as their offset. */}
         <View style={styles.tabContent}>
           {activeTab === 'scan' && (
             <ScanTab
@@ -176,10 +178,10 @@ export function AddMealScreen({ visible, date, onClose }: Props) {
             />
           )}
           {activeTab === 'ai' && (
-            <AITab context={context} date={date} onLogged={handleClose} />
+            <AITab context={context} date={date} onLogged={handleClose} keyboardOffset={insets.top + HEADER_HEIGHT} />
           )}
           {activeTab === 'manual' && (
-            <ManualTab date={date} onCreated={handleClose} formOpen={manualFormOpen} onFormOpenChange={setManualFormOpen} />
+            <ManualTab date={date} onCreated={handleClose} formOpen={manualFormOpen} onFormOpenChange={setManualFormOpen} keyboardOffset={insets.top + HEADER_HEIGHT} />
           )}
           {activeTab === 'search' && (
             <SearchTab onClose={handleClose} />

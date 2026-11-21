@@ -20,10 +20,13 @@ interface BackButtonProps {
   // Defaults to router.back(); pages with a fallback or unsaved-changes
   // prompt pass their own.
   onPress?: () => void;
-  // 'close' (✕) for leaving an edit mode rather than a page.
-  icon?: 'back' | 'close';
+  // 'close' (✕) for leaving an edit mode rather than a page; 'down' (⌄) for
+  // a page that slid up from the bottom.
+  icon?: 'back' | 'close' | 'down';
   style?: StyleProp<ViewStyle>;
 }
+
+const BACK_ICONS = { back: 'chevron-back', close: 'close', down: 'chevron-down' } as const;
 
 export function BackButton({ onPress, icon = 'back', style }: BackButtonProps) {
   return (
@@ -33,9 +36,9 @@ export function BackButton({ onPress, icon = 'back', style }: BackButtonProps) {
       hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
       activeOpacity={0.6}
       accessibilityRole="button"
-      accessibilityLabel={icon === 'close' ? 'Close' : 'Back'}
+      accessibilityLabel={icon === 'back' ? 'Back' : 'Close'}
     >
-      <Ionicons name={icon === 'close' ? 'close' : 'chevron-back'} size={26} color={COLORS.text} />
+      <Ionicons name={BACK_ICONS[icon]} size={26} color={COLORS.text} />
     </TouchableOpacity>
   );
 }
@@ -45,7 +48,7 @@ interface PageHeaderProps {
   // Omit for router.back(); null hides the button (a first step, say) and
   // keeps its space so the title stays centred.
   onBack?: (() => void) | null;
-  backIcon?: 'back' | 'close';
+  backIcon?: BackButtonProps['icon'];
   // Right-hand action (bookmark, Save, menu…). Keep it ~40pt wide, or pass
   // `wideSides` so the title stays centred with a wider control.
   right?: ReactNode;

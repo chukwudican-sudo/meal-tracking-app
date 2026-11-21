@@ -433,6 +433,8 @@ export function MealDetailModal() {
             showsVerticalScrollIndicator={false}
             contentContainerStyle={styles.scrollBody}
             keyboardShouldPersistTaps="handled"
+            // Scrolls the name field above the keyboard (it sits under the photo).
+            automaticallyAdjustKeyboardInsets
           >
             {/* Image tile */}
             {hasPhoto ? (

@@ -1,16 +1,9 @@
 import { router, useLocalSearchParams } from 'expo-router';
-import { useMemo, useRef, useState } from 'react';
+import { useMemo } from 'react';
 import {
-  ActivityIndicator,
-  Animated,
-  Dimensions,
-  KeyboardAvoidingView,
-  Platform,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -19,57 +12,19 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { PageHeader } from '@/components/PageHeader';
 import { Screen } from '@/components/Screen';
 
-import { AIError } from '@/ai/aiEdgeClient';
 import { useRecipeFix } from '@/components/recipes/useRecipeFix';
 import { NutritionTiles } from '@/components/recipes/NutritionTiles';
-import { recipeAssistant, type RecipeAssistantSource } from '@/ai/recipeAssistant';
 import { COLORS } from '@/constants/theme';
 import {
   toRecipeInputFromSaved,
   toRecipeInputFromTemplate,
   useRecipeActions,
 } from '@/hooks/useRecipeActions';
-import { recipeRequiresPro } from '@/lib/entitlements';
+import { useResolvedRecipe } from '@/hooks/useResolvedRecipe';
 import { openPaywall } from '@/lib/paywall';
-import type { Ingredient, Macros, RecipeDifficulty } from '@/store/types';
+import type { Ingredient, RecipeDifficulty } from '@/store/types';
 import { useEntitlementStore } from '@/store/useEntitlementStore';
 import { useMealStore } from '@/store/useMealStore';
-import { useToastStore } from '@/store/useToastStore';
-import { isAIConsentDeclined } from '@/lib/aiConsent';
-
-interface ResolvedRecipe {
-  source: 'premade' | 'saved';
-  // How the Recipe Assistant should gate this recipe: 'ai' triggers the
-  // steps-exist sequencing check; 'premade' skips it (a subscriber has full
-  // access to every premade recipe). Manual/premade saved recipes map to
-  // 'premade'.
-  chatSource: RecipeAssistantSource;
-  // Whether viewing the full ingredients/steps here requires an active Pro
-  // subscription — see lib/entitlements.ts#recipeRequiresPro. Always false
-  // for 'manual' saved recipes, always true for 'ai', and flag-dependent for
-  // premade (RecipeTemplate.isFree).
-  requiresPro: boolean;
-  id: string;
-  recipeId?: string;
-  name: string;
-  category?: string;
-  calories: number;
-  cookTimeMin?: number;
-  macros: Macros;
-  ingredients: Ingredient[];
-  steps?: string[];
-  difficulty?: RecipeDifficulty;
-  favourited: boolean;
-}
-
-interface ChatMsg {
-  id: string;
-  role: 'assistant' | 'user';
-  text: string;
-}
-
-const { height: SCREEN_HEIGHT } = Dimensions.get('window');
-const PANEL_HEIGHT = Math.round(SCREEN_HEIGHT * 0.52);
 
 export default function RecipeDetailScreen() {
   const params = useLocalSearchParams<{ id: string }>();
@@ -81,54 +36,7 @@ export default function RecipeDetailScreen() {
   const insets = useSafeAreaInsets();
   const isPro = useEntitlementStore(s => s.isPro);
 
-  const resolved = useMemo<ResolvedRecipe | null>(() => {
-    const premade = recipes.find(r => r.id === id);
-    if (premade) {
-      const saved = savedRecipes.find(s => s.recipeId === premade.id);
-      return {
-        source: 'premade',
-        chatSource: 'premade',
-        requiresPro: recipeRequiresPro({ source: 'premade', isFree: premade.isFree }),
-        id: premade.id,
-        recipeId: premade.id,
-        name: premade.name,
-        category: premade.category,
-        calories: premade.calories,
-        cookTimeMin: premade.cookTimeMin,
-        macros: premade.macros,
-        ingredients: premade.ingredients,
-        steps: premade.steps,
-        difficulty: premade.difficulty,
-        favourited: !!saved?.favourited,
-      };
-    }
-    const saved = savedRecipes.find(s => s.id === id);
-    if (saved) {
-      // A saved copy of a premade recipe (source 'premade') defers to the
-      // linked catalog entry's isFree flag rather than being unconditionally
-      // free/paid itself.
-      const linkedPremade = saved.source === 'premade'
-        ? recipes.find(r => r.id === saved.recipeId)
-        : undefined;
-      return {
-        source: 'saved',
-        chatSource: saved.source === 'ai' ? 'ai' : 'premade',
-        requiresPro: recipeRequiresPro({ source: saved.source, isFree: linkedPremade?.isFree }),
-        id: saved.id,
-        recipeId: saved.recipeId,
-        name: saved.name,
-        category: saved.category,
-        calories: saved.calories,
-        cookTimeMin: saved.cookTimeMin,
-        macros: saved.macros,
-        ingredients: saved.ingredients,
-        steps: saved.steps,
-        difficulty: saved.difficulty,
-        favourited: saved.favourited,
-      };
-    }
-    return null;
-  }, [recipes, savedRecipes, id]);
+  const resolved = useResolvedRecipe(id);
 
   const recipeInput = useMemo(() => {
     if (!resolved) return null;
@@ -263,13 +171,15 @@ export default function RecipeDetailScreen() {
 
       {fixSheet}
 
-      <RecipeAiChat
-        recipeName={resolved.name}
-        recipeSource={resolved.chatSource}
-        ingredients={resolved.ingredients}
-        steps={resolved.steps ?? []}
-        bottomInset={insets.bottom}
-      />
+      <TouchableOpacity
+        style={[styles.fab, { bottom: Math.max(insets.bottom, 12) + 12 }]}
+        onPress={() => router.push({ pathname: '/recipe/assistant/[id]', params: { id: resolved.id } })}
+        activeOpacity={0.85}
+        accessibilityRole="button"
+        accessibilityLabel="Ask the Recipe Assistant"
+      >
+        <Ionicons name="sparkles" size={22} color="#0E1A12" />
+      </TouchableOpacity>
     </Screen>
   );
 }
@@ -292,206 +202,6 @@ function LockedRecipeCard({ onUnlock }: { onUnlock: () => void }) {
     </View>
   );
 }
-
-// ─── AI chat (shell) ─────────────────────────────────────────────────────────
-
-function RecipeAiChat({
-  recipeName,
-  recipeSource,
-  ingredients,
-  steps,
-  bottomInset,
-}: {
-  recipeName: string;
-  recipeSource: RecipeAssistantSource;
-  ingredients: Ingredient[];
-  steps: string[];
-  bottomInset: number;
-}) {
-  const [open, setOpen] = useState(false);
-  const [messages, setMessages] = useState<ChatMsg[]>([]);
-  const [input, setInput] = useState('');
-  const [sending, setSending] = useState(false);
-  const translateY = useRef(new Animated.Value(PANEL_HEIGHT)).current;
-  const scrollRef = useRef<ScrollView>(null);
-  const showToast = useToastStore(s => s.showToast);
-
-  const scrollToEnd = () =>
-    requestAnimationFrame(() => scrollRef.current?.scrollToEnd({ animated: true }));
-
-  const openPanel = () => {
-    if (messages.length === 0) {
-      setMessages([
-        {
-          id: 'intro',
-          role: 'assistant',
-          text: `Ask me anything about ${recipeName} — swaps, substitutions, portions, or technique.`,
-        },
-      ]);
-    }
-    setOpen(true);
-    Animated.spring(translateY, {
-      toValue: 0,
-      useNativeDriver: true,
-      bounciness: 4,
-      speed: 14,
-    }).start();
-  };
-
-  const closePanel = () => {
-    Animated.timing(translateY, {
-      toValue: PANEL_HEIGHT,
-      duration: 220,
-      useNativeDriver: true,
-    }).start(() => setOpen(false));
-  };
-
-  // Split out so a successful paywall purchase can resend this exact turn
-  // without duplicating the user's message bubble.
-  const sendToAssistant = async (nextMessages: ChatMsg[]) => {
-    setSending(true);
-    try {
-      const reply = await recipeAssistant({
-        recipeName,
-        recipeSource,
-        ingredients,
-        steps,
-        // Drop the local-only intro greeting; send the real conversation turns
-        // ending with the user's new message.
-        messages: nextMessages
-          .filter(m => m.id !== 'intro')
-          .map(m => ({ role: m.role, text: m.text })),
-      });
-      setMessages(prev => [...prev, { id: `a-${Date.now()}`, role: 'assistant', text: reply }]);
-      scrollToEnd();
-    } catch (e) {
-      // "Not now" on the AI permission sheet: take the unanswered message back
-      // into the box rather than leaving it hanging without a reply.
-      if (isAIConsentDeclined(e)) {
-        const last = nextMessages[nextMessages.length - 1];
-        if (last?.role === 'user') {
-          setMessages(prev => prev.filter(m => m.id !== last.id));
-          setInput(prev => prev || last.text);
-        }
-        return;
-      }
-      // not_premium (subscription gate or steps-not-generated gate) → paywall
-      // and close the panel rather than leaving a dangling fake reply. On a
-      // successful purchase, reopen the panel and resend this same turn.
-      if (e instanceof AIError && e.code === 'not_premium') {
-        closePanel();
-        openPaywall({
-          reason: 'premium_feature',
-          headline: 'Unlock the Recipe Assistant with Pro',
-          onSuccess: () => { openPanel(); void sendToAssistant(nextMessages); },
-        });
-        return;
-      }
-      const message =
-        e instanceof AIError && e.message
-          ? e.message
-          : 'Could not get a reply right now. Please try again.';
-      showToast(message);
-    } finally {
-      setSending(false);
-    }
-  };
-
-  const handleSend = async () => {
-    const text = input.trim();
-    if (!text || sending) return;
-    setInput('');
-    const userMsg: ChatMsg = { id: `u-${Date.now()}`, role: 'user', text };
-    const nextMessages = [...messages, userMsg];
-    setMessages(nextMessages);
-    scrollToEnd();
-    await sendToAssistant(nextMessages);
-  };
-
-  const canSend = !!input.trim() && !sending;
-
-  return (
-    <>
-      {/* Floating action button */}
-      {!open ? (
-        <TouchableOpacity style={[styles.fab, { bottom: Math.max(bottomInset, 12) + 12 }]} onPress={openPanel} activeOpacity={0.85}>
-          <Ionicons name="sparkles" size={22} color="#0E1A12" />
-        </TouchableOpacity>
-      ) : null}
-
-      {/* Backdrop */}
-      {open ? <Pressable style={styles.backdrop} onPress={closePanel} /> : null}
-
-      {/* Slide-up panel */}
-      <Animated.View
-        style={[
-          styles.panel,
-          { height: PANEL_HEIGHT, transform: [{ translateY }] },
-        ]}
-        pointerEvents={open ? 'auto' : 'none'}
-      >
-        <View style={styles.panelHandleRow}>
-          <View style={styles.panelHandle} />
-        </View>
-        <View style={styles.panelHeader}>
-          <Text style={styles.panelTitle}>Recipe Assistant</Text>
-          <TouchableOpacity onPress={closePanel} hitSlop={10}>
-            <Ionicons name="chevron-down" size={22} color={COLORS.textSecondary} />
-          </TouchableOpacity>
-        </View>
-
-        <KeyboardAvoidingView
-          style={{ flex: 1 }}
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        >
-          <ScrollView
-            ref={scrollRef}
-            contentContainerStyle={styles.chatScroll}
-            keyboardShouldPersistTaps="handled"
-          >
-            {messages.map(m => (
-              <View
-                key={m.id}
-                style={m.role === 'user' ? styles.userBubble : styles.assistantBubble}
-              >
-                <Text style={m.role === 'user' ? styles.userText : styles.assistantText}>{m.text}</Text>
-              </View>
-            ))}
-            {sending ? (
-              <View style={styles.typingBubble}>
-                <ActivityIndicator size="small" color={COLORS.textSecondary} />
-                <Text style={styles.typingText}>Thinking…</Text>
-              </View>
-            ) : null}
-          </ScrollView>
-
-          <View style={[styles.inputRow, { paddingBottom: Math.max(bottomInset, 10) }]}>
-            <TextInput
-              value={input}
-              onChangeText={setInput}
-              placeholder="Ask about this recipe…"
-              placeholderTextColor={COLORS.textSecondary}
-              style={styles.input}
-              returnKeyType="send"
-              onSubmitEditing={handleSend}
-              editable={!sending}
-              multiline
-            />
-            <TouchableOpacity
-              onPress={handleSend}
-              disabled={!canSend}
-              style={[styles.sendBtn, !canSend && styles.sendBtnDisabled]}
-              activeOpacity={0.8}
-            >
-              <Text style={styles.sendBtnText}>↑</Text>
-            </TouchableOpacity>
-          </View>
-        </KeyboardAvoidingView>
-      </Animated.View>
-    </>
-  );
-}
-
 
 function difficultyStyle(d: RecipeDifficulty) {
   switch (d) {
@@ -639,100 +349,4 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 4 },
     elevation: 6,
   },
-
-  // ── Chat panel ──
-  backdrop: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.4)',
-  },
-  panel: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: COLORS.bg,
-    borderTopLeftRadius: 18,
-    borderTopRightRadius: 18,
-    borderTopWidth: 1,
-    borderColor: COLORS.border,
-  },
-  panelHandleRow: { alignItems: 'center', paddingTop: 8 },
-  panelHandle: { width: 40, height: 4, borderRadius: 2, backgroundColor: COLORS.border },
-  panelHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: COLORS.border,
-  },
-  panelTitle: { color: COLORS.text, fontSize: 16, fontWeight: '700' },
-
-  chatScroll: { padding: 14, gap: 8 },
-  assistantBubble: {
-    backgroundColor: COLORS.card,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    borderRadius: 14,
-    padding: 12,
-    alignSelf: 'flex-start',
-    maxWidth: '88%',
-  },
-  assistantText: { color: COLORS.text, fontSize: 14, lineHeight: 20 },
-  userBubble: {
-    backgroundColor: COLORS.green,
-    borderRadius: 14,
-    padding: 12,
-    alignSelf: 'flex-end',
-    maxWidth: '88%',
-  },
-  userText: { color: '#0E1A12', fontSize: 14, lineHeight: 20 },
-
-  typingBubble: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    backgroundColor: COLORS.card,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    borderRadius: 14,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    alignSelf: 'flex-start',
-  },
-  typingText: { color: COLORS.textSecondary, fontSize: 13 },
-
-  inputRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    paddingHorizontal: 12,
-    paddingTop: 10,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: COLORS.border,
-    gap: 8,
-    backgroundColor: COLORS.bg,
-  },
-  input: {
-    flex: 1,
-    backgroundColor: COLORS.card,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    borderRadius: 18,
-    paddingHorizontal: 12,
-    paddingVertical: Platform.OS === 'ios' ? 10 : 6,
-    color: COLORS.text,
-    fontSize: 14,
-    maxHeight: 100,
-  },
-  sendBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: COLORS.green,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  sendBtnDisabled: { backgroundColor: COLORS.elevated },
-  sendBtnText: { color: '#0E1A12', fontSize: 18, fontWeight: '700' },
 });

@@ -468,8 +468,8 @@ enabled = true
 verify_jwt = true
 
 # AI in-recipe chat backend (recipe-assistant). Same gateway/secret setup;
-# text-only. Subscription-mandatory + steps-exist sequencing check for AI
-# recipes. Deliberately unmetered (no rate limit / usage logging).
+# text-only. Subscription-mandatory. Unmetered as a product (no scan count);
+# only a generous 60/minute technical rate-limit backstop.
 [functions.recipe-assistant]
 enabled = true
 verify_jwt = true

@@ -245,7 +245,9 @@ export default function EditGoalScreen() {
         ))}
       </View>
 
-      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+      {/* Scrolls the field you type in above the keyboard ("Tweak manually"
+          rows sit low on small phones). */}
+      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets>
         {stepId === 'Goal' && (
           <>
             <StepHeader title="What's your goal?" sub="Pick what you're working toward right now." />

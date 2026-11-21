@@ -16,12 +16,14 @@ interface Props {
   // step back from the form.
   formOpen: boolean;
   onFormOpenChange: (open: boolean) => void;
+  // Distance from the top of the screen to this tab (AddMealScreen).
+  keyboardOffset: number;
 }
 
 // Pure-manual entry: starts on a landing page, then opens the simplified meal
 // form. Logging adds the meal to the day, auto-saves it to Recently Added
 // (savedRecipes, source 'manual'), and returns the user to the Home tab.
-export function ManualTab({ date, onCreated, formOpen, onFormOpenChange }: Props) {
+export function ManualTab({ date, onCreated, formOpen, onFormOpenChange, keyboardOffset }: Props) {
   const addMealToDay = useMealStore(s => s.addMealToDay);
   const removeMealFromDay = useMealStore(s => s.removeMealFromDay);
   const ensureRecipeSaved = useMealStore(s => s.ensureRecipeSaved);
@@ -87,6 +89,7 @@ export function ManualTab({ date, onCreated, formOpen, onFormOpenChange }: Props
       primaryLabel="Log Meal"
       showMealType
       showHeader={false}
+      keyboardOffset={keyboardOffset}
       onBack={() => onFormOpenChange(false)}
       onSubmit={handleSubmit}
     />

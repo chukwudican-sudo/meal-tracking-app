@@ -28,6 +28,8 @@ interface Props {
   context: DayContext;
   date: string;
   onLogged: () => void;
+  // Distance from the top of the screen to this tab (AddMealScreen).
+  keyboardOffset: number;
 }
 
 const ZERO_MACROS = { protein: 0, carbs: 0, fats: 0 };
@@ -39,7 +41,7 @@ function nowHHMM(): string {
 
 
 const ESTIMATE_MESSAGES = ['Estimating nutrition…', 'Breaking down ingredients…', 'Almost there…'];
-export function AITab({ date, onLogged }: Props) {
+export function AITab({ date, onLogged, keyboardOffset }: Props) {
   const addMealToDay = useMealStore(s => s.addMealToDay);
   const ingestMidWeekIngredients = useMealStore(s => s.ingestMidWeekIngredients);
 
@@ -151,7 +153,7 @@ export function AITab({ date, onLogged }: Props) {
     <KeyboardAvoidingView
       style={styles.full}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? keyboardOffset : 0}
     >
       <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollBody} keyboardShouldPersistTaps="handled">
         {/* Live nutrition card */}

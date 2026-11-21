@@ -4,15 +4,12 @@
 // specific recipe (swaps, substitutions, tweaks, technique) and gets a reply
 // with awareness of their dietary preferences / allergies.
 //
-// Entitlement is TWO gates, both mandatory:
-//   1. Active subscription — unconditional. This is a premium-only feature with
-//      no free-tier path at all (no free-scan pool involvement).
-//   2. Recipe "unlocked" sequencing check for AI/Custom recipes — the request
-//      must carry a non-empty `steps` array, proving generate-recipe-steps has
-//      already run for this recipe. Premade recipes need no extra check (a
-//      subscriber already has full access to every premade recipe).
-// Both failures reuse the `not_premium` code/402 so the client's existing
-// paywall-alert handling needs no special-casing.
+// Entitlement is one gate: an active subscription, unconditional. This is a
+// premium-only feature with no free-tier path at all (no free-scan pool
+// involvement). There is deliberately no "steps must exist first" check: until
+// Nov 19, 2026 an AI recipe without steps was refused with not_premium, which
+// told a paying user Pro wasn't confirmed. Writing steps is Pro too, so that
+// check protected nothing; a recipe without steps is sent as "(none provided)".
 //
 // UNMETERED AS A PRODUCT FEATURE: this function does NOT call consumeFreeScan
 // and chat is never presented to the user as having a limit — no counter, no
@@ -63,9 +60,6 @@ const LOG_PREFIX = `[${FUNCTION_NAME}]`;
 const RATE_LIMIT = 60;
 const RATE_WINDOW_MS = 60 * 1000;
 
-const RECIPE_SOURCES = ['ai', 'premade'] as const;
-type RecipeSource = (typeof RECIPE_SOURCES)[number];
-
 const RESPONSE_SCHEMA = {
   type: 'object',
   properties: {
@@ -87,16 +81,9 @@ interface IngredientInput {
 
 interface RequestBody {
   recipeName: string;
-  recipeSource: RecipeSource;
   ingredients: IngredientInput[];
   steps: string[];
   messages: ChatTurn[];
-}
-
-function sanitizeSource(raw: unknown): RecipeSource | null {
-  return typeof raw === 'string' && (RECIPE_SOURCES as readonly string[]).includes(raw)
-    ? (raw as RecipeSource)
-    : null;
 }
 
 function sanitizeIngredients(raw: unknown): IngredientInput[] {
@@ -203,17 +190,16 @@ Deno.serve(async (req: Request) => {
   try {
     const raw = await req.json();
     const recipeName = typeof raw?.recipeName === 'string' ? raw.recipeName.trim().slice(0, MAX_NAME_LEN) : '';
-    const recipeSource = sanitizeSource(raw?.recipeSource);
     const messages = sanitizeMessages(raw?.messages);
-    if (!recipeName || !recipeSource) {
-      return errorResponse('invalid_input', 'A recipe and source are required', 400);
+    // Older app builds also send `recipeSource`; it's ignored (see header).
+    if (!recipeName) {
+      return errorResponse('invalid_input', 'A recipe is required', 400);
     }
     if (messages.length === 0 || messages[messages.length - 1].role !== 'user') {
       return errorResponse('invalid_input', 'A user message is required', 400);
     }
     body = {
       recipeName,
-      recipeSource,
       ingredients: sanitizeIngredients(raw?.ingredients),
       steps: sanitizeSteps(raw?.steps),
       messages,
@@ -246,17 +232,9 @@ Deno.serve(async (req: Request) => {
   // Apple 5.1.2: nothing goes to Gemini without the user's yes (_shared/aiConsent.ts).
   if (!aiConsentGiven(profileRow)) return consentRequiredResponse();
 
-  // Gate 1 — subscription, unconditional. Premium-only feature, no free tier.
+  // Subscription, unconditional. Premium-only feature, no free tier.
   if (!isEntitled(profileRow.subscription_status)) {
     return errorResponse('not_premium', 'Chat with the Recipe Assistant is a Premium feature.', 402);
-  }
-
-  // Gate 2 — sequencing, AI/Custom recipes only. A non-empty steps array proves
-  // generate-recipe-steps already ran for this recipe. Premade recipes skip
-  // this (a subscriber already has full access to every premade recipe). Reuses
-  // not_premium so the client needs no special-casing.
-  if (body.recipeSource === 'ai' && body.steps.length === 0) {
-    return errorResponse('not_premium', 'Generate the full recipe before chatting about it.', 402);
   }
 
   // null means the rate-limit check itself errored (caught above).

@@ -60,6 +60,10 @@ interface Props {
   // false when the host screen already has the header (Add Meal → Manual):
   // never two back arrows on one screen.
   showHeader?: boolean;
+  // Distance from the top of the screen to this form's container. The
+  // KeyboardAvoidingView measures against its parent, so a form inside the
+  // Add Meal tab area must say how far down it starts; full-screen = 0.
+  keyboardOffset?: number;
   onBack: () => void;
   onSubmit: (values: MealFormValues) => void;
 }
@@ -138,7 +142,7 @@ function slotTimeFor(type: RecipeCategory, slots: MealSlot[], now: Date): string
 // ─── Component ──────────────────────────────────────────────────────────────
 
 export function MealForm({
-  initial, date, primaryLabel = 'Save', showMealType = false, showHeader = true, onBack, onSubmit,
+  initial, date, primaryLabel = 'Save', showMealType = false, showHeader = true, keyboardOffset = 0, onBack, onSubmit,
 }: Props) {
   const mealSlots = useMealStore(s => s.profile.mealSlots);
 
@@ -203,7 +207,11 @@ export function MealForm({
   }
 
   return (
-    <KeyboardAvoidingView style={styles.full} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+    <KeyboardAvoidingView
+      style={styles.full}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? keyboardOffset : 0}
+    >
       {showHeader ? <PageHeader title="New meal" onBack={onBack} /> : null}
 
       <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>

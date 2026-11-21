@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Alert,
+  KeyboardAvoidingView,
   Modal,
   Platform,
   Pressable,
@@ -675,48 +676,60 @@ function AddSlotPopup({ onCancel, onConfirm }: AddSlotPopupProps) {
 
   const timeStr = `${String(time.getHours()).padStart(2, '0')}:${String(time.getMinutes()).padStart(2, '0')}`;
   const canAdd = name.trim().length > 0;
+  const topInset = useSafeAreaInsets().top;
 
   return (
     <Modal visible transparent animationType="fade" onRequestClose={onCancel}>
-      <Pressable style={styles.pickerBackdrop} onPress={onCancel}>
-        <Pressable style={styles.addSlotCard} onPress={e => e.stopPropagation?.()}>
-          <View style={styles.pickerHeader}>
-            <Text style={styles.pickerTitle}>Add meal slot</Text>
-            <TouchableOpacity onPress={onCancel} hitSlop={10}>
-              <Ionicons name="close" size={20} color={COLORS.textSecondary} />
-            </TouchableOpacity>
-          </View>
+      {/* At the Modal root (top of the screen) so it lifts the sheet above the
+          keyboard. The dim colour lives here so the strip behind the keyboard
+          is dimmed too; on small phones the card shrinks below the status bar
+          and its body scrolls (the time wheel makes it ~445pt tall). */}
+      <KeyboardAvoidingView
+        style={[styles.addSlotLayer, { paddingTop: topInset + 8 }]}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
+        <Pressable style={styles.addSlotBackdrop} onPress={onCancel}>
+          <Pressable style={styles.addSlotCard} onPress={e => e.stopPropagation?.()}>
+            <View style={styles.pickerHeader}>
+              <Text style={styles.pickerTitle}>Add meal slot</Text>
+              <TouchableOpacity onPress={onCancel} hitSlop={10}>
+                <Ionicons name="close" size={20} color={COLORS.textSecondary} />
+              </TouchableOpacity>
+            </View>
 
-          <Text style={styles.pickerSectionLabel}>Slot name</Text>
-          <TextInput
-            style={styles.addSlotInput}
-            value={name}
-            onChangeText={setName}
-            placeholder="e.g. Pre-workout"
-            placeholderTextColor={COLORS.textMuted}
-          />
+            <ScrollView keyboardShouldPersistTaps="handled" bounces={false} showsVerticalScrollIndicator={false}>
+              <Text style={styles.pickerSectionLabel}>Slot name</Text>
+              <TextInput
+                style={styles.addSlotInput}
+                value={name}
+                onChangeText={setName}
+                placeholder="e.g. Pre-workout"
+                placeholderTextColor={COLORS.textMuted}
+              />
 
-          <Text style={styles.pickerSectionLabel}>Time · {timeStr}</Text>
-          <View style={styles.addSlotTimeWrap}>
-            <DateTimePicker
-              value={time}
-              mode="time"
-              display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-              onChange={(_, d) => d && setTime(d)}
-              themeVariant="dark"
-            />
-          </View>
+              <Text style={styles.pickerSectionLabel}>Time · {timeStr}</Text>
+              <View style={styles.addSlotTimeWrap}>
+                <DateTimePicker
+                  value={time}
+                  mode="time"
+                  display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                  onChange={(_, d) => d && setTime(d)}
+                  themeVariant="dark"
+                />
+              </View>
 
-          <TouchableOpacity
-            style={[styles.pickerPrimary, !canAdd && styles.pickerPrimaryDisabled]}
-            disabled={!canAdd}
-            onPress={() => onConfirm(name.trim(), timeStr)}
-            activeOpacity={0.85}
-          >
-            <Text style={styles.pickerPrimaryText}>Add</Text>
-          </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.pickerPrimary, !canAdd && styles.pickerPrimaryDisabled]}
+                disabled={!canAdd}
+                onPress={() => onConfirm(name.trim(), timeStr)}
+                activeOpacity={0.85}
+              >
+                <Text style={styles.pickerPrimaryText}>Add</Text>
+              </TouchableOpacity>
+            </ScrollView>
+          </Pressable>
         </Pressable>
-      </Pressable>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
@@ -950,7 +963,10 @@ const styles = StyleSheet.create({
   emptySlotText: { color: COLORS.textSecondary, fontSize: 13 },
   emptySlotAdd: { color: COLORS.green, fontSize: 13, fontWeight: '700' },
 
+  addSlotLayer: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)' },
+  addSlotBackdrop: { flex: 1, justifyContent: 'flex-end' },
   addSlotCard: {
+    flexShrink: 1,
     backgroundColor: COLORS.bg,
     borderTopLeftRadius: 18,
     borderTopRightRadius: 18,

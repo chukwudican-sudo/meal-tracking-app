@@ -100,7 +100,9 @@ export default function IngredientEditScreen() {
     <Screen edges={['top', 'bottom']}>
       <Header title="Edit Ingredient" onDelete={handleDelete} onDone={done} />
 
-      <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
+      {/* automaticallyAdjustKeyboardInsets: scrolls the tile you type in above
+          the number pad (the macro tiles sit low on the screen). */}
+      <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
         <TextInput
           style={styles.nameInput}
           value={name}

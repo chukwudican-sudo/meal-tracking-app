@@ -198,8 +198,11 @@ there are **no Add to Plan / Add to Today buttons** on recipe pages (add via "+"
   ingredients; top-right **"+" (small filled green circle, left) and bookmark (right)**; one "View Full Recipe" button
   (Pro-gated for non-free content; locked view still shows calories/macros).
 - **Full detail** (`app/recipe/detail/[id].tsx`): name, image, bookmark, tag, info bar (calories, macros, cook time,
-  difficulty Easy/Medium/Hard), ingredients with measurements, numbered steps, floating AI assistant button → half-height
-  chat panel with recipe context (`recipe-assistant`, Pro). Conversation lasts until you leave the recipe.
+  difficulty Easy/Medium/Hard), ingredients with measurements, numbered steps, floating AI assistant button → the
+  Recipe Assistant (`app/recipe/assistant/[id].tsx`): a full-screen chat that slides up, closed with ⌄, recipe name +
+  calories under its title (`recipe-assistant`, Pro). Each recipe's conversation is kept in memory while the app runs
+  (`store/useRecipeChatStore`, never saved or synced, cleared on sign-out). Replaced the half-height panel Nov 21, 2026
+  (moving a panel with the keyboard lagged).
 - **Unified recipe page** (`components/recipes/SavedRecipesView.tsx`, contexts `saved-recipes | swap | search-tab`):
   tabs **All / Saved / Recent / Recipes(premade)**; inline search of the active tab; filter icon → popup
   All/Breakfast/Snacks/Lunch/Dinner (dot when active); newest first (no sort options); green **NEW** pill for

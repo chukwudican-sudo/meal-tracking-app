@@ -77,6 +77,14 @@ function RootLayout() {
             <Stack.Screen name="recipes/category/[type]"   options={fullScreenSlide} />
             <Stack.Screen name="recipe/[id]"               options={fullScreenSlide} />
             <Stack.Screen name="recipe/detail/[id]"        options={fullScreenSlide} />
+            {/* Recipe Assistant chat: slides up over its recipe (an overlay,
+                closed with ⌄). A card, not a modal: native modals cover the
+                toast and AI-consent hosts below. No swipe-back: it would
+                leave sideways after arriving from the bottom. */}
+            <Stack.Screen
+              name="recipe/assistant/[id]"
+              options={{ presentation: 'card', headerShown: false, animation: 'slide_from_bottom', gestureEnabled: false }}
+            />
             <Stack.Screen name="ai/what-can-i-make"        options={fullScreenSlide} />
             <Stack.Screen name="ai/custom"                 options={fullScreenSlide} />
 

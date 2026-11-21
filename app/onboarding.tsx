@@ -4,6 +4,8 @@ import { router } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -840,15 +842,19 @@ function AccountStep({
   };
 
   if (verificationSent) {
+    // Keeps the code field and Verify above the number pad. This step's parent
+    // is the Screen itself (top of the screen), which KeyboardAvoidingView needs.
     return (
-      <View style={[styles.body, styles.formContent]}>
-        <EmailCodeVerification
-          email={email}
-          onVerified={onContinue}
-          onSkip={onContinue}
-          skipLabel="I'll verify later"
-        />
-      </View>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <View style={[styles.body, styles.formContent]}>
+          <EmailCodeVerification
+            email={email}
+            onVerified={onContinue}
+            onSkip={onContinue}
+            skipLabel="I'll verify later"
+          />
+        </View>
+      </KeyboardAvoidingView>
     );
   }
 

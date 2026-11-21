@@ -98,7 +98,7 @@ app/                     expo-router routes
   auth/                  verify-code (6-digit signup OTP — the real signup path) · forgot-password · reset (password-reset deep link)
                          · callback (old signup-link handler, kept untouched for any link still tapped)
   plan/                  build.tsx (Build My Plan wizard, ~3250 lines) · find.tsx (Coming soon shell) · [id] (plan detail / Current Plan / Customize) · day/[date] (Day Detail) · category/[type]
-  recipe/                [id] (preview) · detail/[id] (full recipe + AI assistant chat panel)
+  recipe/                [id] (preview) · detail/[id] (full recipe) · assistant/[id] (Recipe Assistant chat, slides up)
   recipes/               saved (unified recipe page) · category/[type]
   ai/                    custom.tsx (Custom Recipe: concept → steps) · what-can-i-make.tsx
   meal-edit/             macro/[key] · ingredient/[id]   (push routes on top of MealDetailModal, driven by mealEditSession)
@@ -159,7 +159,8 @@ These come straight from months of his feedback. Violating them is the #1 thing 
 - **New full-screen page:** add the file under `app/` AND register it in `app/_layout.tsx` with `fullScreenSlide`
   (`presentation:'card'`, `animation:'slide_from_right'`, no header). Every page slides in from the right. Intentional
   overlays keep their own animation: the "+" Add Meal screen (RN `Modal`, slides up), MealDetailModal, Fix popups,
-  scan half-sheet, toasts, alerts, `paywall` + `auth/verify-code` (modal, slide_from_bottom).
+  scan half-sheet, toasts, alerts, `paywall` + `auth/verify-code` (modal, slide_from_bottom), the Recipe Assistant
+  (card + slide_from_bottom: a native modal would cover the root toast/AI-consent hosts).
 - **Safe areas:** wrap pages in `components/Screen.tsx` (uses `useSafeAreaInsets`), not `SafeAreaView`. Footers use
   `Math.max(insets.bottom, 16) + 16`; tab pages leave ~96px bottom padding for the tab bar. Nothing may be jammed
   against the bottom edge or render above the notch.

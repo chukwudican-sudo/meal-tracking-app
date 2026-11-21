@@ -176,7 +176,7 @@ on success only: `void logAiUsage(...)` (fire-and-forget) and **awaited** `consu
 | `generate-plan-shortlist` | free-scan pool | 30/h | `{mealTypes[], proteins[], carbs[], fats[], cuisines, loves, avoid, cookTime, countPerType}` → `{[mealType]: suggestions[]}` (defaults 4 per main, 2 snacks). One call = one scan. | `ai/generatePlanShortlist.ts` → Build My Plan |
 | `generate-recipe-concept` | free-scan pool | 30/h | `{description, mealType?}` → `name, description, calories, protein, carbs, fats` (no ingredients/steps) | `ai/generateRecipeConcept.ts` → Custom Recipe stage 1 + Fix |
 | `generate-recipe-steps` | **subscription only** (`isEntitled`) | 30/h | concept (resent by client) → `ingredients[], steps[]` consistent with shown macros | `ai/generateRecipeSteps.ts` → Custom Recipe "Generate" |
-| `recipe-assistant` | **subscription only**; AI recipes must already have steps | 60/min backstop (hidden) | `{recipeName, recipeSource, ingredients, steps, messages[]}` → `{reply}`; never consumes scans | `ai/recipeAssistant.ts` → recipe detail chat |
+| `recipe-assistant` | **subscription only** (the "AI recipes must already have steps" check was removed Nov 19) | 60/min backstop (hidden) | `{recipeName, ingredients, steps, messages[]}` → `{reply}`; never consumes scans | `ai/recipeAssistant.ts` → recipe detail chat |
 | `revenuecat-webhook` | shared secret in `Authorization` (raw, no "Bearer") | — | sets `subscription_status` | RevenueCat dashboard |
 | `delete-account` | authed user (deletes self only) | — | `{success:true}` | `lib/deleteAccount.ts` |
 
