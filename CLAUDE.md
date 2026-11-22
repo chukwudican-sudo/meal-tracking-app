@@ -97,7 +97,7 @@ app/                     expo-router routes
   onboarding.tsx         full onboarding step machine (welcome → data → account → results → activation) + login
   auth/                  verify-code (6-digit signup OTP — the real signup path) · forgot-password · reset (password-reset deep link)
                          · callback (old signup-link handler, kept untouched for any link still tapped)
-  plan/                  build.tsx (Build My Plan wizard, ~3250 lines) · find.tsx (Coming soon shell) · [id] (plan detail / Current Plan / Customize) · day/[date] (Day Detail) · category/[type]
+  plan/                  build.tsx (Build My Plan wizard, ~3250 lines) · find.tsx (Find Your Plan: 5 questions → matching premade plans) · [id] (plan detail / Current Plan / Customize) · day/[date] (Day Detail) · category/[type]
   recipe/                [id] (preview) · detail/[id] (full recipe) · assistant/[id] (Recipe Assistant chat, slides up)
   recipes/               saved (unified recipe page) · category/[type]
   ai/                    custom.tsx (Custom Recipe: concept → steps) · what-can-i-make.tsx
@@ -106,7 +106,6 @@ app/                     expo-router routes
   settings.tsx, settings/ account · account-delete-confirm · notifications · help · feedback · coming-soon
   paywall.tsx            thin route for the one reusable Pro paywall (UI in components/paywall/; open ONLY via lib/paywall.ts#openPaywall)
   cart.tsx, kitchen.tsx, grocery/planned-ingredients.tsx, notifications.tsx
-  meal/[id].tsx, modal.tsx   legacy (meal/[id] orphaned add/edit form)
 components/              MealDetailModal, MealForm, MealCard, CustomTabBar, Screen, ProgressRing, ProgressiveLoader,
                          SyncStatusIcon, EmailVerificationBanner, Toast/Undo hosts, addMeal/* (Scan/AI/Manual/Search tabs),
                          recipes/* (SavedRecipesView, RecipeCard…), plans/*, grocery/KitchenScanModal, auth/EmailCodeVerification, onboarding/* pickers

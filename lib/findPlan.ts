@@ -298,6 +298,3 @@ export function matchPlans(
 
 // Below this a plan is shown, but not called "Best match".
 export const BEST_MATCH_MIN = 60;
-
-// Exported for tests / review.
-export const __test = { flagsFor };

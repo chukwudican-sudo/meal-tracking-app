@@ -30,7 +30,7 @@ import { ToastHost } from '@/components/ToastHost';
 import type { MealEntry } from '@/store/types';
 import { AIConsentHost } from '@/components/AIConsentHost';
 
-// Stable empty-array reference; see DayDetailModal for the same pattern.
+// Stable empty-array reference: a fresh [] from a selector re-renders forever.
 const EMPTY_MEALS: MealEntry[] = [];
 
 type TabId = 'scan' | 'ai' | 'manual' | 'search';

@@ -67,7 +67,6 @@ function RootLayout() {
             <Stack.Screen name="auth/callback"         options={{ headerShown: false, animation: 'fade', gestureEnabled: false }} />
             <Stack.Screen name="auth/verify-code"      options={{ presentation: 'modal', headerShown: false, animation: 'slide_from_bottom' }} />
             <Stack.Screen name="settings"      options={fullScreenSlide} />
-            <Stack.Screen name="meal/[id]"     options={{ presentation: 'card', headerShown: false, animation: 'slide_from_right' }} />
             <Stack.Screen name="cart"          options={fullScreenSlide} />
             <Stack.Screen name="profile"       options={fullScreenSlide} />
             <Stack.Screen name="notifications" options={fullScreenSlide} />
@@ -113,9 +112,6 @@ function RootLayout() {
             {/* Meal edit sub-pages (driven by mealEditSession) */}
             <Stack.Screen name="meal-edit/macro/[key]"            options={fullScreenSlide} />
             <Stack.Screen name="meal-edit/ingredient/[id]"        options={fullScreenSlide} />
-
-            {/* Generic fallback `modal` route stays as a card-sheet. */}
-            <Stack.Screen name="modal"         options={{ presentation: 'modal', title: 'Modal' }} />
 
             {/* Reusable Pro paywall — always opened via lib/paywall.ts#openPaywall. */}
             <Stack.Screen

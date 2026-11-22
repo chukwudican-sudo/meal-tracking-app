@@ -2,7 +2,6 @@ import type {
   ActivityLevel,
   Gender,
   GoalType,
-  UserGoals,
 } from '@/store/types';
 
 // ─── Pure calculation helpers ────────────────────────────────────────────────
@@ -217,9 +216,3 @@ export function kgToLbs(kg: number): number { return kg * 2.20462; }
 export function lbsToKg(lbs: number): number { return lbs / 2.20462; }
 export function cmToIn(cm: number): number { return cm / 2.54; }
 export function inToCm(inches: number): number { return inches * 2.54; }
-
-// Convert a stored UserGoals into a copy with isCalculated cleared, used when
-// a manual edit happens.
-export function withManualEdit(goals: UserGoals): UserGoals {
-  return { ...goals, isCalculated: false };
-}

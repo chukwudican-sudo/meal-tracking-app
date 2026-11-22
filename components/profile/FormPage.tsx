@@ -231,10 +231,3 @@ const styles = StyleSheet.create({
   saveBtnDisabled: { opacity: 0.45 },
   saveBtnText: { color: '#fff', fontSize: 14, fontWeight: '700' },
 });
-
-export const FormStyles = {
-  // Re-export common styles for child screens that need them.
-  row: styles.row,
-  rowText: styles.rowText,
-  rowSub: styles.rowSub,
-};

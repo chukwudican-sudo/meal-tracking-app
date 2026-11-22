@@ -176,10 +176,12 @@ Still open:
     that pull keeps this phone's settings over the server's).
 32. `supabase/config.toml` has drifted from the live dashboard (auth block) — either update it or note it's unused.
 33. ~~3 pre-existing tsc errors~~ — DONE Nov 14 (tsc and lint both clean).
-34. Dead code to delete (confirm first): `components/EditMealScreen.tsx`, `components/DayDetailModal.tsx`,
-    `components/grocery/PlannedIngredientsSection.tsx` (none are imported anywhere — only mentioned in comments),
-    `app/meal/[id].tsx`, `app/modal.tsx`, `app/auth/callback.tsx` once no old signup links can be outstanding
-    (password reset uses `app/auth/reset.tsx`, not callback — re-check before deleting).
+34. ~~Dead code~~ — DONE Nov 21: those files, `app/meal/[id].tsx`, `app/modal.tsx`, the Expo starter leftovers
+    (themed text/view, parallax, haptic tab, icon symbol…), react-logo images and 8 unused exports deleted.
+    Still open: `app/auth/reset.tsx` and `app/auth/callback.tsx` — delete only once the dev and prod *Reset password*
+    and *Confirm signup* emails show the code without a link. Unused packages (expo-symbols, expo-haptics,
+    expo-web-browser, react-native-reanimated) — remove with the next native build. 3 unused helpers in
+    lib/sync (serverIsEmpty, inchesToCm, cmToFeetInches) left alone on purpose.
 
 - **Notifications (built Nov 3, needs the new dev build to test):** meal reminders (d7b4786) + bell inbox with push.
   Live steps: `db push` (migration 20261103010000_inbox_push), `ANNOUNCE_SECRET` secret + same value in `.env`,

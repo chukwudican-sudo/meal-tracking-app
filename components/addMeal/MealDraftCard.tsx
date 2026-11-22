@@ -121,7 +121,7 @@ export function MealDraftCard({
     };
     addTemplate(template);
 
-    // Materialize today's entry so it shows up immediately on the DayDetailModal.
+    // Materialize today's entry so it shows up immediately on Home and Day Detail.
     // We add the entry directly because resolveDayFromTemplates is a no-op when
     // the day already exists in `logs`.
     // UUID: meal_logs.id is a uuid column (a `${date}-${id}` id failed sync).

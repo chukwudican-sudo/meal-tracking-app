@@ -10,7 +10,7 @@
 // `isFree` require Pro. A user's own hand-typed ("manual") recipes are
 // always free — there's no AI cost to gate.
 
-import type { RecipeTemplate, SavedRecipeSource } from '@/store/types';
+import type { SavedRecipeSource } from '@/store/types';
 
 export interface RecipeGateInput {
   source: SavedRecipeSource;
@@ -28,9 +28,4 @@ export function recipeRequiresPro(input: RecipeGateInput): boolean {
     default:
       return input.isFree !== true;
   }
-}
-
-/** Convenience for gating a premade RecipeTemplate directly (Build My Plan, recipe lists). */
-export function premadeRecipeRequiresPro(recipe: Pick<RecipeTemplate, 'isFree'>): boolean {
-  return recipeRequiresPro({ source: 'premade', isFree: recipe.isFree });
 }

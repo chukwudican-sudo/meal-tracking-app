@@ -59,17 +59,6 @@ export function calcGoalDate(
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
 
-export function weeksToGoal(
-  currentWeightKg: number,
-  targetWeightKg: number,
-  paceLbsPerWeek: number | null,
-): number | null {
-  if (!paceLbsPerWeek || paceLbsPerWeek <= 0) return null;
-  const diffLbs = Math.abs(currentWeightKg - targetWeightKg) * LBS_PER_KG;
-  if (diffLbs < 0.1) return null;
-  return Math.round(diffLbs / paceLbsPerWeek);
-}
-
 // Age in whole years from an ISO birthday.
 export function ageFromBirthday(iso: string): number {
   const b = new Date(iso + 'T00:00:00');

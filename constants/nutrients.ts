@@ -18,8 +18,6 @@ export const NUTRIENT_META: NutrientMeta[] = [
   { key: 'iron',         label: 'Iron',          unit: 'mg' },
 ];
 
-export const NUTRIENT_KEYS: NutrientKey[] = NUTRIENT_META.map(n => n.key);
-
 const NUTRIENT_BY_KEY: Record<NutrientKey, NutrientMeta> = NUTRIENT_META.reduce(
   (acc, n) => { acc[n.key] = n; return acc; },
   {} as Record<NutrientKey, NutrientMeta>,
