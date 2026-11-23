@@ -6,12 +6,13 @@ import { displayMealStatus } from '@/store/useMealStore';
 interface MealCardProps {
   entry: MealEntry;
   date: string; // YYYY-MM-DD the card is shown on (missed is worked out from it)
+  now: Date;    // the time "missed" is judged by; a new value redraws the card
   onToggle: () => void;
   onOpenDetail: () => void;
 }
 
-export function MealCard({ entry, date, onToggle, onOpenDetail }: MealCardProps) {
-  const status      = displayMealStatus(entry, date);
+export function MealCard({ entry, date, now, onToggle, onOpenDetail }: MealCardProps) {
+  const status      = displayMealStatus(entry, date, now);
   const isCompleted = status === 'completed';
   const isMissed    = status === 'missed';
 

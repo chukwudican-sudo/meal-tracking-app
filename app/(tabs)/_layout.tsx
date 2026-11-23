@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { View } from 'react-native';
 import { router, Tabs, useSegments } from 'expo-router';
+import * as SplashScreen from 'expo-splash-screen';
 
 import { CustomTabBar } from '@/components/CustomTabBar';
 import { AddMealScreen } from '@/components/addMeal/AddMealScreen';
@@ -55,6 +56,14 @@ export default function TabLayout() {
       router.replace('/onboarding');
     }
   }, [ready, onboardingComplete, authed, inAuthFlow]);
+
+  // The logo screen (kept up by app/_layout.tsx) goes once the first real
+  // screen can show: the tabs, or an /auth page above them. A cold start into
+  // the redirect above unmounts this layout, so onboarding hides it itself.
+  const firstScreenReady = ready && (canEnter || inAuthFlow);
+  useEffect(() => {
+    if (firstScreenReady) SplashScreen.hide();
+  }, [firstScreenReady]);
 
   if (!canEnter) {
     return <View style={{ flex: 1, backgroundColor: COLORS.bg }} />;

@@ -9,6 +9,7 @@ import { useEffect, useState } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import type { ErrorBoundaryProps } from 'expo-router';
+import * as SplashScreen from 'expo-splash-screen';
 
 import { COLORS } from '@/constants/theme';
 import { reportError } from '@/lib/monitoring';
@@ -18,6 +19,9 @@ export function CrashScreen({ error, retry }: ErrorBoundaryProps) {
 
   useEffect(() => {
     reportError(error, 'render');
+    // A crash before the first screen would otherwise sit under the logo
+    // screen until its 5s cap (app/_layout.tsx).
+    SplashScreen.hide();
   }, [error]);
 
   const onRetry = async () => {

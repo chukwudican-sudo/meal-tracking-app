@@ -438,7 +438,6 @@ export interface AppStore {
   removeDayMealWithScope: (date: string, mealId: string, scope: 'this' | 'future' | 'all') => void;
   restoreMealToDay:       (date: string, entry: MealEntry, index: number) => void;
   editMealOnDay:          (date: string, entry: MealEntry) => void;
-  markPastDueMealsAsMissed:(date?: string) => void;
   addTemplate:            (template: MealTemplate) => void;
   updateTemplate:         (template: MealTemplate) => void;
   removeTemplate:         (id: string) => void;

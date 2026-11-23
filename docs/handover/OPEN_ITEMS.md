@@ -152,7 +152,11 @@ Still open:
 23. Scanned photo is stored only as a local URI (no Supabase Storage). (Ingredient list: done Oct 22.)
 23b. Small AI test set: turn real corrections from `ai_events` into cases re-run after every prompt change.
 24. AI Describe tab spinner is tiny/barely visible.
-25. Cold start feels slow (never profiled).
+25. Cold start feels slow. Nov 22, part done: the unused Reanimated import is gone (bundle 5.8 → 5.1 MB), the logo
+    screen stays up until the first screen is ready (no blank dark screen), and "missed" is no longer saved into meals
+    (every open re-uploaded today's past-time meals). Left: Home waits for Supabase's login check, a network token
+    refresh after an hour closed (~25 s of retries offline, then the login screen). Showing Home from the saved login
+    first needs sync to start recording from it too (it starts only when Supabase answers) — not decided yet.
 26. `compressPhoto` resizes by width (1280) — tall photos stay huge; should resize the long edge.
 27. Build My Plan macro-picker defaults (min picks, "Step 1 of 2" label) were agent choices Alex never confirmed.
 28. `cleanList` in `ai/generatePlanShortlist.ts` (client) silently caps proteins/carbs/fats picks at 15 each (cuisines
@@ -179,7 +183,8 @@ Still open:
 34. ~~Dead code~~ — DONE Nov 21: those files, `app/meal/[id].tsx`, `app/modal.tsx`, the Expo starter leftovers
     (themed text/view, parallax, haptic tab, icon symbol…), react-logo images and 8 unused exports deleted.
     `app/auth/reset.tsx` and `app/auth/callback.tsx` deleted too (emails checked code-only). Unused packages (expo-symbols, expo-haptics,
-    expo-web-browser, react-native-reanimated) — remove with the next native build. 3 unused helpers in
+    expo-web-browser, react-native-reanimated + react-native-worklets) — remove with the next native build (the Reanimated
+    import itself was removed Nov 22). 3 unused helpers in
     lib/sync (serverIsEmpty, inchesToCm, cmToFeetInches) left alone on purpose.
 
 - **Notifications (built Nov 3, needs the new dev build to test):** meal reminders (d7b4786) + bell inbox with push.

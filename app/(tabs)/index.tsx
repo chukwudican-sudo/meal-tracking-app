@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useCallback, useState, useEffect } from 'react';
 import {
   ActivityIndicator,
   View,
@@ -9,7 +9,7 @@ import {
   AppState,
   type AppStateStatus,
 } from 'react-native';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Screen } from '@/components/Screen';
 
@@ -62,7 +62,6 @@ export default function HomeScreen() {
   const streak                  = useMealStore(s => s.streak);
   const pendingFirstPlan        = useMealStore(s => s.profile.pendingFirstPlan);
   const toggleMealStatus        = useMealStore(s => s.toggleMealStatus);
-  const markPastDueMealsAsMissed = useMealStore(s => s.markPastDueMealsAsMissed);
   const activePlanName = useMealStore(s => s.profile.activePlanName);
   const logWater                = useMealStore(s => s.logWater);
   const resolveDayFromTemplates = useMealStore(s => s.resolveDayFromTemplates);
@@ -107,25 +106,35 @@ export default function HomeScreen() {
   // account's download is done (useDayFillReady: sync must see the new meals).
   const dayFillReady = useDayFillReady();
   useEffect(() => {
-    if (!dayFillReady) return;
-    resolveDayFromTemplates(viewingDate);
-    markPastDueMealsAsMissed(viewingDate);
-  }, [dayFillReady, viewingDate, markPastDueMealsAsMissed, resolveDayFromTemplates]);
+    if (dayFillReady) resolveDayFromTemplates(viewingDate);
+  }, [dayFillReady, viewingDate, resolveDayFromTemplates]);
   useEffect(() => {
     if (dayFillReady) recalcStreak();
   }, [dayFillReady, recalcStreak]);
 
+  // The time the cards judge "missed" by (displayMealStatus), refreshed when
+  // Home is shown again, the app comes back, the day changes or a meal is
+  // ticked. "Missed" used to be saved
+  // into the meal here instead: the server keeps only eaten / not eaten, so
+  // every download brought those meals back as planned and every launch
+  // re-uploaded them (Nov 22, 2026: 15 writes per open).
+  const [now, setNow] = useState(() => new Date());
   useEffect(() => {
     const sub = AppState.addEventListener('change', (state: AppStateStatus) => {
-      if (state === 'active') {
-        const todayIso = toIsoDate(new Date());
-        markPastDueMealsAsMissed(todayIso);
-      }
+      if (state === 'active') setNow(new Date());
     });
     return () => sub.remove();
-  }, [markPastDueMealsAsMissed]);
+  }, []);
+  useFocusEffect(
+    useCallback(() => {
+      setNow(new Date());
+    }, []),
+  );
 
-  const navigateTo = (date: string) => setViewingDate(date);
+  const navigateTo = (date: string) => {
+    setViewingDate(date);
+    setNow(new Date());
+  };
 
 
   // ── Render ──────────────────────────────────────────────────────────────────
@@ -293,7 +302,11 @@ export default function HomeScreen() {
               key={entry.id}
               entry={entry}
               date={viewingDate}
-              onToggle={() => toggleMealStatus(viewingDate, entry.id)}
+              now={now}
+              onToggle={() => {
+                setNow(new Date());
+                toggleMealStatus(viewingDate, entry.id);
+              }}
               onOpenDetail={() => openMealEditSession(viewingDate, 'home', entry)}
             />
           ))

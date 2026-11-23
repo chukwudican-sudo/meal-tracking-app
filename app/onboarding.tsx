@@ -1,6 +1,7 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { router } from 'expo-router';
+import * as SplashScreen from 'expo-splash-screen';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -126,6 +127,13 @@ export default function OnboardingScreen() {
   const [stepId, setStepId] = useState<StepId>('welcome');
   const [mode, setMode] = useState<'flow' | 'login'>('flow');
   const patch = (p: Partial<Answers>) => setAnswers(a => ({ ...a, ...p }));
+
+  // A logged-out cold start lands here: the tabs gate's redirect replaces the
+  // tabs (they unmount), so this screen hides the logo screen kept up by
+  // app/_layout.tsx. Otherwise it would stay up for its whole 5s cap.
+  useEffect(() => {
+    SplashScreen.hide();
+  }, []);
 
   const isWeightGoal = answers.goal === 'lose' || answers.goal === 'muscle';
   // The pace in use: inside the chosen goal's range (going back and switching

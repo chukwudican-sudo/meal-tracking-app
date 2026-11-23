@@ -3,10 +3,10 @@
 import { wrapRoot } from '@/lib/monitoring';
 import { ThemeProvider } from '@react-navigation/native';
 import { Stack } from 'expo-router';
+import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { View } from 'react-native';
 import { SafeAreaProvider, initialWindowMetrics } from 'react-native-safe-area-context';
-import 'react-native-reanimated';
 
 import { AppDarkTheme } from '@/constants/theme';
 import { ToastHost } from '@/components/ToastHost';
@@ -33,6 +33,15 @@ export const unstable_settings = {
 // first session lookup resolves, so identity sync (lib/auth.tsx) always finds
 // the SDK already configured.
 configurePurchases();
+
+// Keep the logo screen up until the first real screen can show (Expo's
+// documented pattern). It used to hide on its own as soon as this layout drew,
+// leaving a blank dark screen while the store loaded and the login was checked.
+// Hidden by the tabs gate once it knows where to go (app/(tabs)/_layout.tsx),
+// by CrashScreen, and after SPLASH_MAX_MS whatever happens, so it never hangs.
+const SPLASH_MAX_MS = 5_000;
+void SplashScreen.preventAutoHideAsync();
+setTimeout(() => SplashScreen.hide(), SPLASH_MAX_MS);
 
 // Shared options for full-screen pages: standard iOS push presentation so they
 // slide in from the right (and back out to the right). `card` is required for

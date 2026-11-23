@@ -192,6 +192,9 @@ These come straight from months of his feedback. Violating them is the #1 thing 
   `lib/paywall.ts#runPendingSuccess`, after the paywall has fully closed AND the sync finished. `openPaywall` never
   shows the paywall on a phone that already has Pro (Alert + Restore instead). Rapidly re-presenting/dismissing the
   paywall RN Modal left an invisible layer that froze the app. The webhook handles TRANSFER (restores move Pro).
+- **Logo screen (Nov 22):** `app/_layout.tsx` keeps the native splash up (`preventAutoHideAsync`) until the first real
+  screen can show: the tabs gate hides it, onboarding hides it on mount (a logged-out cold start unmounts the tabs),
+  CrashScreen hides it, and a 5s timer caps it. A new first screen outside these must hide it too.
 - **`CameraView` must stay childless** — render overlays as absolutely-positioned siblings. Children inside it crashed the
   app on iOS (New Architecture) when the camera unmounted after a scan; expo-camera itself warns about it.
 - **AI calls from the client:** always via an `ai/<function>.ts` wrapper on `invokeAIFunction` (35s client timeout).
@@ -239,8 +242,9 @@ These come straight from months of his feedback. Violating them is the #1 thing 
 - **Meal ownership & status (one rule each, in `store/useMealStore.ts`):** `initialMealStatus(date, time)` — a meal the
   user adds for now/earlier/a past day is `completed` (counts at once), later/future is `pending` (planned).
   `isAdHoc` = the user's own meal (never auto-"missed", kept by plan changes, excluded from the heatmap's plan score).
-  "Missed" is shown via `displayMealStatus(meal, date)` (planned + unticked + time passed), not trusted from storage
-  (the server keeps only eaten / not eaten); stats only ever count `completed`.
+  "Missed" is shown via `displayMealStatus(meal, date)` (planned + unticked + time passed), never saved: the server
+  keeps only eaten / not eaten, so a saved 'missed' came back as planned and was re-uploaded on every open (removed
+  Nov 22; Home redraws the cards with a fresh `now`). Stats only ever count `completed`.
   `isPlanTemplate(t)` (`tpl-plan-…` or the seed ids) tells plan templates from the user's own (scheduled recipes,
   draft-card repeating meals `tpl-${Date.now()}` — never match seeds by pattern). `isUserOwnedMeal` = what plan
   activation / End plan keep. Groceries (Planned Ingredients) only come from **planned** meals + the plan.

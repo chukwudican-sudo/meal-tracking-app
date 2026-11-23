@@ -929,39 +929,6 @@ export const useMealStore = create<AppStore>()(
         });
       },
 
-      // ── Missed meals ────────────────────────────────────────────────────────
-      markPastDueMealsAsMissed: (dateArg) => {
-        set(state => {
-          const now = new Date();
-          const todayIso = toIsoDate(now);
-          const targetDate = dateArg ?? todayIso;
-          if (targetDate !== todayIso) return state;
-
-          const log = state.logs[targetDate];
-          if (!log) return state;
-
-          let changed = false;
-
-          const nextMeals = log.meals.map(meal => {
-            // Same rule as the display (only planned meals can be "missed").
-            if (meal.status !== 'pending' || displayMealStatus(meal, targetDate, now) !== 'missed') return meal;
-            changed = true;
-            return { ...meal, status: 'missed' as const };
-          });
-
-          if (!changed) return state;
-          return {
-            logs: {
-              ...state.logs,
-              [targetDate]: {
-                ...log,
-                meals: nextMeals,
-              },
-            },
-          };
-        });
-      },
-
       // ── Templates ─────────────────────────────────────────────────────────
       addTemplate: template =>
         set(state => ({ templates: [...state.templates, template] })),
@@ -1130,7 +1097,9 @@ export const useMealStore = create<AppStore>()(
         days.forEach(iso => {
           if (iso < todayIso) return;
           (state.logs[iso]?.meals ?? []).forEach(m => {
-            if (m.status !== 'pending') return;
+            // Planned and still ahead: a plan meal whose time has passed is
+            // missed (worked out, not stored) and needs no shopping.
+            if (displayMealStatus(m, iso) !== 'pending') return;
             (m.ingredients ?? []).forEach(ing => {
               const key = normalizeIngredientName(ing.name);
               if (!key) return;
