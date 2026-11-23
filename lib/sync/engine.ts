@@ -14,7 +14,9 @@ import { projector } from './projector';
 import { fetchServerProfile, pullSince, pushItem, serverNow } from './repository';
 import { entityKey, type SyncTable } from './types';
 
-const LAST_USER_KEY = 'sync:lastUserId';
+// The account sync last ran for on this phone (kept across logout). Also read
+// by lib/auth.tsx to trust the saved login only for that account.
+export const LAST_USER_KEY = 'sync:lastUserId';
 // Upper bound on how long we'll wait before re-draining while writes are still
 // pending. The actual delay tracks the soonest item's backoff (see
 // scheduleRetryIfNeeded) so a transient failure retries in ~1s, not a flat 30s.
@@ -93,6 +95,12 @@ class SyncEngine {
   private listeners = new Set<() => void>();
   private snapshot: SyncStatus = { status: 'idle', pending: 0, deadLetter: 0, lastError: null, stuck: false, readyUserId: null };
   private readyUserId: string | null = null;
+  // Recording started from the login saved on this phone (startCapture) while
+  // Supabase hadn't confirmed it yet. Nothing uploads (flush needs userId).
+  private captureUserId: string | null = null;
+  // Bumped by every stop / sign-in: a startCapture still reading storage then
+  // knows it was cancelled (a sign-out landing during that read).
+  private captureGen = 0;
 
   constructor() {
     // A live edit enqueues outside any flush cycle; react promptly so normal
@@ -108,6 +116,41 @@ class SyncEngine {
 
   // ── lifecycle ──────────────────────────────────────────────────────────────
 
+  // Record changes for the account whose login is saved on this phone while
+  // Supabase is still confirming it (lib/auth.tsx#savedUserId). An hour-old
+  // login needs a network refresh, and offline that never comes: Home shows
+  // from the saved login meanwhile, so its edits must be recorded from the
+  // start (the projector only queues changes made while it runs). Nothing
+  // uploads until onSignIn takes over. Only for the account sync last ran for
+  // here: a first login or another account decides restore / switch (which
+  // clear the phone) before anything is recorded, so those wait for onSignIn.
+  async startCapture(userId: string): Promise<void> {
+    if (this.userId || this.captureUserId === userId) return;
+    this.stopCapture();
+    const gen = this.captureGen;
+    if ((await AsyncStorage.getItem(LAST_USER_KEY)) !== userId) return;
+    // Cancelled (stop / sign-in / sign-out) or started elsewhere during the read.
+    if (gen !== this.captureGen || this.userId || this.captureUserId) return;
+    this.captureUserId = userId;
+    await outbox.activate(userId);
+    // Stopped, or taken over by onSignIn (whose reconcile starts the projector).
+    if (gen !== this.captureGen || this.captureUserId !== userId || this.userId) return;
+    projector.start();
+    this.setStatus(this.baseStatus);
+  }
+
+  // The saved login turned out invalid, or the account is no longer set up on
+  // this phone: stop recording and keep its queue on disk for its next login.
+  // A no-op once onSignIn has taken over (that ends with onSignOut).
+  stopCapture(): void {
+    this.captureGen++;
+    if (!this.captureUserId) return;
+    this.captureUserId = null;
+    projector.stop();
+    outbox.deactivate();
+    this.setStatus(this.baseStatus);
+  }
+
   async onSignIn(userId: string): Promise<void> {
     if (this.userId === userId) {
       // Same user. If a reconcile is still in flight (a concurrent caller kicked
@@ -121,6 +164,12 @@ class SyncEngine {
       void this.flush();
       return;
     }
+    // Recording started from the saved login (startCapture): the same account
+    // takes it over with its queue still loaded; another account's recording
+    // is saved and stopped before anything else happens.
+    if (this.captureUserId !== userId) this.stopCapture();
+    else this.captureGen++;
+    this.captureUserId = null;
     this.userId = userId;
     this.readyUserId = null;
     this.reconcilePromise = this.reconcile(userId).finally(() => {
@@ -143,14 +192,26 @@ class SyncEngine {
     return outbox.counts();
   }
 
+  // The only way to clear this phone's copy of the account (logout, account
+  // delete, password reset, account switch): recording stops in the same tick
+  // as the clear, so a sign-in event racing a logout (a token refresh that
+  // restarts sync) can never record it as deletes of everything (the Nov 21
+  // wipe pattern; found in the Nov 22 review).
+  clearLocalData(): void {
+    projector.stop();
+    useMealStore.getState().resetUserData();
+  }
+
   // Undo prepareSignOut() when the user backs out of logging out: resume change
   // capture from the current state so subsequent edits are still synced.
   resumeAfterCancelledSignOut(): void {
-    if (this.userId) projector.start();
+    if (this.userId || this.captureUserId) projector.start();
   }
 
   async onSignOut(): Promise<void> {
     projector.stop();
+    this.captureUserId = null;
+    this.captureGen++;
     this.clearTimers();
     // Do NOT clear the outbox: any still-pending writes must survive sign-out so
     // they can be flushed the next time this account signs in on this device.
@@ -209,6 +270,10 @@ class SyncEngine {
     try {
       this.setStatus('syncing');
       const lastUserId = await AsyncStorage.getItem(LAST_USER_KEY);
+      // Signed out (or switched) during the read: this reconcile is stale. Going
+      // on would switch this account's queue and recording back on with nobody
+      // signed in (whatever happens on /onboarding next would queue for it).
+      if (this.userId !== userId) return;
       let mode: Mode = !lastUserId ? 'claim' : lastUserId === userId ? 'same' : 'switch';
 
       // First login on this install with real data already on the server and
@@ -241,10 +306,13 @@ class SyncEngine {
       // it doesn't mix into the real account and hydrateActivePlanIfNeeded can
       // rebuild the real plan.
       if (mode === 'switch' || mode === 'restore') {
-        useMealStore.getState().resetUserData();
+        // Never record a clear: whatever started recording before, it would
+        // queue deletes of everything (the Nov 21 dev wipe pattern).
+        this.clearLocalData();
       }
 
       await outbox.activate(userId);
+      if (this.userId !== userId) return; // stale, as above
 
       // Retry anything that dead-lettered in a previous session. Items that
       // failed against a not-yet-migrated backend (missing constraint/seed) would

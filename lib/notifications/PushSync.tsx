@@ -33,8 +33,10 @@ function openInboxFor(id: string) {
 }
 
 export function PushSync() {
-  const { user, initializing } = useAuth();
-  const userId = initializing ? undefined : user?.id ?? null;
+  const { user, initializing, savedUserId } = useAuth();
+  // Registering needs a confirmed login: wait while Supabase is still checking
+  // a saved one (offline that can last), rather than clearing the inbox.
+  const userId = user?.id ?? (initializing || savedUserId ? undefined : null);
   // Re-run after a permission grant (onboarding / Settings / one-time ask
   // all record the result here).
   const allowed = useMealStore(s => s.profile.notificationsAllowed);

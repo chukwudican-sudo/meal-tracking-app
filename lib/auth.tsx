@@ -13,12 +13,14 @@ import {
   type ReactNode,
 } from 'react';
 import { AppState } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { AuthError, Session, User } from '@supabase/supabase-js';
 
 import { allowPushRegistration, unregisterPushToken } from '@/lib/notifications/push';
 import { clearMealPhotoCaches } from '@/lib/media/mealPhotos';
 import { useRecipeChatStore } from '@/store/useRecipeChatStore';
-import { supabase } from './supabase';
+import { SESSION_STORAGE_KEY, supabase } from './supabase';
+import { LAST_USER_KEY } from './sync/engine';
 import { useMealStore } from '@/store/useMealStore';
 import { syncPurchasesIdentity } from './purchases';
 import {
@@ -204,7 +206,15 @@ export async function changePassword(currentPassword: string, newPassword: strin
     // The stored session (no network): "verify later" users have none yet.
     const { data } = await supabase.auth.getSession();
     const email = data.session?.user.email;
-    if (!email) return { error: 'Verify your email first, then you can change your password.' };
+    if (!email) {
+      // No session: a "verify later" account, or offline with an hour-old
+      // login (saved on the phone, Supabase can't refresh it yet).
+      return {
+        error: useMealStore.getState().profile.pendingEmailVerification
+          ? 'Verify your email first, then you can change your password.'
+          : "Couldn't reach the server. Check your connection and try again.",
+      };
+    }
 
     const check = await withTimeout(
       supabase.auth.signInWithPassword({ email, password: currentPassword }),
@@ -292,10 +302,21 @@ function parseRetryAfterSeconds(message: string): number | null {
 // ─── Session context ─────────────────────────────────────────────────────────
 
 interface AuthContextValue {
+  // Confirmed by Supabase. Network calls and uploads need this.
   session: Session | null;
   user: User | null;
   // True until the initial getSession() resolves, so gates can avoid flashing.
   initializing: boolean;
+  // The login saved on this phone, read from storage at launch (no network),
+  // for the account sync last ran for here. Kept while Supabase can't confirm
+  // it for lack of network; cleared when Supabase signs out (login invalid).
+  savedUserId: string | null;
+  // The account signed in on this phone: the confirmed session's, else the
+  // saved login's. What screens use to decide "signed in".
+  userId: string | null;
+  // The signed-in decision can be made: at once with a saved login, otherwise
+  // once Supabase's first check is done.
+  authReady: boolean;
   // Whether the Home "verify your email" banner should be shown right now
   // (unverified account exists AND not dismissed this session).
   showVerifyBanner: boolean;
@@ -307,9 +328,34 @@ const AuthContext = createContext<AuthContextValue>({
   session: null,
   user: null,
   initializing: true,
+  savedUserId: null,
+  userId: null,
+  authReady: false,
   showVerifyBanner: false,
   dismissVerifyBanner: () => {},
 });
+
+// The account whose login is saved on this phone, straight from storage: no
+// refresh, no network. Supabase's own first check refreshes an expired token
+// (~0.5 s online; offline it retries ~25 s, then reports no session even though
+// the login is still saved). Trusted only for the account sync last ran for
+// here (LAST_USER_KEY), the one case sync can record for at once.
+async function readSavedLogin(): Promise<string | null> {
+  try {
+    const [raw, lastUserId] = await Promise.all([
+      AsyncStorage.getItem(SESSION_STORAGE_KEY),
+      AsyncStorage.getItem(LAST_USER_KEY),
+    ]);
+    if (!raw || !lastUserId) return null;
+    const saved = JSON.parse(raw) as { refresh_token?: unknown; user?: { id?: unknown } } | null;
+    const id = saved?.user?.id;
+    return typeof id === 'string' && typeof saved?.refresh_token === 'string' && id === lastUserId
+      ? id
+      : null;
+  } catch {
+    return null;
+  }
+}
 
 function isConfirmed(session: Session | null): boolean {
   return !!session?.user?.email_confirmed_at || !!session?.user?.confirmed_at;
@@ -318,6 +364,11 @@ function isConfirmed(session: Session | null): boolean {
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [initializing, setInitializing] = useState(true);
+  const [savedUserId, setSavedUserId] = useState<string | null>(null);
+  const [savedChecked, setSavedChecked] = useState(false);
+  // Supabase signed out (login invalid, or a logout): a saved-login read that
+  // finishes later must not bring it back.
+  const signedOutRef = useRef(false);
   // Session-scoped dismissal — resets on every cold start (this provider
   // remounts), so a dismissed banner reappears next launch while unverified.
   const [bannerDismissed, setBannerDismissed] = useState(false);
@@ -329,13 +380,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let mounted = true;
 
+    void readSavedLogin().then(id => {
+      if (!mounted) return;
+      if (id && !signedOutRef.current) setSavedUserId(id);
+      setSavedChecked(true);
+    });
+
     supabase.auth.getSession().then(({ data }) => {
       if (!mounted) return;
       setSession(data.session);
       setInitializing(false);
     });
 
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+    const { data: sub } = supabase.auth.onAuthStateChange((event, nextSession) => {
+      // Only a real sign-out ends the saved login. A refresh that failed for
+      // lack of network reports no session but leaves the login saved, and
+      // Supabase's background refresh picks it up once back online.
+      if (event === 'SIGNED_OUT') {
+        signedOutRef.current = true;
+        setSavedUserId(null);
+      }
       setSession(nextSession);
       setInitializing(false);
     });
@@ -351,15 +415,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // can resolve the right `users` row, and log out (back to an anonymous
   // RevenueCat id) on sign-out. Guarded against re-firing on token refreshes
   // (onAuthStateChange fires repeatedly for the same user) and against
-  // running before the initial getSession() resolves.
+  // running before the signed-in decision (authReady). Follows the saved login
+  // too: offline with an hour-old login Supabase reports no session, and
+  // logging RevenueCat out then would hide Pro.
+  const userId = session?.user?.id ?? savedUserId;
+  const authReady = savedChecked && (savedUserId !== null || !initializing);
   const lastSyncedUserIdRef = useRef<string | null | undefined>(undefined);
   useEffect(() => {
-    if (initializing) return;
-    const userId = session?.user?.id ?? null;
+    if (!authReady) return;
     if (lastSyncedUserIdRef.current === userId) return;
     lastSyncedUserIdRef.current = userId;
     void syncPurchasesIdentity(userId);
-  }, [session, initializing]);
+  }, [userId, authReady]);
 
   // Once we observe a confirmed session, the account is verified — clear the
   // pending flag permanently so the banner never returns, and drop the stored
@@ -405,10 +472,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       session,
       user: session?.user ?? null,
       initializing,
+      savedUserId,
+      userId,
+      authReady,
       showVerifyBanner: pendingEmailVerification && !isConfirmed(session) && !bannerDismissed,
       dismissVerifyBanner: () => setBannerDismissed(true),
     }),
-    [session, initializing, pendingEmailVerification, bannerDismissed],
+    [session, initializing, savedUserId, userId, authReady, pendingEmailVerification, bannerDismissed],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

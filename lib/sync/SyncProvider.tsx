@@ -12,7 +12,8 @@ import { useMealStore } from '@/store/useMealStore';
 import { engine, type SyncStatus } from './engine';
 
 export function SyncProvider({ children }: { children: ReactNode }) {
-  const { session, initializing } = useAuth();
+  const { session, initializing, savedUserId } = useAuth();
+  const onboarded = useMealStore(s => s.profile.onboardingComplete);
   const [hydrated, setHydrated] = useState(() => useMealStore.persist.hasHydrated());
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
@@ -34,6 +35,16 @@ export function SyncProvider({ children }: { children: ReactNode }) {
     });
     return () => unsub();
   }, []);
+
+  // Saved login -> start recording at once (engine.startCapture), so edits
+  // made on Home before Supabase confirms the login (offline: possibly for a
+  // long time) still upload. Only for an account set up on this phone, and
+  // after hydration (an earlier baseline would see hydration as edits).
+  useEffect(() => {
+    if (!hydrated) return;
+    if (savedUserId && onboarded) void engine.startCapture(savedUserId);
+    else engine.stopCapture();
+  }, [hydrated, savedUserId, onboarded]);
 
   // Auth session -> engine (launch + login + logout).
   useEffect(() => {
@@ -81,10 +92,10 @@ const readyUserIdSnapshot = () => engine.getSnapshot().readyUserId;
 // sync to wait for. Gives up after 5s so a slow network never leaves the day
 // empty (sync is watching by then; only the pull is late).
 export function useDayFillReady(): boolean {
-  const { session } = useAuth();
+  // The saved login counts: sync records for it from launch (startCapture).
+  const { userId } = useAuth();
   // Only this field: the whole status changes on every queued write.
   const readyUserId = useSyncExternalStore(engine.subscribe, readyUserIdSnapshot, readyUserIdSnapshot);
-  const userId = session?.user?.id ?? null;
   const synced = !userId || readyUserId === userId;
   const [, setTimedOut] = useState(false);
   useEffect(() => {

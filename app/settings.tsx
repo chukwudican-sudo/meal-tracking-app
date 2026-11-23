@@ -18,11 +18,11 @@ import { openPaywall } from '@/lib/paywall';
 import { showManageSubscriptions } from '@/lib/purchases';
 import { engine } from '@/lib/sync/engine';
 import { useEntitlementStore } from '@/store/useEntitlementStore';
-import { useMealStore } from '@/store/useMealStore';
 
 export default function SettingsScreen() {
-  const resetUserData = useMealStore(s => s.resetUserData);
-  const { session } = useAuth();
+  // userId: confirmed, or the saved login while Supabase can't confirm it
+  // (offline). Only no account at all means "never verified" below.
+  const { session, userId } = useAuth();
   const isPro = useEntitlementStore(s => s.isPro);
 
   const handleBack = () => {
@@ -55,7 +55,7 @@ export default function SettingsScreen() {
       return;
     }
     void clearPendingPassword();
-    resetUserData();
+    engine.clearLocalData();
     router.replace('/onboarding');
   };
 
@@ -65,9 +65,12 @@ export default function SettingsScreen() {
   // signOut() may report "session missing" (there's no session); that's fine —
   // we only need to clear local state, so don't block on its result.
   const finishUnverifiedLogout = async () => {
+    // Stop recording before the wipe whatever the state, so it can never be
+    // queued as deletes (nothing is flushed: there's no confirmed account).
+    await engine.prepareSignOut();
     await signOut();
     void clearPendingPassword();
-    resetUserData();
+    engine.clearLocalData();
     router.replace('/onboarding');
   };
 
@@ -81,11 +84,23 @@ export default function SettingsScreen() {
   };
 
   const handleLogout = () => {
-    // No confirmed session means the account is still unverified: its data was
-    // never backed up to Supabase, so logging out permanently deletes it. Warn
+    // Signed in from the login saved on this phone, not yet confirmed by
+    // Supabase (offline with an hour-old login, or up to ~90s after the
+    // connection returns while its refresh catches up): logging out needs the
+    // server, and trying would hang on Supabase's ~25s of retries, then fail.
+    if (!session && userId) {
+      Alert.alert(
+        "Can't log out yet",
+        'Your login is still reconnecting. Check your internet connection and try again in a minute. Your data is safe on this phone.',
+      );
+      return;
+    }
+    // No account on this phone (no confirmed session, no saved login) means it
+    // is still unverified: its data was never backed up to Supabase, so
+    // logging out permanently deletes it. Warn
     // clearly and distinctly rather than silently wiping (the normal flow below
     // assumes a real session whose data is already/​flushable to the cloud).
-    if (!session) {
+    if (!userId) {
       Alert.alert(
         'Log out and erase your data?',
         "Your email isn't verified yet, so your profile, meals, weight, and plans have never been backed up to the cloud. " +

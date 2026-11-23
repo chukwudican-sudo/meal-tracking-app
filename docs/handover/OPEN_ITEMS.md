@@ -154,9 +154,11 @@ Still open:
 24. AI Describe tab spinner is tiny/barely visible.
 25. Cold start feels slow. Nov 22, part done: the unused Reanimated import is gone (bundle 5.8 → 5.1 MB), the logo
     screen stays up until the first screen is ready (no blank dark screen), and "missed" is no longer saved into meals
-    (every open re-uploaded today's past-time meals). Left: Home waits for Supabase's login check, a network token
-    refresh after an hour closed (~25 s of retries offline, then the login screen). Showing Home from the saved login
-    first needs sync to start recording from it too (it starts only when Supabase answers) — not decided yet.
+    (every open re-uploaded today's past-time meals). Also Nov 22: Home shows from the login saved on the phone instead
+    of waiting for Supabase's token refresh (offline it waited ~25 s, then showed the login screen); sync records
+    from that saved login at once (BACKEND.md "Saved login"). The offline open can't be tried on the dev build (it
+    loads code from the Mac): test on the next TestFlight build (roadmap t5). After launch: one-request download
+    (now ~10 sequential requests, 1.6–2.5 s), lazy module loading after measuring with Expo Atlas.
 26. `compressPhoto` resizes by width (1280) — tall photos stay huge; should resize the long edge.
 27. Build My Plan macro-picker defaults (min picks, "Step 1 of 2" label) were agent choices Alex never confirmed.
 28. `cleanList` in `ai/generatePlanShortlist.ts` (client) silently caps proteins/carbs/fats picks at 15 each (cuisines

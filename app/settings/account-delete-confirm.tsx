@@ -17,10 +17,10 @@ import { deleteAccountRequest } from '@/lib/deleteAccount';
 import { clearPendingPassword } from '@/lib/pendingCredentials';
 import { showManageSubscriptions } from '@/lib/purchases';
 import { useEntitlementStore } from '@/store/useEntitlementStore';
-import { useMealStore } from '@/store/useMealStore';
+import { engine } from '@/lib/sync/engine';
 
 export default function AccountDeleteConfirmScreen() {
-  const { user } = useAuth();
+  const { user, savedUserId } = useAuth();
   const [password, setPassword] = useState('');
   const [deleting, setDeleting] = useState(false);
 
@@ -39,6 +39,12 @@ export default function AccountDeleteConfirmScreen() {
   const performDelete = async () => {
     const email = user?.email;
     if (!email) {
+      // No confirmed login yet: offline with an hour-old login (saved on the
+      // phone, Supabase can't refresh it) — not a missing account.
+      if (savedUserId) {
+        Alert.alert("You're offline", 'Connect to the internet to delete your account.');
+        return;
+      }
       Alert.alert('Something went wrong', 'Could not find your account email. Please sign in again.');
       return;
     }
@@ -73,7 +79,7 @@ export default function AccountDeleteConfirmScreen() {
     await signOut();
     void clearPendingPassword();
     useEntitlementStore.getState()._reset();
-    useMealStore.getState().resetUserData();
+    engine.clearLocalData();
     router.replace('/onboarding');
   };
 

@@ -17,7 +17,6 @@ import { Screen } from '@/components/Screen';
 import { COLORS } from '@/constants/theme';
 import { sendPasswordReset, signOut, updatePassword } from '@/lib/auth';
 import { engine } from '@/lib/sync/engine';
-import { useMealStore } from '@/store/useMealStore';
 import { useToastStore } from '@/store/useToastStore';
 
 type Step = 'email' | 'code' | 'password';
@@ -31,7 +30,6 @@ type Step = 'email' | 'code' | 'password';
 // backs out) we end that session with the same safe ordering as Settings → Log
 // out, then send them to log in normally with the new password.
 export default function ForgotPasswordScreen() {
-  const resetUserData = useMealStore(s => s.resetUserData);
   const showToast = useToastStore(s => s.showToast);
 
   const [step, setStep] = useState<Step>('email');
@@ -76,7 +74,7 @@ export default function ForgotPasswordScreen() {
       engine.resumeAfterCancelledSignOut();
       return error;
     }
-    resetUserData();
+    engine.clearLocalData();
     return null;
   };
 

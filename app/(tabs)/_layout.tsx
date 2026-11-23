@@ -25,7 +25,10 @@ export default function TabLayout() {
   // (email confirmation pending), but the user has just onboarded and should be
   // let in with the "verify your email" banner rather than kicked to login.
   const pendingEmailVerification = useMealStore(s => s.profile.pendingEmailVerification ?? false);
-  const { session, initializing } = useAuth();
+  // userId: the confirmed session's or the login saved on this phone, so Home
+  // shows without waiting for Supabase to refresh an hour-old login (which
+  // offline never finishes). Sync records from that saved login meanwhile.
+  const { userId, authReady } = useAuth();
 
   const [hydrated, setHydrated] = useState(() => useMealStore.persist.hasHydrated());
   useEffect(() => {
@@ -34,8 +37,8 @@ export default function TabLayout() {
     return unsub;
   }, []);
 
-  const ready = hydrated && !initializing;
-  const authed = !!session || pendingEmailVerification;
+  const ready = hydrated && authReady;
+  const authed = !!userId || pendingEmailVerification;
   const canEnter = ready && onboardingComplete && authed;
 
   // This layout is the navigation anchor, so it stays mounted underneath

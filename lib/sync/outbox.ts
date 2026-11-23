@@ -33,6 +33,10 @@ class Outbox {
   private userId: string | null = null;
   private items: OutboxItem[] = [];
   private persistTimer: ReturnType<typeof setTimeout> | null = null;
+  private loading: Promise<void> = Promise.resolve();
+  // The account whose saved queue is loaded into `items`. Until then nothing
+  // is written back: saving the still-empty list would erase the stored queue.
+  private loadedFor: string | null = null;
   // Notified whenever items are enqueued outside a flush cycle, so the engine
   // can promptly schedule a drain + refresh its status snapshot.
   private changeListener: (() => void) | null = null;
@@ -46,14 +50,35 @@ class Outbox {
     this.changeListener = cb;
   }
 
-  async activate(userId: string): Promise<void> {
+  // Already active (or loading) for this account: keep the queue in memory.
+  // Sync starts recording from the login saved on the phone before Supabase
+  // confirms it (engine.startCapture), and the sign-in reconcile activates
+  // again: reloading from storage then would drop writes made in the last
+  // 400 ms (not yet saved). Another account's queue is saved before switching.
+  activate(userId: string): Promise<void> {
+    if (this.userId === userId) return this.loading;
+    if (this.userId) this.flushPersist();
     this.userId = userId;
+    this.items = [];
+    this.loadedFor = null;
+    this.loading = this.load(userId);
+    return this.loading;
+  }
+
+  private async load(userId: string): Promise<void> {
+    let items: OutboxItem[];
     try {
       const raw = await AsyncStorage.getItem(storageKey(userId));
-      this.items = raw ? (JSON.parse(raw) as OutboxItem[]) : [];
+      items = raw ? (JSON.parse(raw) as OutboxItem[]) : [];
     } catch {
-      this.items = [];
+      items = [];
     }
+    // Deactivated or switched while reading: this queue isn't the active one.
+    if (this.userId !== userId) return;
+    // Anything queued during the read is newer than its stored version.
+    const queued = new Set(this.items.map(it => it.entityKey));
+    this.items = [...items.filter(it => !queued.has(it.entityKey)), ...this.items];
+    this.loadedFor = userId;
     // Backfill enqueuedAt for items persisted before the field existed, giving
     // them a fresh "stuck" window rather than instantly appearing overdue.
     const now = Date.now();
@@ -82,6 +107,7 @@ class Outbox {
     this.flushPersist();
     this.userId = null;
     this.items = [];
+    this.loadedFor = null;
   }
 
   enqueue(input: EnqueueInput): void {
@@ -264,7 +290,7 @@ class Outbox {
       clearTimeout(this.persistTimer);
       this.persistTimer = null;
     }
-    if (!this.userId) return;
+    if (!this.userId || this.loadedFor !== this.userId) return;
     const key = storageKey(this.userId);
     const value = JSON.stringify(this.items);
     AsyncStorage.setItem(key, value).catch(() => {

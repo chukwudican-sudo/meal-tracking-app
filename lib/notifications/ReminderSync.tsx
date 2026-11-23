@@ -29,8 +29,10 @@ getNotifications()?.setNotificationHandler({
 });
 
 export function ReminderSync() {
-  const { user, initializing } = useAuth();
-  const signedIn = !!user;
+  // The saved login counts: offline with an hour-old login Supabase reports no
+  // session, and treating that as signed out would cancel every reminder.
+  const { userId, authReady } = useAuth();
+  const signedIn = !!userId;
 
   const [hydrated, setHydrated] = useState(() => useMealStore.persist.hasHydrated());
   useEffect(() => {
@@ -47,7 +49,7 @@ export function ReminderSync() {
   const minutes = useMealStore(s => s.profile.remindMinutesBefore);
   const mealSlots = useMealStore(s => s.profile.mealSlots);
 
-  const ready = hydrated && !initializing;
+  const ready = hydrated && authReady;
   const onboarded = useMealStore(s => profileHasData(s.profile));
   // Synced from onboarding: false = they tapped "Not now". Respect it even
   // where the (unsynced) reminders switch came back as its default after a

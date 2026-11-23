@@ -20,10 +20,17 @@ if (!supabaseUrl || !supabasePublishableKey) {
   );
 }
 
+// Where the login is saved on the phone: the same name supabase-js picks by
+// default (sb-<project ref>-auth-token), so existing logins stay. Spelled out
+// because lib/auth.tsx reads it directly at launch to show Home from the saved
+// login without waiting for the network.
+export const SESSION_STORAGE_KEY = `sb-${new URL(supabaseUrl).hostname.split('.')[0]}-auth-token`;
+
 export const supabase = createClient(supabaseUrl, supabasePublishableKey, {
   auth: {
     // Persist the session in AsyncStorage so users stay signed in across launches.
     storage: AsyncStorage,
+    storageKey: SESSION_STORAGE_KEY,
     autoRefreshToken: true,
     persistSession: true,
     // React Native has no URL to parse the session from (that's a web-only concern).

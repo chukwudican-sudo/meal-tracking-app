@@ -301,6 +301,11 @@ These come straight from months of his feedback. Violating them is the #1 thing 
   that turned a logout into server deletes (dev account wiped, restored from backup) — `engine.ts`/`projector.ts`
   now `DevSettings.reload()` on hot swap. Any new module-level singleton that subscribes to the store needs the same
   `module.hot.dispose`. Login does a full pull when the phone has no profile (a stale cursor can't rebuild it).
+- **Saved login + wipes (Nov 22):** Home shows from the login saved on the phone (`useAuth().userId` / `authReady`,
+  not `session`), and sync records from it at once (`engine.startCapture`) — never gate on `session === null` meaning
+  "logged out" (offline with an hour-old login it is null while the user is signed in). Wipe the phone's data ONLY
+  via `engine.clearLocalData()` (never `resetUserData()` directly): it stops recording in the same tick, so no race
+  can queue the wipe as deletes. See BACKEND.md "Saved login".
 - **Settings/profile forms (`components/profile/FormPage`):** switches and choices save on tap (no button); typed
   forms pass `dirty` (`useIsDirty`) → green **Save** top-right, grey until changed, "Discard changes?" on leaving
   unsaved. `onSave` returns `false` when validation refuses. Only Feedback keeps a bottom button (Submit).

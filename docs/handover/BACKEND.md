@@ -94,7 +94,17 @@ there's a session, network, and a hydrated store. UI never waits on sync.
 - **Conflicts:** last-write-wins with a dirty guard (local wins while a write for that entity is pending);
   `applyServerSnapshot` union-merges and never clears. **Cache-first:** the app renders local data immediately; the gate
   depends only on hydration + auth, never on the network.
-- **Sign-out order:** stop projector → best-effort flush → `signOut()` → clear delta cursor → `resetUserData()`.
+- **Saved login (Nov 22):** Supabase's first `getSession()` refreshes an expired access token over the network (~0.5 s;
+  offline ~25 s of retries, then "no session" with the login still saved). `lib/auth.tsx` reads the saved session
+  (`SESSION_STORAGE_KEY`) at launch and trusts it as `savedUserId` when it belongs to `LAST_USER_KEY`'s account;
+  `userId` (session ?? saved) and `authReady` drive the gate, day fill, reminders, RevenueCat identity. Sync records
+  from that moment: `engine.startCapture` (outbox + projector, no pull, no uploads); `onSignIn` takes it over once
+  Supabase confirms (the auto-refresh ticker recovers within ~90 s of reconnecting); SIGNED_OUT → `stopCapture`, queue
+  kept. `outbox.activate` keeps an already-loaded queue and never saves before its queue has loaded. Settings refuses to
+  log out from an unconfirmed saved login ("Can't log out yet").
+- **Sign-out order:** stop projector → best-effort flush → `signOut()` → clear delta cursor → `engine.clearLocalData()`
+  (the only way to wipe the phone's copy: it stops the projector in the same tick as `resetUserData()`, so a sign-in
+  event racing a logout can't record the wipe as deletes).
   The outbox is **never** cleared on sign-out (pending writes sync on next login). Verified sessions log out instantly;
   never-verified accounts get a hard warning ("…never been backed up… Log out & erase").
 - **Dev hot reload:** `engine.ts` and `projector.ts` force a full app reload (`DevSettings.reload`) when Metro
