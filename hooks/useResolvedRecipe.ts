@@ -10,9 +10,8 @@ import { useMealStore } from '@/store/useMealStore';
 export interface ResolvedRecipe {
   source: 'premade' | 'saved';
   // Whether viewing the full ingredients/steps requires an active Pro
-  // subscription — see lib/entitlements.ts#recipeRequiresPro. Always false
-  // for 'manual' saved recipes, always true for 'ai', and flag-dependent for
-  // premade (RecipeTemplate.isFree).
+  // subscription — see lib/entitlements.ts#recipeRequiresPro: only AI-written
+  // recipes do; built-in and the user's own are free.
   requiresPro: boolean;
   id: string;
   recipeId?: string;
@@ -37,7 +36,7 @@ export function useResolvedRecipe(id: string): ResolvedRecipe | null {
       const saved = savedRecipes.find(s => s.recipeId === premade.id);
       return {
         source: 'premade',
-        requiresPro: recipeRequiresPro({ source: 'premade', isFree: premade.isFree }),
+        requiresPro: recipeRequiresPro({ source: 'premade' }),
         id: premade.id,
         recipeId: premade.id,
         name: premade.name,
@@ -53,15 +52,9 @@ export function useResolvedRecipe(id: string): ResolvedRecipe | null {
     }
     const saved = savedRecipes.find(s => s.id === id);
     if (saved) {
-      // A saved copy of a premade recipe (source 'premade') defers to the
-      // linked catalog entry's isFree flag rather than being unconditionally
-      // free/paid itself.
-      const linkedPremade = saved.source === 'premade'
-        ? recipes.find(r => r.id === saved.recipeId)
-        : undefined;
       return {
         source: 'saved',
-        requiresPro: recipeRequiresPro({ source: saved.source, isFree: linkedPremade?.isFree }),
+        requiresPro: recipeRequiresPro({ source: saved.source }),
         id: saved.id,
         recipeId: saved.recipeId,
         name: saved.name,

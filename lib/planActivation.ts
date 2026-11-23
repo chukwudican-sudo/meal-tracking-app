@@ -6,7 +6,10 @@
 import { router } from 'expo-router';
 import { Alert } from 'react-native';
 
+import { planRequiresPro } from '@/lib/entitlements';
+import { openPaywall } from '@/lib/paywall';
 import type { MealPlan } from '@/store/types';
+import { useEntitlementStore } from '@/store/useEntitlementStore';
 import { countFutureMeals, countOwnFutureMeals, useMealStore } from '@/store/useMealStore';
 import { useToastStore } from '@/store/useToastStore';
 
@@ -67,6 +70,17 @@ export function confirmCustomizeSave(onSave: () => void): void {
 // Start a premade/saved plan: the confirmation above, then activate, toast and
 // return to the tabs. One path for Plan detail and Find Your Plan.
 export function startPlanWithConfirm(plan: MealPlan): void {
+  // Premade plans are what Pro sells (lib/entitlements.ts#planRequiresPro):
+  // the paywall appears here, on Start, for the plan page and Find Your Plan
+  // alike; after buying, this runs again and the plan starts.
+  if (planRequiresPro(plan) && !useEntitlementStore.getState().isPro) {
+    openPaywall({
+      reason: 'premium_feature',
+      headline: 'Start this plan with Pro',
+      onSuccess: () => startPlanWithConfirm(plan),
+    });
+    return;
+  }
   const start = () => {
     useMealStore.getState().activatePlan(plan);
     useToastStore.getState().showToast(`${plan.name} activated`);

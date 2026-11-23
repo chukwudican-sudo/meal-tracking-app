@@ -237,11 +237,6 @@ export interface RecipeTemplate {
   ingredients: Ingredient[];
   steps: string[];            // numbered cooking steps in order
   difficulty?: RecipeDifficulty; // shown on the full recipe detail page
-  // True for the subset of the premade catalog available to every user,
-  // free tier included. Undefined/false means viewing the full recipe (and
-  // adding it to a plan) requires an active Pro subscription — see
-  // lib/entitlements.ts.
-  isFree?: boolean;
 }
 
 // Full recipe concept used by Custom Recipe / What Can I Make AI suggestions.
@@ -522,7 +517,8 @@ export interface AppStore {
   // templates already exist. Run after meal_logs are pulled.
   hydrateActivePlanIfNeeded: () => void;
   // Snapshots current templates[] into a MealPlan and pushes onto savedPlans.
-  saveCurrentPlanAs: (name: string) => MealPlan;
+  // null: nothing saved (a premade plan without Pro — see the store).
+  saveCurrentPlanAs: (name: string) => MealPlan | null;
   renameSavedPlan: (id: string, name: string) => void;
   removeSavedPlan: (id: string) => void;
 

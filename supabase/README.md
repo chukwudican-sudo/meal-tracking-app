@@ -11,7 +11,7 @@ from `.env` (`EXPO_PUBLIC_SUPABASE_URL`, `EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY`)
 | `migrations/20260714010000_schema.sql` | All 17 tables, helper functions, `updated_at` triggers, auth→profile trigger, protected-columns trigger. |
 | `migrations/20260714010100_rls.sql` | Enables RLS on every table + owner / child / premade / admin policies. |
 | `migrations/20260714010200_sync_constraints.sql` | Natural-key unique indexes for offline-first upserts: `(user_id, ingredient_name)` on the grocery tables and `(user_id, logged_at)` on `weight_logs`. |
-| `migrations/20260714010300_seed_premade_recipes.sql` | Seeds 6 placeholder premade recipes (+ ingredients, steps) with fixed UUIDs matching `constants/premadeRecipes.ts`, and marks exactly 5 free in `premade_recipe_access`. |
+| `migrations/20260714010300_seed_premade_recipes.sql` | Seeds 6 placeholder premade recipes (+ ingredients, steps) with fixed UUIDs matching `constants/premadeRecipes.ts`, and marks exactly 5 free in `premade_recipe_access` (dead data since Nov 23: the app never read it, and all built-in recipes are free). |
 | `migrations/20260717010000_delta_sync.sql` | Delta-pull support: adds `updated_at` (+ `set_updated_at` trigger) to `weight_logs`, `saved_recipes`, `kitchen_items`, `cart_items`; `(user_id, updated_at)` indexes on the delta tables (+ `(updated_at)` on `recipes`); and a `server_now()` RPC (granted to `authenticated`) for skew-free cursors. |
 | `migrations/20260718010000_plan_sync.sql` | Plan syncing: adds `recipe_name` + `recipe_ref` to `plan_day_meals` (preserve the local recipe reference + name when `recipe_id` can't resolve to a real recipe UUID), `updated_at` (+ trigger) on `plan_slots` so it can drive delta pulls, and `(user_id/plan_id, updated_at)` indexes on `plans` / `plan_slots` / `plan_day_meals`. |
 
@@ -163,9 +163,8 @@ the first time they're used after a fresh purchase.
    this claim, so premade content + `premade_recipe_access` become writable
    from the app for your account. (The dashboard itself uses the service role
    and bypasses RLS regardless.)
-4. Free premade recipes are now seeded automatically (5 of the 6 placeholders
-   are `is_free = true`). Adjust in `premade_recipe_access` only if you change
-   the seeded set.
+4. `premade_recipe_access` is not read by the app (Nov 23: all built-in recipes
+   are free; premade plans are the Pro gate, checked in the app).
 
 ## Sync model (login pull)
 

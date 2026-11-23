@@ -88,8 +88,8 @@ Still open:
 7. Restore Purchases flow test; re-signup after delete gets a new user id → old subscription needs Restore (understood
    and accepted by Alex, no code change).
 8. ~~Remove debug `console.info/log` before release~~ — DONE Nov 14: traces removed, timing logs kept under `__DEV__`.
-9. Choose the free premade recipes — currently 12 of 60 (3 per category) have `isFree` in `constants/recipeSeed.ts`; the
-   picks were the agent's, not Alex's.
+9. ~~Choose the free premade recipes~~ — DONE Nov 23: all recipes free, premade plans + AI are Pro (Alex's decision after
+   the research in `reports/Recipe paywalls and content management.md`; no free plan, no badges).
 10. Android: no Play Console yet; `Purchases.showManageSubscriptions()` is iOS-only (Android needs the Play URL).
 
 ## C. Launch blockers (App Store)
@@ -160,7 +160,7 @@ Still open:
     loads code from the Mac): test on the next TestFlight build (roadmap t5). After launch: one-request download
     (now ~10 sequential requests, 1.6–2.5 s), lazy module loading after measuring with Expo Atlas.
 26. `compressPhoto` resizes by width (1280) — tall photos stay huge; should resize the long edge.
-27. Build My Plan macro-picker defaults (min picks, "Step 1 of 2" label) were agent choices Alex never confirmed.
+27. ~~Build My Plan macro-picker defaults~~ — confirmed by Alex Nov 23 (≥1 pick per screen, "Step 1 of 2" label).
 28. `cleanList` in `ai/generatePlanShortlist.ts` (client) silently caps proteins/carbs/fats picks at 15 each (cuisines
     20) before calling `generate-plan-shortlist` — a user who picks more loses the extras without being told.
 29. Re-test `generate-recipe-concept` anti-embellishment (it used to add ingredients the user never mentioned).

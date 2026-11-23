@@ -1,6 +1,7 @@
 // Single entry point for triggering the Pro paywall from anywhere in the
-// app — AI error handlers, client-only gates (Build My Plan activation, View
-// Full Recipe), and the plain "Upgrade to Pro" entry points in Settings /
+// app — AI error handlers, client-only gates (Build My Plan activation, Start
+// Plan / Customize on a premade plan, an AI recipe's full steps), and the
+// plain "Upgrade to Pro" entry points in Settings /
 // Profile. Callers never navigate to app/paywall.tsx directly.
 
 import { router } from 'expo-router';

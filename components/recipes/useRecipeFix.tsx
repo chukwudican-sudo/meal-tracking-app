@@ -46,8 +46,7 @@ export function useRecipeFix(savedId: string | undefined) {
   // Shown inside the sheet: a toast would render behind this Modal.
   const [error, setError] = useState<string | null>(null);
 
-  // Same Pro gate as viewing the full recipe (own recipes have no premade
-  // isFree flag): no fixing what this user can't open.
+  // Same Pro gate as viewing the full recipe: no fixing what this user can't open.
   const canFix = !!recipe && isOwnRecipe(recipe) && !(recipeRequiresPro({ source: recipe.source }) && !isPro);
 
   const openFix = () => {

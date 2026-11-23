@@ -33,6 +33,8 @@ import {
   planNutrition, planSetsGoals, portionOf, scaleIngredients, scaleMacros, swapPortion, type PlanNutrition,
 } from '@/lib/planNutrition';
 import { PLAN_SEED } from '@/constants/planSeed';
+import { planRequiresPro } from '@/lib/entitlements';
+import { useEntitlementStore } from '@/store/useEntitlementStore';
 import { DEFAULT_TRACKED_NUTRIENTS } from '@/constants/nutrients';
 import { classifyIngredient, normalizeIngredientName } from '@/constants/ingredientCategories';
 import { newId, isUuid, stableId } from '@/lib/sync/uuid';
@@ -1798,6 +1800,10 @@ export const useMealStore = create<AppStore>()(
           ? state.savedPlans.find(p => p.name === state.profile.activePlanName) ??
             state.plans.find(p => p.name === state.profile.activePlanName)
           : undefined;
+        // A copy of a premade plan is the user's own and starts freely: without
+        // Pro (a premade plan still running after Pro ended) that would be a way
+        // around the plan paywall. Nothing is lost: the original stays in Explore.
+        if (runningPlan && planRequiresPro(runningPlan) && !useEntitlementStore.getState().isPro) return null;
 
         // Reverse-map templates -> 7-day plan structure using each template's
         // weekly recurrence days (falling back to "every day" for `daily`).
@@ -2434,7 +2440,7 @@ export const useMealStore = create<AppStore>()(
       // The premade catalogs (recipes, plans) are read-only app content, not user
       // data — never persist them. Persisting froze each install on whatever
       // RECIPE_SEED / PLAN_SEED looked like at its first launch: new recipes and
-      // isFree flags never arrived, and a duplicate id fixed in the seed on Aug 19
+      // changed flags never arrived, and a duplicate id fixed in the seed on Aug 19
       // lived on in phones that had saved it on Aug 17.
       partialize: state =>
         Object.fromEntries(

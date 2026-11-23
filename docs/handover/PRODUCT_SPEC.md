@@ -103,7 +103,9 @@ Top → bottom:
 4. **Day Detail button** ("Monday 25 May — 5 meals · 2,400 cal", includes ad-hoc meals) → `/plan/day/[date]`.
 5. **Planned Ingredients** button with count badge → full page.
 6. **Explore Plans** (premade, horizontal category rows Balanced / High Protein / Low Carb / High Fiber / Keto /
-   Mediterranean, "See all") — seeded in `constants/planSeed.ts`, backend-managed later.
+   Mediterranean, "See all") — seeded in `constants/planSeed.ts`, backend-managed later. **Pro** (Nov 23): anyone can
+   open a plan and read every meal and recipe; **Start Plan** (and Customize) opens the paywall without Pro, and the
+   plan starts after buying. No PRO badges on the cards (Alex: no "pro, pro, pro" feel). Recipes are all free.
 7. **Saved Plans** ("My Plan — May 29", "Current" tag; rename any, delete only user-built, with confirm).
 
 **Day Detail page** (`app/plan/day/[date].tsx`): date + day name, macro summary, sections per non-skipped meal slot
@@ -142,7 +144,8 @@ empty removed slots). Back = Cancel ("All unsaved changes will be lost. Are you 
 2. **Macro picker — three screens: Proteins → Carbs → Fats** (required). Each is a **vertical searchable list**
    (Cal AI style) from the live `macro_*` tables, sorted by familiarity; search ranks "starts with" above "contains";
    checkmark/highlight selection. Umbrella items (Chicken, Beef, Pork, Turkey, Potato) expand server-side.
-   Agent-chosen defaults Alex never confirmed: ≥1 pick per screen; progress shows "Step 1 of 2" with a sublabel.
+   Defaults confirmed by Alex Nov 23, 2026: ≥1 pick per screen (the AI builds meals around a protein, a carb and a
+   fat); progress shows "Step 1 of 2" with a sublabel.
 3. **Secondary preferences** (optional, skippable, asked fresh every time, not saved — "use last time" was removed):
    cuisines (Nigerian, Mediterranean, Asian, American, Mexican, Indian, Mixed/Everything), cook time (Quick <15 /
    Moderate 15–30 / Full 30+ — tie-breaker only), **loved foods** (keeps its own short `LOVE_SUGGESTIONS` chip list —
@@ -196,7 +199,7 @@ there are **no Add to Plan / Add to Today buttons** on recipe pages (add via "+"
 
 - **Recipe preview** (`app/recipe/[id].tsx`): image/placeholder, name, calories, P/C/F, cook time, meal-type tag, 3–4 key
   ingredients; top-right **"+" (small filled green circle, left) and bookmark (right)**; one "View Full Recipe" button
-  (Pro-gated for non-free content; locked view still shows calories/macros).
+  (free for built-in and own recipes; an AI recipe's steps are Pro — locked view still shows calories/macros).
 - **Full detail** (`app/recipe/detail/[id].tsx`): name, image, bookmark, tag, info bar (calories, macros, cook time,
   difficulty Easy/Medium/Hard), ingredients with measurements, numbered steps, floating AI assistant button → the
   Recipe Assistant (`app/recipe/assistant/[id].tsx`): a full-screen chat that slides up, closed with ⌄, recipe name +

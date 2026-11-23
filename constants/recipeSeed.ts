@@ -12,10 +12,8 @@ import type { RecipeTemplate } from '@/store/types';
 // run `npm run check:recipe-nutrition` (scripts/recipe-nutrition/). Ingredient
 // ids must be unique within a recipe but don't need to be globally unique.
 //
-// 3 recipes per category (12 of 60, 20%) are flagged `isFree: true` — real,
-// meaningful free-tier access without undermining the reason to go Pro. Every
-// other recipe here requires an active subscription to view in full / add to
-// a plan (see lib/entitlements.ts#recipeRequiresPro).
+// Every recipe here is free to read in full (Nov 23, 2026: recipes are free,
+// plans and AI are Pro — lib/entitlements.ts).
 
 function ing(id: string, name: string, quantity: number, unit: string) {
   return { id, name, quantity, unit };
@@ -42,7 +40,6 @@ export const RECIPE_SEED: RecipeTemplate[] = [
       'Top with blueberries and drizzle with honey.',
     ],
     difficulty: 'Easy',
-    isFree: true,
   },
   {
     id: 'rcp-bf-greek-yogurt-bowl',
@@ -63,7 +60,6 @@ export const RECIPE_SEED: RecipeTemplate[] = [
       'Drizzle with honey.',
     ],
     difficulty: 'Easy',
-    isFree: true,
   },
   {
     id: 'rcp-bf-veggie-omelette',
@@ -85,7 +81,6 @@ export const RECIPE_SEED: RecipeTemplate[] = [
       'Pour in eggs, sprinkle cheese, fold and serve.',
     ],
     difficulty: 'Easy',
-    isFree: true,
   },
   {
     id: 'rcp-bf-avocado-toast',
@@ -375,7 +370,6 @@ export const RECIPE_SEED: RecipeTemplate[] = [
       'Spoon tuna mix, roll tightly, slice in half.',
     ],
     difficulty: 'Easy',
-    isFree: true,
   },
   {
     id: 'rcp-ln-quinoa-bowl',
@@ -419,7 +413,6 @@ export const RECIPE_SEED: RecipeTemplate[] = [
       'Slice diagonally and serve.',
     ],
     difficulty: 'Easy',
-    isFree: true,
   },
   {
     id: 'rcp-ln-veggie-stir-fry',
@@ -441,7 +434,6 @@ export const RECIPE_SEED: RecipeTemplate[] = [
       'Add soy sauce, toss, serve over rice.',
     ],
     difficulty: 'Easy',
-    isFree: true,
   },
 
   {
@@ -680,7 +672,6 @@ export const RECIPE_SEED: RecipeTemplate[] = [
       'Serve over rice.',
     ],
     difficulty: 'Medium',
-    isFree: true,
   },
   {
     id: 'rcp-dn-salmon-rice',
@@ -880,7 +871,6 @@ export const RECIPE_SEED: RecipeTemplate[] = [
       'Simmer 20 minutes until thickened.',
     ],
     difficulty: 'Easy',
-    isFree: true,
   },
   {
     id: 'rcp-dn-pork-stir-fry',
@@ -923,7 +913,6 @@ export const RECIPE_SEED: RecipeTemplate[] = [
       'Bake at 220C for 12 minutes; finish with basil.',
     ],
     difficulty: 'Easy',
-    isFree: true,
   },
   {
     id: 'rcp-dn-shrimp-fried-rice',
@@ -1006,7 +995,6 @@ export const RECIPE_SEED: RecipeTemplate[] = [
       'Serve with hummus for dipping.',
     ],
     difficulty: 'Easy',
-    isFree: true,
   },
   {
     id: 'rcp-sn-protein-smoothie',
@@ -1043,7 +1031,6 @@ export const RECIPE_SEED: RecipeTemplate[] = [
       'Serve with a small handful of almonds.',
     ],
     difficulty: 'Easy',
-    isFree: true,
   },
   {
     id: 'rcp-sn-yogurt-honey',
@@ -1062,7 +1049,6 @@ export const RECIPE_SEED: RecipeTemplate[] = [
       'Drizzle honey and top with crushed walnuts.',
     ],
     difficulty: 'Easy',
-    isFree: true,
   },
   {
     id: 'rcp-sn-rice-cake-pb',

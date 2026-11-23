@@ -26,6 +26,9 @@ import { useUndoStore } from '@/store/useUndoStore';
 import type { MealPlan, MealSlot, PlanDayMeal, RecipeTemplate } from '@/store/types';
 import { slotNameToCategory } from '@/utils/mealSlots';
 import { confirmCustomizeSave, startPlanWithConfirm } from '@/lib/planActivation';
+import { planRequiresPro } from '@/lib/entitlements';
+import { openPaywall } from '@/lib/paywall';
+import { useEntitlementStore } from '@/store/useEntitlementStore';
 import { EMPTY_SLOT, REMOVED_SLOT } from '@/constants/planSlots';
 import { planSetsGoals, portionLabel, portionOf } from '@/lib/planNutrition';
 
@@ -167,6 +170,17 @@ export default function PlanDetailScreen() {
 
   const handleStartCustomize = () => {
     if (!storedPlan) return;
+    // Customizing a premade plan saves the user's own copy, which starts
+    // freely: without this, it would be a way around the plan paywall (a
+    // premade plan still running after Pro ended can reach here).
+    if (planRequiresPro(storedPlan) && !useEntitlementStore.getState().isPro) {
+      openPaywall({
+        reason: 'premium_feature',
+        headline: 'Customize this plan with Pro',
+        onSuccess: handleStartCustomize,
+      });
+      return;
+    }
     // Deep clone via JSON to ensure nested arrays are independent from the
     // store snapshot. The plan is small (≤7 days × ~5 meals) so this is fine.
     const clone: MealPlan = JSON.parse(JSON.stringify(storedPlan));

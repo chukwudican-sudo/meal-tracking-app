@@ -28,6 +28,11 @@ Deeper material lives in `docs/handover/` — read the relevant file before touc
   recipes, a Kitchen inventory + Cart, AI meal scanning/estimation, AI recipe generation, and a Pro subscription.
 - **Monetization:** 5 free AI "scans" (shared pool across AI features), then Pro via RevenueCat
   (Monthly $14.99 / Yearly $49.99, Test Store right now). Principle: **gate cost, not arbitrary features.**
+  **The line (Nov 23, research in `reports/Recipe paywalls and content management.md`): recipes are free, plans and
+  AI are Pro.** Every built-in recipe is free to read; Start Plan / Customize on a premade plan opens the paywall
+  (`lib/entitlements.ts#planRequiresPro`, checked in `startPlanWithConfirm`; no "PRO" badges on cards — Alex's call);
+  the user's own plans start freely and a running plan keeps running when Pro ends. Free things are never locked
+  later (review backlash, Apple 3.1.2(a)); loosening is fine.
 
 ## 2. Stack
 
@@ -287,7 +292,8 @@ These come straight from months of his feedback. Violating them is the #1 thing 
   call (`generate-recipe-concept`, free scans) returns ingredients, `addCustomRecipe` saves it to Recent (never merged by
   name). View Full Recipe writes steps from exactly those ingredients (`generate-recipe-steps`, Pro; server overwrites
   the returned list with the input). Fix = `useRecipeFix` → `fix-recipe` (free scans; no steps yet → ingredients/macros
-  only; never renames). Fix memory is `recipeFixHistory` (local, not synced). Free users see ingredients + step 1.
+  only; never renames). Fix memory is `recipeFixHistory` (local, not synced). Free users see an AI recipe's
+  ingredients + step 1 (built-in recipes are free in full).
   Swaps (picker + "Use this recipe") go through `lib/recipeSwap.ts#applyRecipeSwap`, which returns its Undo.
 - **No demo content (Nov 13):** a new install starts like a clean account (`resetUserData`): no demo meals,
   history, library or streak. The old first-launch demo templates (`DEMO_TEMPLATE_IDS` tpl-1..5) made a new account

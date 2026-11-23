@@ -45,7 +45,7 @@ import type { PurchasesPackage } from 'react-native-purchases';
 
 const BENEFITS = [
   'Unlimited AI scans',
-  'Full recipes, not just previews',
+  'All premade meal plans',
   'Custom Recipe generation',
   'Unlimited Recipe Assistant chat',
   'AI-personalized Build My Plan',

@@ -238,10 +238,11 @@ Changing `_shared/*` → redeploy every importer. Changing `constants/entitlemen
 - **Server status via webhook:** INITIAL_PURCHASE, RENEWAL, UNCANCELLATION, PRODUCT_CHANGE, NON_RENEWING_PURCHASE,
   TRANSFER → `active` (+ provider, expiry). EXPIRATION → `expired`. CANCELLATION / BILLING_ISSUE → no change
   (access lasts until expiry). Always 200, idempotent. Accepted race: briefly after purchase the server may still say `free`.
-- **Client-only Pro gates** (`lib/entitlements.ts`): Build My Plan **activation**, and **View Full Recipe**
-  (`recipeRequiresPro`: `ai` → Pro; `manual` → free; `premade` → Pro unless `isFree`; first 2 per category are free =
-  8 of 60 — Alex should pick these deliberately). Locked recipe view still shows calories/macros as a teaser.
-  Note: DB `premade_recipe_access.is_free` (5 of 6 placeholders) is not what the client uses.
+- **Client-only Pro gates** (`lib/entitlements.ts`, Nov 23: recipes free, plans and AI Pro): Build My Plan
+  **activation**; **Start Plan / Customize on a premade plan** (`planRequiresPro` = `source === 'premade'`, checked in
+  `lib/planActivation.ts#startPlanWithConfirm` and the plan page's Customize); an **AI recipe's full steps**
+  (`recipeRequiresPro`: only `ai`; built-in and manual recipes are free in full). The per-recipe `isFree` flags were
+  removed. Note: DB `premade_recipe_access.is_free` (6 placeholder rows) is not read by the app.
 - **Free tier:** core tracking free forever; 5 free AI scans total, shared by all "free-scan pool" functions, consumed
   only on success; recipe steps + assistant are Pro-only.
 
