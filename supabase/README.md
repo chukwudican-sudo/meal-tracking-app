@@ -154,12 +154,10 @@ the first time they're used after a fresh purchase.
 ## Manual dashboard steps (not code)
 
 1. **Auth → Providers → Email**: enable it and turn on **"Confirm email"**.
-2. **Auth → URL Configuration → Redirect URLs**: add
-   - `mealapp://auth/callback`
-   - `mealapp://auth/reset`
-   - **Dev project only** (the "Macrotri Dev" build, see `app.config.js`):
-     `mealapp-dev://auth/callback` and `mealapp-dev://auth/reset`. Never add
-     these to production.
+2. **Auth → Emails**: the *Confirm signup* and *Reset password* templates must
+   show `{{ .Token }}` (the 6-digit code) and no link. The app sends no redirect
+   URL (since Nov 21, 2026), so **Auth → URL Configuration → Redirect URLs**
+   needs no app entries; old `mealapp://auth/...` entries are harmless.
 3. **Make yourself an admin**: Auth → Users → your user → edit
    **app_metadata** to include `{"is_admin": true}`. `public.is_admin()` reads
    this claim, so premade content + `premade_recipe_access` become writable

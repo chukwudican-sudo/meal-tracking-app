@@ -5,7 +5,8 @@
 // subsequent change emits the delta. Reference checks keep unrelated updates
 // cheap; per-record content hashes avoid spurious writes.
 
-import { isPlanTemplate, isSeedTemplate, useMealStore } from '@/store/useMealStore';
+import { DevSettings } from 'react-native';
+import { isPlanTemplate, isSeedTemplate, profileHasData, useMealStore } from '@/store/useMealStore';
 import type {
   AppStore, GroceryItem, MealEntry, MealPlan, MealTemplate, SavedRecipe, ServerSnapshot,
 } from '@/store/types';
@@ -235,7 +236,7 @@ class Projector {
   // edited. Run once per account per install, by the engine.
   enqueueSyncUpgradeBackfill(): void {
     const s = useMealStore.getState();
-    this.upsertUsers();
+    if (this.mayUploadRestoredProfile()) this.upsertUsers();
     buildWater(s).forEach((ml, date) => this.upsertWater(date, ml));
     buildTemplates(s).forEach(snap => this.upsertTemplate(snap.template));
     buildMeals(s).forEach((snap, id) => {
@@ -276,7 +277,11 @@ class Projector {
 
     // Accounts from before users.active_plan_name existed (or a pointer never
     // uploaded): send it once, or a reinstall can't bring the plan back.
-    if (snapshot.usersActivePlanName !== undefined) {
+    // Not while a plan write is queued either: the pull then kept the local
+    // plan pointer (applyServerSnapshot's anyPlanDirty), which may be stale, and
+    // sending it could end a running Explore plan on every phone.
+    const anyPlanDirty = Array.from(outbox.dirtyKeys()).some(k => k.startsWith('plans:'));
+    if (snapshot.usersActivePlanName !== undefined && !anyPlanDirty && this.mayUploadRestoredProfile()) {
       // Also rewrites a never-written null as '' when no plan is running.
       if (activePlanWire(s.profile.activePlanName) !== snapshot.usersActivePlanName) this.upsertUsers();
     }
@@ -490,6 +495,18 @@ class Projector {
       table: 'meal_templates', op: 'upsert', entityKey: entityKey.template(template.id), payload: { template },
     });
   }
+  // The restore-time uploads above send the WHOLE local profile. Skip them when
+  // this phone's profile is empty, or a profile write is still queued: the
+  // pull then leaves the local profile at its defaults (a queued write is
+  // never overwritten), and uploading it would replace the queued real write
+  // and wipe the server's profile (found in the Nov 21, 2026 review).
+  private mayUploadRestoredProfile(): boolean {
+    return (
+      profileHasData(useMealStore.getState().profile) &&
+      !outbox.dirtyKeys().has(entityKey.usersSelf())
+    );
+  }
+
   private upsertUsers(): void {
     const s = useMealStore.getState();
     outbox.enqueue({ table: 'users', op: 'upsert', entityKey: entityKey.usersSelf(), payload: { profile: s.profile, goals: s.goals } });
@@ -497,3 +514,19 @@ class Projector {
 }
 
 export const projector = new Projector();
+
+// Development only. A hot reload (Metro Fast Refresh) re-runs this file when
+// it or anything it imports changes (e.g. lib/supabase.ts) and creates a new
+// projector, while the old one stays subscribed to the store, which isn't
+// re-run. Nov 21, 2026: sign-out stopped only the new one, the orphan captured
+// the logout wipe as deletes of every record, and the next sign-in pushed
+// them (the dev account was emptied; restored from a backup). A hot-swapped
+// sync layer can't be trusted (nothing restarts the new copy either), so
+// Metro's dispose hook, run before the file re-runs, stops the old copy and
+// reloads the whole app instead.
+if (__DEV__) {
+  (module as { hot?: { dispose(cb: () => void): void } }).hot?.dispose(() => {
+    projector.stop();
+    DevSettings.reload('Sync code changed');
+  });
+}

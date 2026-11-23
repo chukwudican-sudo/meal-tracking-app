@@ -28,10 +28,9 @@ export const supabase = createClient(supabaseUrl, supabasePublishableKey, {
     persistSession: true,
     // React Native has no URL to parse the session from (that's a web-only concern).
     detectSessionInUrl: false,
-    // PKCE returns a `?code=` query param on the redirect deep link, which
-    // expo-linking parses reliably (implicit-flow tokens live in the URL
-    // fragment, which RN deep links don't expose). We exchange the code for a
-    // session in the auth/callback and auth/reset screens.
+    // PKCE dates from link-style auth emails (deleted Nov 21, 2026: signup and
+    // reset now verify a 6-digit code with verifyOtp, which doesn't depend on
+    // the flow type). Left as is rather than change a working auth setting.
     flowType: 'pkce',
   },
 });

@@ -13,8 +13,6 @@ import {
   type ReactNode,
 } from 'react';
 import { AppState } from 'react-native';
-import Constants from 'expo-constants';
-import * as Linking from 'expo-linking';
 import type { AuthError, Session, User } from '@supabase/supabase-js';
 
 import { allowPushRegistration, unregisterPushToken } from '@/lib/notifications/push';
@@ -32,17 +30,9 @@ import { APP_NAME } from '@/constants/app';
 import { reportError } from '@/lib/monitoring';
 import { withTimeout } from '@/lib/timeoutSignal';
 
-// Deep links Supabase sends the user back to. These must be added to the
-// project's Auth "Redirect URLs" allow-list in the Supabase dashboard.
-// Use the app's own custom scheme rather than Linking.createURL() so the
-// redirect is deterministic (createURL yields an exp:// URL under Expo Go and
-// must never override the intended production/standalone deep link). The
-// scheme comes from the app config: mealapp, or mealapp-dev in the "Macrotri
-// Dev" build (app.config.js), so a link opens the app that asked for it.
-const configScheme = Constants.expoConfig?.scheme;
-const APP_SCHEME = (Array.isArray(configScheme) ? configScheme[0] : configScheme) || 'mealapp';
-export const EMAIL_CONFIRM_REDIRECT = `${APP_SCHEME}://auth/callback`;
-export const PASSWORD_RESET_REDIRECT = `${APP_SCHEME}://auth/reset`;
+// Signup and password-reset emails carry a 6-digit code, never a link (the
+// dev and prod templates were checked Nov 21, 2026), so no redirect deep link
+// is sent: the old /auth/callback and /auth/reset pages were deleted then.
 
 export interface AuthResult {
   error: string | null;
@@ -73,9 +63,6 @@ export async function signUpWithEmail(email: string, password: string): Promise<
   const { data, error } = await supabase.auth.signUp({
     email: email.trim(),
     password,
-    // Explicit deep link so the confirmation email points at the app rather
-    // than the dashboard's default Site URL.
-    options: { emailRedirectTo: EMAIL_CONFIRM_REDIRECT },
   });
   if (error) return { error: error.message };
 
@@ -189,11 +176,9 @@ export async function signOut(): Promise<AuthResult> {
 // render {{ .Token }} (6-digit code, verified by verifyRecoveryOtp) — a tapped
 // link breaks when opened on another device (PKCE verifier lives on this phone)
 // or gets burned by email-scanner prefetch, the same failures that moved signup
-// to a code. redirectTo only matters for old link-style emails (/auth/reset).
+// to a code.
 export async function sendPasswordReset(email: string): Promise<AuthResult> {
-  const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
-    redirectTo: PASSWORD_RESET_REDIRECT,
-  });
+  const { error } = await supabase.auth.resetPasswordForEmail(email.trim());
   return toEmailSendResult(error, 'Could not send the reset email. Please try again.');
 }
 
@@ -267,7 +252,6 @@ export async function resendVerificationEmail(email: string): Promise<AuthResult
   const { error } = await supabase.auth.resend({
     type: 'signup',
     email: email.trim(),
-    options: { emailRedirectTo: EMAIL_CONFIRM_REDIRECT },
   });
   return toEmailSendResult(error, 'Could not resend the email. Please try again.');
 }
@@ -303,18 +287,6 @@ function toEmailSendResult(error: AuthError | null, fallback: string): AuthResul
 function parseRetryAfterSeconds(message: string): number | null {
   const match = message.match(/after (\d+)\s*seconds?/i);
   return match ? Number(match[1]) : null;
-}
-
-// Deep links from email confirmation / password reset arrive as
-// `mealapp://auth/...?code=<pkce_code>` (mealapp-dev:// in Macrotri Dev). Exchange that code for a session.
-export async function exchangeCodeFromUrl(url: string): Promise<AuthResult> {
-  const { queryParams } = Linking.parse(url);
-  const code = typeof queryParams?.code === 'string' ? queryParams.code : null;
-  if (!code) {
-    return { error: 'This link is missing its auth code or has expired.' };
-  }
-  const { error } = await supabase.auth.exchangeCodeForSession(code);
-  return { error: error ? error.message : null };
 }
 
 // ─── Session context ─────────────────────────────────────────────────────────

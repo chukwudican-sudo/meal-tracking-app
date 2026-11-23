@@ -5,6 +5,7 @@
 // signing in as a different user resets local data and pulls the new account's.
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { DevSettings } from 'react-native';
 import { profileHasData, useMealStore } from '@/store/useMealStore';
 import { supabase } from '@/lib/supabase';
 import { reportError } from '@/lib/monitoring';
@@ -150,14 +151,7 @@ class SyncEngine {
 
   async onSignOut(): Promise<void> {
     projector.stop();
-    if (this.retryTimer) {
-      clearTimeout(this.retryTimer);
-      this.retryTimer = null;
-    }
-    if (this.stuckTimer) {
-      clearTimeout(this.stuckTimer);
-      this.stuckTimer = null;
-    }
+    this.clearTimers();
     // Do NOT clear the outbox: any still-pending writes must survive sign-out so
     // they can be flushed the next time this account signs in on this device.
     // deactivate() persists them to storage and drops the in-memory copy.
@@ -183,6 +177,17 @@ class SyncEngine {
     this.userId = null;
     this.readyUserId = null;
     this.setStatus('idle');
+  }
+
+  clearTimers(): void {
+    if (this.retryTimer) {
+      clearTimeout(this.retryTimer);
+      this.retryTimer = null;
+    }
+    if (this.stuckTimer) {
+      clearTimeout(this.stuckTimer);
+      this.stuckTimer = null;
+    }
   }
 
   setOnline(online: boolean): void {
@@ -263,8 +268,13 @@ class SyncEngine {
         // A full pull is required whenever we can't trust an incremental cursor:
         // first claim, account switch, or a returning account with no cursor yet
         // (fresh install / pre-delta upgrade). Otherwise pull only what changed.
+        // Also when this phone holds no profile at all: a delta can't rebuild an
+        // empty cache. Nov 21, 2026: after the dev database was restored from a
+        // backup, the cursor was newer than every restored row, so each delta
+        // came back empty and login failed with "no profile" forever.
         const cursor = await AsyncStorage.getItem(cursorKey(userId));
-        const fullPull = mode !== 'same' || cursor === null;
+        const fullPull =
+          mode !== 'same' || cursor === null || !profileHasData(useMealStore.getState().profile);
         const since = fullPull ? null : cursor;
 
         // Capture server time BEFORE the pull so rows written concurrently (or by
@@ -520,3 +530,13 @@ class SyncEngine {
 }
 
 export const engine = new SyncEngine();
+
+// Development only: a hot reload re-runs this file and makes a new engine
+// that nothing signs in, while the old one keeps flushing. Reload the whole
+// app instead (see the projector's note).
+if (__DEV__) {
+  (module as { hot?: { dispose(cb: () => void): void } }).hot?.dispose(() => {
+    engine.clearTimers();
+    DevSettings.reload('Sync code changed');
+  });
+}

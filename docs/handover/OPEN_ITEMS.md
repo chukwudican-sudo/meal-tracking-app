@@ -70,8 +70,8 @@ Nothing here is approved for building yet — per the working rules, discuss and
 - ~~Custom SMTP (dev)~~ — on; emails are sent as `Macrotri <hello@macrotri.com>`. The production project needs the same.
 
 Still open:
-1. **Delete `/auth/reset` before launch** (old link emails only; its "done" state routes to `/(tabs)`, which the gate
-   bounces to onboarding while logged out).
+1. ~~Delete `/auth/reset` before launch~~ — DONE Nov 21 (with `/auth/callback`): the Reset password and Confirm signup
+   emails on dev and prod were checked and show only the code. The app no longer sends a redirect URL.
 2. Worth checking: the sync engine's `claim` mode (device with no `sync:lastUserId`) uploads local profile/goals over
    the server copy. A normal login on a fresh install hits this too — confirm a fresh-install login can't overwrite a
    real profile with defaults.
@@ -178,8 +178,7 @@ Still open:
 33. ~~3 pre-existing tsc errors~~ — DONE Nov 14 (tsc and lint both clean).
 34. ~~Dead code~~ — DONE Nov 21: those files, `app/meal/[id].tsx`, `app/modal.tsx`, the Expo starter leftovers
     (themed text/view, parallax, haptic tab, icon symbol…), react-logo images and 8 unused exports deleted.
-    Still open: `app/auth/reset.tsx` and `app/auth/callback.tsx` — delete only once the dev and prod *Reset password*
-    and *Confirm signup* emails show the code without a link. Unused packages (expo-symbols, expo-haptics,
+    `app/auth/reset.tsx` and `app/auth/callback.tsx` deleted too (emails checked code-only). Unused packages (expo-symbols, expo-haptics,
     expo-web-browser, react-native-reanimated) — remove with the next native build. 3 unused helpers in
     lib/sync (serverIsEmpty, inchesToCm, cmToFeetInches) left alone on purpose.
 

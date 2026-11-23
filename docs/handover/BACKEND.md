@@ -87,7 +87,8 @@ there's a session, network, and a hydrated store. UI never waits on sync.
   `saved_recipes` before `plans` because of the `plan_day_meals.recipe_id` FK; retries scheduled at the soonest backoff
   clamped 1–30s; an enqueue listener drains within ~1s), `SyncProvider.tsx` + `useSyncStatus()`.
 - **Reconcile modes:** `claim` (new account on this device → `enqueueAll`), `switch` (different user → full pull,
-  `enqueueMissing`), `same` (delta pull from cursor). Cursor key `sync:lastPulledAt:${userId}`, captured via
+  `enqueueMissing`), `same` (delta pull from cursor; a full pull instead when this phone holds no profile — a delta can't rebuild an
+  empty cache: after the Nov 21 dev backup restore the cursor was newer than every restored row and login failed). Cursor key `sync:lastPulledAt:${userId}`, captured via
   `server_now()` *before* pulling. `sync:lastUserId` is kept across logout on purpose (clearing it would flip to `claim`
   and upload a wiped store over the server copy).
 - **Conflicts:** last-write-wins with a dirty guard (local wins while a write for that entity is pending);
@@ -96,6 +97,10 @@ there's a session, network, and a hydrated store. UI never waits on sync.
 - **Sign-out order:** stop projector → best-effort flush → `signOut()` → clear delta cursor → `resetUserData()`.
   The outbox is **never** cleared on sign-out (pending writes sync on next login). Verified sessions log out instantly;
   never-verified accounts get a hard warning ("…never been backed up… Log out & erase").
+- **Dev hot reload:** `engine.ts` and `projector.ts` force a full app reload (`DevSettings.reload`) when Metro
+  swaps them. Nov 21: a hot swap left an old projector still listening; the next logout's `resetUserData()` was
+  captured as deletes and wiped the dev account (restored from backup). A restored profile is only re-uploaded when
+  this phone has real profile data and no queued profile write (`mayUploadRestoredProfile`).
 - `flush()` captures `uid` once, verifies the session matches via `getSession()`, and stops if the user changes mid-loop
   (fixed a mass-RLS-violation bug during rapid logout/login).
 - **What syncs:** profile → `users`, meals → `meal_logs`(+ingredients), weight, saved recipes (+ingredients/steps),
@@ -117,8 +122,7 @@ there's a session, network, and a hydrated store. UI never waits on sync.
   saves `profile.email` locally; when verification is needed sets `pendingEmailVerification` and stores the password in
   `expo-secure-store` via `lib/pendingCredentials.ts`), `signInWithEmail`, **`verifySignupOtp(email, code)`**
   (`verifyOtp` type `signup`), `resendVerificationEmail` (friendly rate-limit message + retry seconds), `signOut`,
-  `sendPasswordReset` (→ `mealapp://auth/reset`), `updatePassword`, `exchangeCodeFromUrl` (deep-link PKCE code; has
-  debug logs). `AuthProvider` also: syncs RevenueCat identity to the Supabase uid; clears pending verification +
+  `sendPasswordReset` (emails a 6-digit code; no redirect URL since Nov 21), `updatePassword`. `AuthProvider` also: syncs RevenueCat identity to the Supabase uid; clears pending verification +
   stored password once a confirmed session appears; silent re-auth on foreground while unverified (15s throttle).
 - **Signup confirmation = 6-digit code** (`components/auth/EmailCodeVerification.tsx`, `textContentType='oneTimeCode'`,
   60s resend cooldown). Shown inline after signup in onboarding ("I'll verify later" allowed — local-first) and at
@@ -140,7 +144,8 @@ there's a session, network, and a hydrated store. UI never waits on sync.
   `signOut`, `clearPendingPassword`, `useEntitlementStore._reset()`, `resetUserData()`, `router.replace('/onboarding')`.
   Warns that it does **not** cancel an Apple subscription (button → Manage Subscription). Re-signing up with the same
   email creates a new uid → Pro must be reclaimed via Restore Purchases.
-- Redirect URLs that must be allow-listed in the dashboard: `mealapp://auth/callback`, `mealapp://auth/reset`.
+- Redirect URLs: none needed since Nov 21, 2026 (all auth emails are code-only; the app sends no redirect URL). The
+  old `mealapp://auth/callback` / `auth/reset` entries in the dashboard allow-list are harmless leftovers.
   A signup 500 `unexpected_failure` on Aug 18 was never root-caused (DB trigger ruled out; suspect: redirect allow-list).
 
 ## 5. Edge functions

@@ -63,8 +63,6 @@ function RootLayout() {
             <Stack.Screen name="(tabs)"        options={{ headerShown: false }} />
             <Stack.Screen name="onboarding"    options={{ headerShown: false, animation: 'fade', gestureEnabled: false }} />
             <Stack.Screen name="auth/forgot-password"  options={fullScreenSlide} />
-            <Stack.Screen name="auth/reset"            options={{ headerShown: false, animation: 'fade', gestureEnabled: false }} />
-            <Stack.Screen name="auth/callback"         options={{ headerShown: false, animation: 'fade', gestureEnabled: false }} />
             <Stack.Screen name="auth/verify-code"      options={{ presentation: 'modal', headerShown: false, animation: 'slide_from_bottom' }} />
             <Stack.Screen name="settings"      options={fullScreenSlide} />
             <Stack.Screen name="cart"          options={fullScreenSlide} />

@@ -95,8 +95,8 @@ app/                     expo-router routes
   (tabs)/                index (Home) · plan · recipes · progress   (+ custom tab bar with the "+" button)
   _layout.tsx            root Stack: providers + EVERY non-tab route registered here (see conventions)
   onboarding.tsx         full onboarding step machine (welcome → data → account → results → activation) + login
-  auth/                  verify-code (6-digit signup OTP — the real signup path) · forgot-password · reset (password-reset deep link)
-                         · callback (old signup-link handler, kept untouched for any link still tapped)
+  auth/                  verify-code (6-digit signup OTP — the real signup path) · forgot-password (6-digit reset code).
+                         The old link pages (reset, callback) were deleted Nov 21: all four auth emails are code-only.
   plan/                  build.tsx (Build My Plan wizard, ~3250 lines) · find.tsx (Find Your Plan: 5 questions → matching premade plans) · [id] (plan detail / Current Plan / Customize) · day/[date] (Day Detail) · category/[type]
   recipe/                [id] (preview) · detail/[id] (full recipe) · assistant/[id] (Recipe Assistant chat, slides up)
   recipes/               saved (unified recipe page) · category/[type]
@@ -293,6 +293,10 @@ These come straight from months of his feedback. Violating them is the #1 thing 
   mount before, launch-day plan meals were baselined as uploaded and never sent. Any new automatic store change at
   launch must wait the same way. Known gap (post-launch): plan meals get random ids per phone, so two phones filling
   the same day before either syncs make duplicates — fix with calendar-style ids (series + date).
+- **Sync modules reload the whole app in dev (Nov 21):** a Fast Refresh of `lib/sync/*` left an orphan projector
+  that turned a logout into server deletes (dev account wiped, restored from backup) — `engine.ts`/`projector.ts`
+  now `DevSettings.reload()` on hot swap. Any new module-level singleton that subscribes to the store needs the same
+  `module.hot.dispose`. Login does a full pull when the phone has no profile (a stale cursor can't rebuild it).
 - **Settings/profile forms (`components/profile/FormPage`):** switches and choices save on tap (no button); typed
   forms pass `dirty` (`useIsDirty`) → green **Save** top-right, grey until changed, "Discard changes?" on leaving
   unsaved. `onSave` returns `false` when validation refuses. Only Feedback keeps a bottom button (Submit).
