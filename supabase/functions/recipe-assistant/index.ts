@@ -34,7 +34,7 @@ import { handlePreflight } from '../_shared/cors.ts';
 import { errorResponse, jsonResponse } from '../_shared/errors.ts';
 import { aiConsentGiven, consentRequiredResponse } from '../_shared/aiConsent.ts';
 import { createAdminClient, getAuthedUser } from '../_shared/auth.ts';
-import { isEntitled } from '../_shared/entitlement.ts';
+import { hasPro } from '../_shared/entitlement.ts';
 import { isRateLimited, logAiUsage } from '../_shared/rateLimit.ts';
 import { callGeminiJSON, GeminiTimeoutError } from '../_shared/gemini.ts';
 import {
@@ -216,7 +216,7 @@ Deno.serve(async (req: Request) => {
   const [profileResult, rateLimitResult] = await Promise.all([
     admin
       .from('users')
-      .select('ai_consent, subscription_status, dietary_preferences, allergies')
+      .select('ai_consent, subscription_status, subscription_expiry_date, dietary_preferences, allergies')
       .eq('id', user.id)
       .single(),
     isRateLimited(admin, user.id, FUNCTION_NAME, RATE_LIMIT, RATE_WINDOW_MS).catch((e) => {
@@ -233,7 +233,7 @@ Deno.serve(async (req: Request) => {
   if (!aiConsentGiven(profileRow)) return consentRequiredResponse();
 
   // Subscription, unconditional. Premium-only feature, no free tier.
-  if (!isEntitled(profileRow.subscription_status)) {
+  if (!(await hasPro(admin, user.id, profileRow))) {
     return errorResponse('not_premium', 'Chat with the Recipe Assistant is a Premium feature.', 402);
   }
 

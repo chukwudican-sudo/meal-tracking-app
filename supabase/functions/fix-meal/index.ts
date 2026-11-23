@@ -338,7 +338,7 @@ Deno.serve(async (req: Request) => {
   const [profileResult, rateLimitResult] = await Promise.all([
     admin
       .from('users')
-      .select('ai_consent, subscription_status, free_scans_remaining, dietary_preferences, allergies')
+      .select('ai_consent, subscription_status, subscription_expiry_date, free_scans_remaining, dietary_preferences, allergies')
       .eq('id', user.id)
       .single(),
     isRateLimited(admin, user.id, FUNCTION_NAME, RATE_LIMIT, RATE_WINDOW_MS).catch((e) => {
@@ -358,7 +358,7 @@ Deno.serve(async (req: Request) => {
   // from the initial estimate). Subscribers are unlimited; everyone else spends
   // a free scan (consumed only on success, below). not_premium triggers the
   // paywall in the app.
-  const entitlement = resolveEntitlement(profileRow.subscription_status, profileRow.free_scans_remaining);
+  const entitlement = await resolveEntitlement(admin, user.id, profileRow);
   if (!entitlement.allowed) {
     return errorResponse(
       'not_premium',

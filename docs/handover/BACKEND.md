@@ -165,8 +165,8 @@ All in `supabase/functions/`, all **deployed** (Oct 9 check). `verify_jwt=true` 
 ### Shared skeleton (`_shared/`)
 `cors.ts` (`handlePreflight`), `errors.ts` (`errorResponse`, `jsonResponse`, body `{ error: { code, message } }`, codes
 `invalid_input | unauthorized | not_premium (402) | rate_limited (429) | ai_failed | server_error`), `auth.ts`
-(`createAdminClient`, `getAuthedUser`), `entitlement.ts` (`isEntitled` = status `active|trial`;
-`resolveEntitlement(status, freeScansRemaining)`; `consumeFreeScan` RPC), `rateLimit.ts` (`isRateLimited`,
+(`createAdminClient`, `getAuthedUser`), `entitlement.ts` (`hasPro` = status `active|trial` and expiry + 3 days not passed, else RevenueCat asked live
+and the answer saved; `resolveEntitlement(admin, userId, row)`; `consumeFreeScan` RPC), `rateLimit.ts` (`isRateLimited`,
 `logAiUsage` on `ai_usage_log` keyed by user + function name), `gemini.ts` (`callGeminiJSON`: structured JSON schema,
 optional `images[]` placed before the text part, timeout via AbortController, **one retry after 500ms only on 429/503**,
 never on timeout), `mealPromptHelpers.ts` (`buildUserContext`, `buildHardConstraints`, `buildStyleCues`,
@@ -190,7 +190,7 @@ on success only: `void logAiUsage(...)` (fire-and-forget) and **awaited** `consu
 | `generate-meal-suggestions` | free-scan pool | 30/h | `{mealType, count 1–8, cuisines, cookTime, loves, avoid, description}` → suggestions, category locked to mealType | `ai/generateMealSuggestions.ts` → Build My Plan Describe / swap top-up |
 | `generate-plan-shortlist` | free-scan pool | 30/h | `{mealTypes[], proteins[], carbs[], fats[], cuisines, loves, avoid, cookTime, countPerType}` → `{[mealType]: suggestions[]}` (defaults 4 per main, 2 snacks). One call = one scan. | `ai/generatePlanShortlist.ts` → Build My Plan |
 | `generate-recipe-concept` | free-scan pool | 30/h | `{description, mealType?}` → `name, description, calories, protein, carbs, fats` (no ingredients/steps) | `ai/generateRecipeConcept.ts` → Custom Recipe stage 1 + Fix |
-| `generate-recipe-steps` | **subscription only** (`isEntitled`) | 30/h | concept (resent by client) → `ingredients[], steps[]` consistent with shown macros | `ai/generateRecipeSteps.ts` → Custom Recipe "Generate" |
+| `generate-recipe-steps` | **subscription only** (`hasPro`) | 30/h | concept (resent by client) → `ingredients[], steps[]` consistent with shown macros | `ai/generateRecipeSteps.ts` → Custom Recipe "Generate" |
 | `recipe-assistant` | **subscription only** (the "AI recipes must already have steps" check was removed Nov 19) | 60/min backstop (hidden) | `{recipeName, ingredients, steps, messages[]}` → `{reply}`; never consumes scans | `ai/recipeAssistant.ts` → recipe detail chat |
 | `revenuecat-webhook` | shared secret in `Authorization` (raw, no "Bearer") | — | sets `subscription_status` | RevenueCat dashboard |
 | `delete-account` | authed user (deletes self only) | — | `{success:true}` | `lib/deleteAccount.ts` |

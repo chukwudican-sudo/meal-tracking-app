@@ -1,6 +1,7 @@
 // Shared RevenueCat → users-row mapping, used by revenuecat-webhook (events)
 // and sync-subscription (direct REST lookup right after a purchase), so both
-// write the same values. Not imported by the AI functions.
+// write the same values. The AI functions use fetchRevenueCatPro too, through
+// _shared/entitlement.ts (a saved Pro past its expiry is confirmed live).
 
 import { PRO_ENTITLEMENT_ID } from '../../../constants/entitlements.ts';
 
@@ -33,7 +34,10 @@ export function grantedStatus(periodType: string | undefined | null): 'trial' | 
 export interface RevenueCatPro {
   status: 'trial' | 'active';
   provider: SubscriptionProvider;
-  expiryIso: string | null; // null = never expires (lifetime/promotional)
+  // When Pro access ends: the later of the renewal date and a billing grace
+  // period's end (Apple keeps access while it retries a failed payment).
+  // null = never expires (lifetime/promotional).
+  expiryIso: string | null;
 }
 
 const REVENUECAT_TIMEOUT_MS = 3000;
@@ -80,10 +84,14 @@ export async function fetchRevenueCatPro(
   const sub = typeof ent.product_identifier === 'string'
     ? body?.subscriber?.subscriptions?.[ent.product_identifier]
     : undefined;
+  // The AI functions trust the saved date until it passes (_shared/entitlement.ts):
+  // saving the bare renewal date during a grace period would send every AI call
+  // back to RevenueCat until the grace ends.
+  const accessUntil = Number.isFinite(grace) && (!Number.isFinite(expires) || grace > expires) ? grace : expires;
   return {
     status: grantedStatus(sub?.period_type),
     provider: mapProvider(sub?.store),
-    expiryIso: Number.isFinite(expires) ? new Date(expires).toISOString() : null,
+    expiryIso: ent.expires_date == null ? null : Number.isFinite(accessUntil) ? new Date(accessUntil).toISOString() : null,
   };
 }
 

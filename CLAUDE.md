@@ -215,8 +215,14 @@ These come straight from months of his feedback. Violating them is the #1 thing 
   key on either project: every function would return 500 "Server not configured". Profile data is
   always read server-side, never trusted from the client. **Editing anything in `_shared/` means redeploying every
   function that imports it** (each bundles its own copy). `constants/entitlements.ts` is imported by the Deno
-  `revenuecat-webhook` via relative path (and, through `_shared/subscription.ts`, by sync-subscription and
-  delete-account) — keep it dependency-free and redeploy those three if it changes.
+  `revenuecat-webhook` via relative path (and, through `_shared/subscription.ts`, by sync-subscription,
+  delete-account and — via `_shared/entitlement.ts` — all 11 AI functions) — keep it dependency-free and redeploy
+  all 14 if it changes.
+- **Server Pro check (Nov 23, fu3):** `_shared/entitlement.ts#hasPro` trusts `users.subscription_status` only until
+  `subscription_expiry_date` + 3 days; past that it asks RevenueCat live (`fetchRevenueCatPro`, 3s) and saves the
+  answer (a lost EXPIRATION webhook can't leave Pro on forever); if RevenueCat is unreachable the saved status stands.
+  The saved expiry is the later of the renewal date and a billing grace period's end. New AI functions select
+  `subscription_expiry_date` and use `resolveEntitlement(admin, userId, row)` / `hasPro`.
 - **Database grants — locked unless granted (Nov 12, migration `20261112010000_explicit_grants_auto_rls`):** new
   tables get NO automatic grants (Supabase's current default) and RLS is switched on automatically (`ensure_rls` event
   trigger). Every migration that creates a table must, in the same file: enable RLS, write its policies, and

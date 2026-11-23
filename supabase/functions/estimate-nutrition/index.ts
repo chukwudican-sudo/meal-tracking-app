@@ -203,7 +203,7 @@ Deno.serve(async (req: Request) => {
     admin
       .from('users')
       .select(
-        'ai_consent, subscription_status, free_scans_remaining, dietary_preferences, allergies, goal_type, ' +
+        'ai_consent, subscription_status, subscription_expiry_date, free_scans_remaining, dietary_preferences, allergies, goal_type, ' +
           'daily_calorie_target, protein_target_grams, carbs_target_grams, fats_target_grams',
       )
       .eq('id', user.id)
@@ -224,7 +224,7 @@ Deno.serve(async (req: Request) => {
   // Entitlement gate: subscribers are unlimited; everyone else spends a free
   // scan (consumed only on success, below). The app uses not_premium to trigger
   // the paywall.
-  const entitlement = resolveEntitlement(profileRow.subscription_status, profileRow.free_scans_remaining);
+  const entitlement = await resolveEntitlement(admin, user.id, profileRow);
   if (!entitlement.allowed) {
     return errorResponse(
       'not_premium',
