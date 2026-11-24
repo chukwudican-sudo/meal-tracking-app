@@ -185,8 +185,8 @@ Still open:
 34. ~~Dead code~~ — DONE Nov 21: those files, `app/meal/[id].tsx`, `app/modal.tsx`, the Expo starter leftovers
     (themed text/view, parallax, haptic tab, icon symbol…), react-logo images and 8 unused exports deleted.
     `app/auth/reset.tsx` and `app/auth/callback.tsx` deleted too (emails checked code-only). Unused packages (expo-symbols, expo-haptics,
-    expo-web-browser, react-native-reanimated + react-native-worklets) — remove with the next native build (the Reanimated
-    import itself was removed Nov 22). 3 unused helpers in
+    expo-web-browser, react-native-reanimated + react-native-worklets) uninstalled Nov 23; they leave the phone with the
+    next native build (the current dev build still carries them, unused). 3 unused helpers in
     lib/sync (serverIsEmpty, inchesToCm, cmToFeetInches) left alone on purpose.
 
 - **Notifications (built Nov 3, needs the new dev build to test):** meal reminders (d7b4786) + bell inbox with push.
