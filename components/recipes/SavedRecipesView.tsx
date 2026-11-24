@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
   Dimensions,
+  LayoutChangeEvent,
   Modal,
   NativeScrollEvent,
   NativeSyntheticEvent,
@@ -178,6 +179,15 @@ export function SavedRecipesView({ mode, context, swapFilter = 'All', onBeforeNa
     });
   };
 
+  // Open on the starting tab (Saved / Recent), and stay on the active tab once
+  // the real width is known. The pages only ever scrolled on a tab tap, so the
+  // Saved Recipes page showed the All page under the "Saved" label (Nov 23).
+  const onPagerLayout = (e: LayoutChangeEvent) => {
+    const w = e.nativeEvent.layout.width;
+    setPageWidth(w);
+    scrollRef.current?.scrollTo({ x: activeIndex * w, animated: false });
+  };
+
   const onMomentumEnd = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
     const idx = Math.round(e.nativeEvent.contentOffset.x / pageWidth);
     if (idx !== activeIndex) setActiveIndex(idx);
@@ -305,7 +315,8 @@ export function SavedRecipesView({ mode, context, swapFilter = 'All', onBeforeNa
         showsHorizontalScrollIndicator={false}
         onMomentumScrollEnd={onMomentumEnd}
         scrollEventThrottle={16}
-        onLayout={e => setPageWidth(e.nativeEvent.layout.width)}
+        contentOffset={{ x: defaultIndexForContext(context) * SCREEN_WIDTH, y: 0 }}
+        onLayout={onPagerLayout}
         keyboardShouldPersistTaps="handled"
       >
         {TAB_DEFS.map((t, idx) => (

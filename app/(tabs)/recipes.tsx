@@ -25,7 +25,9 @@ const CATEGORIES: RecipeCategory[] = ['Breakfast', 'Lunch', 'Dinner', 'Snacks'];
 
 export default function RecipesScreen() {
   const recipes      = useMealStore(s => s.recipes);
-  const savedRecipes = useMealStore(s => s.savedRecipes);
+  // The tile opens the Saved tab, which lists bookmarked recipes only: count
+  // the same thing (all recipes, AI ones included, made the number disagree).
+  const savedCount = useMealStore(s => s.savedRecipes.filter(r => r.favourited).length);
   const grocery      = useMealStore(s => s.grocery);
   const { addToToday } = useRecipeActions();
 
@@ -123,7 +125,7 @@ export default function RecipesScreen() {
               <NavTile
                 icon="❤️"
                 title="Saved Recipes"
-                count={savedRecipes.length}
+                count={savedCount}
                 onPress={() => router.push('/recipes/saved')}
               />
               <View style={{ width: 12 }} />
