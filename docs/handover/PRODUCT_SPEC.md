@@ -152,7 +152,8 @@ empty removed slots). Back = Cancel ("All unsaved changes will be lost. Are you 
    "do not replace it"), **Foods to Avoid** (same searchable list over proteins+carbs+fats combined; can add exactly
    what you typed as a custom entry, e.g. "shellfish"; **persisted** in `planAvoidFoods` and pre-filled next time; hard
    constraint like allergies).
-4. **AI shortlist** (`generate-plan-shortlist`, one call, 1 scan): sections per active meal type (4 per main, 2 snacks),
+4. **AI shortlist** (`generate-plan-shortlist`, one call, 1 scan, ~5 s, no cooking steps — written when a kept meal's
+   recipe is first opened): sections per active meal type (4 per main, 2 snacks),
    pick favourites; **Generate More** per type (≈3 more, 1 scan); **Regenerate** returns to the picker (1 scan).
 5. **Build my week:** rotate the user's own picks across 7 days (`day % picks.length`) — no AI-generated variations.
 6. **Preview:** looks exactly like the plan detail pages; quick **Swap** (catalog browse free, Describe = 1 scan via
@@ -245,7 +246,8 @@ healthier = current) → activity (4 friendly phrasings) → pace slider (lose 0
 secondary nutrients (skippable) → processing 0→100% (ProgressiveLoader-style) → "Your personalized plan is ready" with
 Apple/Google (coming soon)/Email → email + password + confirm → **6-digit code screen ("I'll verify later" allowed)** →
 setup → goal timeline ("[Name], you will reach your goal by [date]") → calorie ring → notifications ask → "Ready to build
-your first meal plan?" (Build My Plan / "I'll do this later" → Home nudge).
+your first meal plan?" (Build My Plan / "I'll do this later" → Home nudge). No paywall in onboarding (Alex, Nov 23:
+users meet the paywall when they touch Pro things — Build My Plan's Confirm, Start Plan, AI past the 5 free uses).
 Math — ONE calculator, `calcTargets` in `constants/goalCalc.ts`, shared by onboarding and Edit Goal (Nov 11; they used
 to differ): Mifflin-St Jeor; activity 1.2/1.375/1.55/1.725/1.9; ±500 kcal/day per lb/week (pace slider: lose 0.5–2,
 gain 0.25–1, 0.25 steps); floor 1200 kcal (1500 for a man losing). Macros (superseded 30/40/30 — it gave a 62 kg

@@ -1860,6 +1860,8 @@ export default function BuildPlanScreen() {
             cookTimeMin: card.cookTimeMin,
             macros: card.macros,
             ingredients: card.ingredients,
+            // Empty for shortlist meals (Nov 23): the recipe page writes the
+            // steps when the recipe is first opened (generate-recipe-steps).
             steps: card.steps,
             difficulty: card.difficulty,
             source: 'ai',

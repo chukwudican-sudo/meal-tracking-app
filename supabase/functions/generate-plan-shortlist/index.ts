@@ -70,11 +70,19 @@ const MIN_PER_TYPE = 1;
 const MAX_PER_TYPE = 6;
 const MAX_MACRO_ITEMS = 15;
 
-// A shortlist across up to 4 meal types (~14 short recipes with steps) is the
-// heaviest payload of the meal functions, so use the same generous ceiling as
-// suggest-kitchen-recipes rather than the lighter 20s used for single-slot
-// suggestions.
-const GEMINI_TIMEOUT_MS = 25000;
+// Speed (Nov 23, two tests of 12 runs each on the real request): one call for
+// all ~14 recipes with cooking steps took 18–41s and timed out at 25s. Now:
+// - no cooking steps: they're written only for the meals the user keeps, when
+//   a recipe is first opened (generate-recipe-steps, the recipe page's path);
+// - one small call per meal type, all at once, with low thinking: 4.9–5.1s,
+//   calories in line with the slow version.
+// Each part retries once (Google's guidance for timeouts / 429 / 5xx / a bad
+// answer), all inside one overall budget below the app's 35s timeout. Any part
+// still failing fails the whole request: never a half-empty shortlist.
+const PART_TIMEOUT_MS = 12000;
+const OVERALL_BUDGET_MS = 25000;
+const PART_RETRY_DELAY_MS = 800;
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 const FUNCTION_NAME = 'generate-plan-shortlist';
 const LOG_PREFIX = `[${FUNCTION_NAME}]`;
 
@@ -114,14 +122,10 @@ function suggestionItemSchema(): Record<string, unknown> {
           required: ['name', 'quantity', 'unit'],
         },
       },
-      steps: {
-        type: 'array',
-        items: { type: 'string' },
-      },
     },
     required: [
       'name', 'calories', 'cookTimeMin', 'difficulty',
-      'protein', 'carbs', 'fats', 'ingredients', 'steps',
+      'protein', 'carbs', 'fats', 'ingredients',
     ],
   };
 }
@@ -236,8 +240,8 @@ function buildPrompt(
     `between otherwise equally-suitable options; it should never visibly steer ` +
     `which meals get selected. Each suggestion needs a short name, a ` +
     `calorie estimate for one serving, cookTimeMin, difficulty (Easy/Medium/` +
-    `Hard), macros (protein/carbs/fats in grams), an ingredients list with ` +
-    `quantity and unit, and clear numbered cooking steps.` +
+    `Hard), macros (protein/carbs/fats in grams), and an ingredients list ` +
+    `with quantity and unit.` +
     (hasExpansions
       ? ` IMPORTANT: when a family expansion is provided (for proteins or carbs), ` +
         `always use the specific variety name in the meal's name — e.g. ` +
@@ -359,27 +363,55 @@ Deno.serve(async (req: Request) => {
     daily_calorie_target: profileRow.daily_calorie_target ?? null,
   };
 
-  const { system, userText } = buildPrompt(mealTypes, counts, prefs, profile);
+  const deadline = Date.now() + OVERALL_BUDGET_MS;
+  const startedAt = Date.now();
 
-  let result: unknown;
-  try {
-    result = await callGeminiJSON({
-      apiKey: geminiKey,
-      model: GEMINI_MODEL,
-      systemInstruction: system,
-      userText,
-      responseSchema: buildResponseSchema(mealTypes, counts),
-      logPrefix: LOG_PREFIX,
-      timeoutMs: GEMINI_TIMEOUT_MS,
-    });
-  } catch (e) {
-    console.error(`${LOG_PREFIX} Gemini call failed:`, e);
-    const message =
-      e instanceof GeminiTimeoutError
-        ? 'The AI took too long to build your shortlist. Please try again.'
-        : 'Could not generate your meal shortlist. Please try again.';
+  // One meal type's options: up to 2 tries, each capped by what's left of the
+  // overall budget.
+  const generateType = async (t: MealType): Promise<unknown[]> => {
+    const { system, userText } = buildPrompt([t], counts, prefs, profile);
+    let lastError: unknown = new Error(`${t}: no time left`);
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      const left = deadline - Date.now();
+      if (left < 3000) break;
+      try {
+        const out = await callGeminiJSON({
+          apiKey: geminiKey,
+          model: GEMINI_MODEL,
+          systemInstruction: system,
+          userText,
+          responseSchema: buildResponseSchema([t], counts),
+          logPrefix: `${LOG_PREFIX} ${t}`,
+          timeoutMs: Math.min(PART_TIMEOUT_MS, left),
+          thinkingLevel: 'low',
+        });
+        const items = (out as { shortlist?: Record<string, unknown> })?.shortlist?.[t];
+        if (Array.isArray(items) && items.length > 0) return items;
+        throw new Error(`${t}: no options in the answer`);
+      } catch (e) {
+        lastError = e;
+        console.warn(`${LOG_PREFIX} ${t} attempt ${attempt} failed:`, e);
+        if (attempt === 1) await sleep(PART_RETRY_DELAY_MS + Math.random() * 400);
+      }
+    }
+    throw lastError;
+  };
+
+  const parts = await Promise.allSettled(mealTypes.map(generateType));
+  const failed = parts.filter((r): r is PromiseRejectedResult => r.status === 'rejected');
+  if (failed.length > 0) {
+    console.error(`${LOG_PREFIX} ${failed.length} of ${mealTypes.length} meal types failed after retries`);
+    const message = failed.some(f => f.reason instanceof GeminiTimeoutError)
+      ? 'The AI took too long to build your shortlist. Please try again.'
+      : 'Could not generate your meal shortlist. Please try again.';
     return errorResponse('ai_failed', message, 502);
   }
+  const shortlist: Record<string, unknown[]> = {};
+  mealTypes.forEach((t, i) => {
+    shortlist[t] = (parts[i] as PromiseFulfilledResult<unknown[]>).value;
+  });
+  const result = { shortlist };
+  console.info(`${LOG_PREFIX} shortlist ready in ${Date.now() - startedAt}ms (${mealTypes.length} types)`);
 
   // Only charge the call (rate-limit log + free scan) once it succeeded, so our
   // own failures/timeouts don't burn the user's quota or free scans.

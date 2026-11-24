@@ -244,6 +244,8 @@ These come straight from months of his feedback. Violating them is the #1 thing 
   with the secret key (`SUPABASE_SECRET_KEY`) from `.env` (read-only). Other AI functions can adopt it one at a time.
 - **Gemini speed:** `callGeminiJSON({ thinkingLevel })` — scan-meal and fix-meal use `'low'` (scan 8.7s -> ~2.6s,
   fix 4.8s -> ~1.6s, accuracy held); unset = model default (medium). Gemini 3 uses `thinkingLevel`, not `thinkingBudget`.
+  generate-plan-shortlist (Nov 23): no steps + one `'low'` call per meal type in parallel, each retried once — 18–41s
+  (timing out) -> ~5s, calories held in a 12-run test; never returns a partial shortlist.
   **estimate-nutrition stays on the default on purpose** (tested Nov 15, 12 meals x 3 rounds: 'low' was ~3x faster
   but counted mixed/larger plates 10-25% lower; a grams-first prompt didn't fix it). It records to `ai_events` now
   (`PROMPT_VERSION estimate-2026-11-15`), totals = sum of ingredients in code, and "small/large" = 0.75x/1.5x.
