@@ -293,7 +293,9 @@ type Step =
   | { kind: 'macroPicker'; group: MacroGroup }
   | { kind: 'secondaryPrefs'; questionIdx: 0 | 1 | 2 | 3 }
   | { kind: 'guide' }
-  | { kind: 'shortlist' }
+  // One screen per meal type, in the order of the day (Nov 23, Alex: 14 cards
+  // stacked on one page was too much).
+  | { kind: 'shortlist'; typeIdx: number }
   | { kind: 'pick'; slotIdx: number }
   | { kind: 'preview' };
 
@@ -363,6 +365,14 @@ const EMPTY_PREFS: WizardPrefs = {
 };
 
 // ─── Screen ──────────────────────────────────────────────────────────────────
+
+// Shortlist screen headings, one per meal type.
+const SHORTLIST_TITLES: Partial<Record<RecipeCategory, string>> = {
+  Breakfast: 'Pick your breakfasts',
+  Lunch: 'Pick your lunches',
+  Dinner: 'Pick your dinners',
+  Snacks: 'Pick your snacks',
+};
 
 export default function BuildPlanScreen() {
   const profile = useMealStore(s => s.profile);
@@ -1510,7 +1520,7 @@ export default function BuildPlanScreen() {
       }
       setShortlistByType(next);
       setSelectedByType({});
-      setStep({ kind: 'shortlist' });
+      setStep({ kind: 'shortlist', typeIdx: 0 });
     } catch (e) {
       handleAIError(e, () => void runShortlistGeneration());
     } finally {
@@ -1778,34 +1788,16 @@ export default function BuildPlanScreen() {
       return;
     }
 
-    const proceed = () => {
-      const bySlot: Record<string, RecipeTemplate[]> = {};
-      activeSlots.forEach(slot => {
-        bySlot[slot.id] = selectedByType[categoryForSlot(slot.name)] ?? [];
-      });
-      setSelectionsBySlot(bySlot);
-      setPreviewDays(buildPreviewDays(activeSlots, bySlot));
-      setExpandedDays(new Set([0]));
-      setStep({ kind: 'preview' });
-    };
-
-    // A meal type with no picks is treated as skipped, matching the old
-    // per-slot skip semantics — but confirm first so it's never a surprise.
-    const skipped = activeCategories.filter(c => (selectedByType[c] ?? []).length === 0);
-    if (skipped.length > 0) {
-      Alert.alert(
-        `Skip ${skipped.join(' and ')}?`,
-        `You haven't picked anything for ${skipped.join(' or ')}, so ${
-          skipped.length === 1 ? 'it' : 'they'
-        } won't appear in your plan.`,
-        [
-          { text: 'Go back', style: 'cancel' },
-          { text: 'Build anyway', onPress: proceed },
-        ],
-      );
-      return;
-    }
-    proceed();
+    // A meal type with no picks is skipped: chosen on its own screen ("Skip
+    // breakfast"), so there's no extra confirmation here.
+    const bySlot: Record<string, RecipeTemplate[]> = {};
+    activeSlots.forEach(slot => {
+      bySlot[slot.id] = selectedByType[categoryForSlot(slot.name)] ?? [];
+    });
+    setSelectionsBySlot(bySlot);
+    setPreviewDays(buildPreviewDays(activeSlots, bySlot));
+    setExpandedDays(new Set([0]));
+    setStep({ kind: 'preview' });
   }
 
   // ── Activate flow ──────────────────────────────────────────────────────
@@ -2154,21 +2146,39 @@ export default function BuildPlanScreen() {
   }
 
   // ── Render: SHORTLIST step ─────────────────────────────────────────────
-  // One scrollable screen with a section per active meal type. Each section is
-  // only a handful of cards, so there's no pagination — a deliberate
-  // simplification over the old per-slot paginated catalogue walk.
+  // One screen per meal type, in the order of the day (Breakfast → Snacks →
+  // Lunch → Dinner for the default slots), with Next — like the food picker.
+  // Leaving a type empty is an explicit "Skip …" on its own screen.
   if (step.kind === 'shortlist') {
+    const typeCount = activeCategories.length;
+    const idx = Math.max(0, Math.min(step.typeIdx, typeCount - 1));
+    const category = activeCategories[idx];
+    const options = shortlistByType[category] ?? [];
+    const picked = selectedByType[category] ?? [];
+    const busy = !!generateMoreLoadingByType[category];
+    const isLast = idx === typeCount - 1;
+    const lower = category.toLowerCase();
     const totalPicked = activeCategories.reduce(
       (sum, c) => sum + (selectedByType[c] ?? []).length,
       0,
     );
+    const footerLabel = !isLast
+      ? (picked.length > 0 ? 'Next' : `Skip ${lower}`)
+      : totalPicked === 0
+        ? 'Pick at least one meal'
+        : picked.length > 0 ? 'Build my week' : `Skip ${lower} and build my week`;
+    const footerDisabled = isLast && totalPicked === 0;
+    const onFooter = () => {
+      if (!isLast) setStep({ kind: 'shortlist', typeIdx: idx + 1 });
+      else handleBuildWeek();
+    };
 
     return (
       <Screen edges={['top', 'bottom']}>
         <Header
-          title="Pick your favourites"
-          subtitle={`${totalPicked} selected`}
-          onBack={() => setStep({ kind: 'guide' })}
+          title={SHORTLIST_TITLES[category] ?? `Pick your ${lower}`}
+          subtitle={`${idx + 1} of ${typeCount} · ${picked.length} picked`}
+          onBack={() => setStep(idx === 0 ? { kind: 'guide' } : { kind: 'shortlist', typeIdx: idx - 1 })}
           rightAction={
             <TouchableOpacity onPress={handleRegenerate} hitSlop={10}>
               <Text style={styles.headerRightMutedText}>Redo</Text>
@@ -2176,64 +2186,46 @@ export default function BuildPlanScreen() {
           }
         />
 
-        <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
+        <ScrollView key={category} contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
           <Text style={styles.onbHint}>
             Choose the ones you&apos;d actually eat. Pick one and it repeats daily; pick
             several and we&apos;ll rotate them through the week.
           </Text>
 
-          {activeCategories.map(category => {
-            const options = shortlistByType[category] ?? [];
-            const picked = selectedByType[category] ?? [];
-            const busy = !!generateMoreLoadingByType[category];
-            return (
-              <View key={category} style={styles.shortlistSection}>
-                <Text style={styles.shortlistSectionTitle}>{category}</Text>
-                <Text style={styles.shortlistSectionMeta}>
-                  {picked.length === 0
-                    ? 'Nothing picked yet — skip this meal by leaving it empty.'
-                    : `${picked.length} picked`}
-                </Text>
+          {options.length === 0 ? (
+            <Text style={styles.shortlistEmpty}>No options for {lower} this time.</Text>
+          ) : (
+            options.map(card => (
+              <PickCard
+                key={card.id}
+                recipe={card}
+                selected={picked.some(r => r.id === card.id)}
+                showCheck
+                onPress={() => toggleShortlistPick(category, card)}
+              />
+            ))
+          )}
 
-                {options.length === 0 ? (
-                  <Text style={styles.shortlistEmpty}>No options for {category} this time.</Text>
-                ) : (
-                  options.map(card => (
-                    <PickCard
-                      key={card.id}
-                      recipe={card}
-                      selected={picked.some(r => r.id === card.id)}
-                      showCheck
-                      onPress={() => toggleShortlistPick(category, card)}
-                    />
-                  ))
-                )}
-
-                <TouchableOpacity
-                  style={[styles.shortlistGenMore, busy && styles.disabledBtn]}
-                  onPress={() => generateMoreForType(category)}
-                  disabled={busy}
-                  activeOpacity={0.85}
-                >
-                  <Text style={styles.shortlistGenMoreText}>
-                    {busy ? 'Finding more…' : `✨ More ${category.toLowerCase()} options`}
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            );
-          })}
+          <TouchableOpacity
+            style={[styles.shortlistGenMore, busy && styles.disabledBtn]}
+            onPress={() => generateMoreForType(category)}
+            disabled={busy}
+            activeOpacity={0.85}
+          >
+            <Text style={styles.shortlistGenMoreText}>
+              {busy ? 'Finding more…' : `✨ More ${lower} options`}
+            </Text>
+          </TouchableOpacity>
         </ScrollView>
 
         <View style={[styles.footer, { paddingBottom: footerBottomPad }]}>
           <TouchableOpacity
-            style={[styles.primaryBtn, styles.primaryBtnFull, totalPicked === 0 && styles.disabledBtn]}
-            disabled={totalPicked === 0}
-            onPress={handleBuildWeek}
+            style={[styles.primaryBtn, styles.primaryBtnFull, footerDisabled && styles.disabledBtn]}
+            disabled={footerDisabled}
+            onPress={onFooter}
             activeOpacity={0.85}
           >
-            <Text style={styles.primaryBtnText}>
-              {totalPicked === 0 ? 'Pick at least one meal' : 'Build my week'}
-            </Text>
+            <Text style={styles.primaryBtnText}>{footerLabel}</Text>
           </TouchableOpacity>
         </View>
       </Screen>
@@ -2297,7 +2289,7 @@ export default function BuildPlanScreen() {
       <Header
         title="Preview your plan"
         subtitle="Tap any meal to swap it"
-        onBack={() => setStep({ kind: 'shortlist' })}
+        onBack={() => setStep({ kind: 'shortlist', typeIdx: Math.max(0, activeCategories.length - 1) })}
       />
 
       <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
@@ -3238,9 +3230,6 @@ const styles = StyleSheet.create({
   macroSectionTitle: { color: COLORS.text, fontSize: 15, fontWeight: '700', marginTop: 8 },
 
   // Shortlist step
-  shortlistSection: { marginBottom: 20 },
-  shortlistSectionTitle: { color: COLORS.text, fontSize: 16, fontWeight: '700', marginBottom: 2 },
-  shortlistSectionMeta: { color: COLORS.textSecondary, fontSize: 12, marginBottom: 10 },
   shortlistEmpty: {
     color: COLORS.textMuted,
     fontSize: 13,
