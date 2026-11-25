@@ -516,9 +516,9 @@ export interface AppStore {
   // fill today's missing slots WITHOUT clobbering existing/synced logs. No-op if
   // templates already exist. Run after meal_logs are pulled.
   hydrateActivePlanIfNeeded: () => void;
-  // Snapshots current templates[] into a MealPlan and pushes onto savedPlans.
-  // null: nothing saved (a premade plan without Pro — see the store).
-  saveCurrentPlanAs: (name: string) => MealPlan | null;
+  // Keeps the running plan: returns it when it's already in Saved Plans or
+  // Explore; otherwise snapshots templates[] into a new saved plan.
+  saveCurrentPlanAs: (name: string) => MealPlan;
   renameSavedPlan: (id: string, name: string) => void;
   removeSavedPlan: (id: string) => void;
 

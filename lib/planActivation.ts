@@ -38,6 +38,26 @@ export function confirmPlanActivation({ hasCurrentPlan, onActivate, onSaveAndAct
     return;
   }
 
+  // Already kept (every built or customized plan is saved; premade plans stay
+  // in Explore): nothing to save first. Offering to save it anyway made
+  // duplicate saved plans (Nov 25 audit).
+  const { profile, savedPlans, plans } = useMealStore.getState();
+  const current = profile.activePlanName;
+  const keptIn = !current
+    ? null
+    : savedPlans.some(p => p.name === current)
+      ? 'your Saved Plans'
+      : plans.some(p => p.name === current)
+        ? 'Explore Plans'
+        : null;
+  if (keptIn) {
+    Alert.alert('Replace your current plan?', `“${current}” stays in ${keptIn}.${futureLine}`, [
+      { text: 'Replace', style: 'destructive', onPress: onActivate },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
+    return;
+  }
+
   Alert.alert(
     'Replace your current plan?',
     `This will replace your current plan.${futureLine} Would you like to save your current plan first?`,

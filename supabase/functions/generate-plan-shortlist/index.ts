@@ -86,7 +86,7 @@ const PART_RETRY_DELAY_MS = 800;
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 const FUNCTION_NAME = 'generate-plan-shortlist';
 // Bump on any prompt/schema change so ai_events can compare versions.
-const PROMPT_VERSION = 'shortlist-2026-11-24';
+const PROMPT_VERSION = 'shortlist-2026-11-25';
 const LOG_PREFIX = `[${FUNCTION_NAME}]`;
 
 interface RequestPrefs {
@@ -218,6 +218,27 @@ const MEAL_SHARE: Record<MealType, [number, number]> = {
   Snacks: [0.05, 0.15],
 };
 
+// What each meal type looks like (Nov 25 audit): each type is its own
+// parallel call that never sees the others, so lunch and dinner came back as
+// the same chicken-rice / beef-corn / egg-potato plates. Examples are a
+// direction, not a menu; cuisines and the user's foods still shape the dish.
+const MEAL_STYLE: Record<MealType, string> = {
+  Breakfast:
+    'Breakfast: morning dishes (e.g. eggs, oats, yogurt bowls, toast, smoothies, ' +
+    'pancakes, breakfast wraps), not lunch or dinner plates.',
+  // "Quick", not "light": lunch gets the same share of the day as dinner.
+  Lunch:
+    'Lunch: quick midday meals (e.g. grain or rice bowls, wraps, salads, ' +
+    'sandwiches, soups) rather than the cooked mains typical of dinner.',
+  Dinner:
+    'Dinner: hearty cooked evening meals (e.g. stir-fries, curries, stews, ' +
+    'pasta, bakes, roasts, skillet dishes) rather than the bowls, salads and ' +
+    'sandwiches typical of lunch.',
+  Snacks:
+    'Snacks: small, simple bites (e.g. fruit, yogurt, nuts, boiled eggs, ' +
+    'popcorn), not mini meals.',
+};
+
 function buildCalorieRanges(types: MealType[], dailyTarget: number | null): string {
   if (!dailyTarget || dailyTarget <= 0) return '';
   const r10 = (n: number) => Math.round(n / 10) * 10;
@@ -259,7 +280,8 @@ function buildPrompt(
     `carries almost no weight — only use it as a barely-perceptible tie-breaker ` +
     `between otherwise equally-suitable options; it should never visibly steer ` +
     `which meals get selected. Each suggestion needs a short name (2–5 words, ` +
-    `about 40 characters at most), a ` +
+    `about 40 characters at most) that reads like a real dish's name (e.g. ` +
+    `"Egg Fried Rice", "Yam and Egg Sauce"), not a list of its ingredients, a ` +
     `calorie estimate for one serving, cookTimeMin, difficulty (Easy/Medium/` +
     `Hard), macros (protein/carbs/fats in grams), and an ingredients list ` +
     `with quantity and unit.` +
@@ -287,6 +309,7 @@ function buildPrompt(
         `varied, general, traditional dishes across different culinary styles — ` +
         `not thematically repetitive.`
       : '',
+    `Meal style: ${types.map(t => MEAL_STYLE[t]).join(' ')}`,
     calorieRanges
       ? `Size each option for one serving within its meal's share of the daily ` +
         `target: ${calorieRanges}.`

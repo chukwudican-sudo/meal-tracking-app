@@ -117,8 +117,10 @@ filter pre-set to the slot), pick replaces for **that day only**. Past days edit
 **Plan detail / Current Plan** (`app/plan/[id].tsx`): same layout for premade and current plans — name, description,
 disclaimer, daily calorie target, macro breakdown, "Meals in this plan" collapsible (See more/less, 4 shown) with
 calories, prep time, type label, weekly schedule day cards. Premade → **Start Plan**; current → **Customize Plan** only.
-Starting a plan when one is active → "This will replace your current plan. Would you like to save your current plan
-first?" **Save and replace / Replace / Cancel** (used everywhere a plan starts). Replacing resets today + future logs,
+Starting a plan when one is active → if the current plan is already kept (in Saved Plans, or a premade plan in
+Explore — the usual case) "“<name>” stays in your Saved Plans / Explore Plans." **Replace / Cancel**; only a plan in
+neither list gets "Would you like to save your current plan first?" **Save and replace / Replace / Cancel** (Nov 25:
+saving a kept plan again made duplicates; used everywhere a plan starts). Replacing resets today + future logs,
 keeps the past. Plans repeat weekly. Recipes from a premade plan are **not** auto-saved.
 
 **Customize Plan:** works on a draft (`customizeDraft` in the store, read by `app/plan/[id].tsx`, `SavedRecipesView`
@@ -158,13 +160,23 @@ empty removed slots). Back = Cancel ("All unsaved changes will be lost. Are you 
    **✨ More options** (≈3 more, 1 scan) and **✏️ Describe** (one meal from your words via
    `generate-meal-suggestions`, 1 scan, added already picked, named in your words). The AI gets each meal's share of
    the daily target (breakfast 20–30%, lunch/dinner 25–35%, each snack 5–15%) and keeps invented names to 2–5 words;
-   names wrap to 2 lines (pick cards, Home). 4 options per main, 2 snacks.
+   names wrap to 2 lines (pick cards, Home). 4 options per main, 2 snacks. Each meal type has its own style line
+   (lunch lighter — bowls/wraps/salads; dinner hearty cooked — Nov 25, they came back as the same dishes) and names
+   read like a menu dish, not an ingredient list. Back to Review with no answer changed → **Back to your shortlist**
+   (picks kept, no scan); a changed answer builds a new one.
 5. **Build my week:** rotate the user's own picks across 7 days (`day % picks.length`) — no AI-generated variations.
+   Two slots of the same type (the default two snacks) start one pick apart: 2 snacks picked = A + B each day.
 6. **Preview:** looks exactly like the plan detail pages; quick **Swap** (catalog browse free, Describe = 1 scan via
    `generate-meal-suggestions`); non-blocking toast if a swap moves a day ±15% off the calorie target.
-7. **Confirm Plan** → Pro gate ("Unlock Build My Plan with Pro") → `ensureRecipeSaved` for AI meals (`source:'ai'`; they
-   appear in Saved Recipes — accepted) → `activatePlan`; auto-named "My Plan — <date>", tagged Current; ingredients
-   flow into Planned Ingredients.
+7. Footer **Save for later | Start plan** (Nov 25, Alex: build a plan and keep it without starting it). Both → Pro gate
+   (a saved own plan starts without Pro, so saving is gated too) → `ensureRecipeSaved` for AI meals (`source:'ai'`; they
+   appear in Saved Recipes — accepted) → added to Saved Plans, auto-named "My Plan — <date>". **Start plan** then
+   `activatePlan` (tagged Current; ingredients flow into Planned Ingredients); **Save for later** leaves the current plan
+   alone ("… saved to Saved Plans"). Sharing a plan with someone is parked (roadmap sh1).
+
+Swipe-back / Android back go one step back like the ← button (first screen leaves; Nov 25). Swap's Suggest more,
+once the built-in recipes run out, uses AI with the same error handling as More options (paywall when out of scans).
+Food lists give up after 10 s and show Retry ("Loading foods…" could spin forever).
 
 Older constants still in the file: `PAGE_SIZE=5`, `INITIAL_SEED=9`, `SUGGEST_BATCH=5`, catalog 15 recipes per category.
 Superseded: single-pick per slot; AI variations; 4-question onboarding before the guide; per-slot pick pages with
@@ -268,7 +280,8 @@ Exact screen copy is in `chat-history/main-chat-may-oct-2026.md` (message around
   (lbs/kg, app-wide, default lbs). Gear → Settings.
 - **Edit Goal:** goal tiles (Lose Weight / Maintain / Gain Muscle — same as onboarding) → confirm weight → activity →
   pace slider (shared `components/PaceSlider`, skipped for Maintain) → old vs new targets side by side (manual tweaks) →
-  "Update your meal plan to match?" Yes → auto-save current plan as "Auto-saved Plan – {date}" (if one exists) and
+  "Update your meal plan to match?" Yes → auto-save current plan as "Auto-saved Plan – {date}" (only if it isn't
+  already in Saved Plans / Explore) and
   `router.replace('/plan/build')`; No → targets only.
 - **Personal Details:** name, age, height, weight, gender, activity, and **Meal Time Slots** (5 fixed, wheel times + skip
   toggles; defaults Breakfast 07:30, Mid-morning Snack 10:30, Lunch 13:00, Afternoon Snack 15:30, Dinner 19:00).

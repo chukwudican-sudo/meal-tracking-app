@@ -33,8 +33,6 @@ import {
   planNutrition, planSetsGoals, portionOf, scaleIngredients, scaleMacros, swapPortion, type PlanNutrition,
 } from '@/lib/planNutrition';
 import { PLAN_SEED } from '@/constants/planSeed';
-import { planRequiresPro } from '@/lib/entitlements';
-import { useEntitlementStore } from '@/store/useEntitlementStore';
 import { DEFAULT_TRACKED_NUTRIENTS } from '@/constants/nutrients';
 import { classifyIngredient, normalizeIngredientName } from '@/constants/ingredientCategories';
 import { newId, isUuid, stableId } from '@/lib/sync/uuid';
@@ -1812,10 +1810,14 @@ export const useMealStore = create<AppStore>()(
           ? state.savedPlans.find(p => p.name === state.profile.activePlanName) ??
             state.plans.find(p => p.name === state.profile.activePlanName)
           : undefined;
-        // A copy of a premade plan is the user's own and starts freely: without
-        // Pro (a premade plan still running after Pro ended) that would be a way
-        // around the plan paywall. Nothing is lost: the original stays in Explore.
-        if (runningPlan && planRequiresPro(runningPlan) && !useEntitlementStore.getState().isPro) return null;
+        // Already kept: every Build My Plan run and every Customize is saved,
+        // and premade plans stay in Explore. Copying it again only made
+        // duplicates ("My Plan — Nov 24 (3)", "Auto-saved Plan – Nov 24";
+        // Nov 25 audit). Day-level swaps are changes to days, not to the plan.
+        // Never copying a premade plan also keeps the old rule: a copy would be
+        // the user's own and start without Pro, a way around the plan paywall.
+        // So only a running plan that's in neither list gets a snapshot.
+        if (runningPlan) return runningPlan;
 
         // Reverse-map templates -> 7-day plan structure using each template's
         // weekly recurrence days (falling back to "every day" for `daily`).
@@ -1853,11 +1855,6 @@ export const useMealStore = create<AppStore>()(
           id: newId(),
           // "Save current plan" passes the active plan's own name.
           name: uniquePlanName(name, [...state.savedPlans, ...state.plans]),
-          // A snapshot of a style plan (premade / its copy) keeps the style,
-          // so restarting it sets the goals the same way.
-          description: runningPlan?.description,
-          disclaimer: runningPlan?.disclaimer,
-          category: runningPlan?.category,
           days,
           savedAt: new Date().toISOString(),
           source: 'user',

@@ -9,6 +9,13 @@
 // empty lists — as before — instead of a permission error the user can't fix.
 
 import { supabase } from '@/lib/supabase';
+import { withTimeout } from '@/lib/timeoutSignal';
+
+// No answer in 10 s counts as a failure, so the picker shows its retry state
+// ("Loading foods…" could spin for a minute or more on a bad connection —
+// Nov 25 audit). A late answer is simply ignored.
+const LOAD_TIMEOUT_MS = 10_000;
+const TIMEOUT_MESSAGE = 'Loading the food list took too long';
 
 async function hasSession(): Promise<boolean> {
   const { data } = await supabase.auth.getSession();
@@ -31,7 +38,11 @@ const TABLE_BY_GROUP: Record<MacroGroup, string> = {
  * fall to the bottom and are broken alphabetically. Throws if any query fails so
  * the caller can show a retry state.
  */
-export async function fetchMacroFoodOptions(): Promise<Record<MacroGroup, string[]>> {
+export function fetchMacroFoodOptions(): Promise<Record<MacroGroup, string[]>> {
+  return withTimeout(loadMacroFoodOptions(), LOAD_TIMEOUT_MS, TIMEOUT_MESSAGE);
+}
+
+async function loadMacroFoodOptions(): Promise<Record<MacroGroup, string[]>> {
   if (!(await hasSession())) return { proteins: [], carbs: [], fats: [] };
   const load = (table: string) =>
     supabase
@@ -64,7 +75,11 @@ export async function fetchMacroFoodOptions(): Promise<Record<MacroGroup, string
  * properly sorted by familiarity_score across all categories. Used by the
  * "foods to avoid" searchable list which draws from the entire food pool.
  */
-export async function fetchAllFoodOptionsCombined(): Promise<string[]> {
+export function fetchAllFoodOptionsCombined(): Promise<string[]> {
+  return withTimeout(loadAllFoodOptionsCombined(), LOAD_TIMEOUT_MS, TIMEOUT_MESSAGE);
+}
+
+async function loadAllFoodOptionsCombined(): Promise<string[]> {
   if (!(await hasSession())) return [];
   const load = (table: string) =>
     supabase

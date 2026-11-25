@@ -20,6 +20,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { BackButton } from '@/components/PageHeader';
 import { Screen } from '@/components/Screen';
 import { router } from 'expo-router';
+import { useNavigation, usePreventRemove } from '@react-navigation/native';
 
 import { COLORS, OPAQUE_SHEET_BG } from '@/constants/theme';
 import { newId } from '@/lib/sync/uuid';
@@ -47,6 +48,7 @@ import { AIConsentHost } from '@/components/AIConsentHost';
 import { PaywallModalHost } from '@/components/paywall/PaywallModalHost';
 import { ToastHost } from '@/components/ToastHost';
 import { isAIConsentDeclined } from '@/lib/aiConsent';
+import { reportError } from '@/lib/monitoring';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -252,12 +254,22 @@ function buildPreviewDays(
   activeSlots: MealSlot[],
   selections: Record<string, RecipeTemplate[]>,
 ): PlanDayMeal[][] {
+  // Slots of the same meal type start one pick apart: the default day has two
+  // snack slots, and both got the same snack each day (Nov 25 audit).
+  const startBySlot = new Map<string, number>();
+  const slotsSeenByType: Partial<Record<RecipeCategory, number>> = {};
+  activeSlots.forEach(slot => {
+    const type = categoryForSlot(slot.name);
+    const n = slotsSeenByType[type] ?? 0;
+    startBySlot.set(slot.id, n);
+    slotsSeenByType[type] = n + 1;
+  });
   return Array.from({ length: 7 }, (_, day) => {
     const dayMeals: PlanDayMeal[] = [];
     activeSlots.forEach(slot => {
       const picks = selections[slot.id] ?? [];
       if (picks.length === 0) return;
-      const pick = picks[day % picks.length];
+      const pick = picks[(day + (startBySlot.get(slot.id) ?? 0)) % picks.length];
       dayMeals.push({
         slotName: slot.name,
         time: slot.time,
@@ -455,18 +467,21 @@ export default function BuildPlanScreen() {
   // Combined all-food list for the avoid picker (proteins+carbs+fats merged,
   // sorted by familiarity). Loaded in parallel with macroOptions.
   const [allFoodOptions, setAllFoodOptions] = useState<string[] | null>(null);
+  const [allFoodOptionsError, setAllFoodOptionsError] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     setMacroOptions(null);
     setMacroOptionsError(false);
     setAllFoodOptions(null);
+    setAllFoodOptionsError(false);
     fetchMacroFoodOptions()
       .then(opts => { if (!cancelled) setMacroOptions(opts); })
       .catch(() => { if (!cancelled) setMacroOptionsError(true); });
     fetchAllFoodOptionsCombined()
       .then(all => { if (!cancelled) setAllFoodOptions(all); })
-      .catch(() => { /* avoid list gracefully degrades to custom-only */ });
+      // The avoid list still takes typed foods; it says so, with a Retry.
+      .catch(() => { if (!cancelled) setAllFoodOptionsError(true); });
     return () => { cancelled = true; };
   }, [macroReloadKey]);
 
@@ -479,6 +494,12 @@ export default function BuildPlanScreen() {
   // In-flight flags: whole-shortlist generation and the per-type
   // "More options" top-up.
   const [shortlistLoading, setShortlistLoading] = useState(false);
+  // The answers the current shortlist was built from. Back to Review with
+  // nothing changed returns to it for free instead of paying for a new one.
+  const [shortlistBuiltFrom, setShortlistBuiltFrom] = useState<string | null>(null);
+  // Start plan / Save for later close the wizard; this stops a double tap
+  // saving the plan twice before it's gone.
+  const finishingRef = useRef(false);
   const [generateMoreLoadingByType, setGenerateMoreLoadingByType] = useState<Partial<Record<RecipeCategory, boolean>>>({});
 
   // Re-bucket recipes by category whenever profile, recipe pool, or wizard
@@ -568,6 +589,21 @@ export default function BuildPlanScreen() {
     });
   }, [step, activeSlots, pageWidth, pageIdxBySlot]);
 
+  // Swipe-back / Android back go one step back, like each screen's ← button,
+  // instead of closing the whole wizard (Nov 25 audit; same as Find Your
+  // Plan). The first screen, and the guard below, still leave. Anything else
+  // that removes this screen (Activate's dismissAll) goes through.
+  const navigation = useNavigation();
+  const onFirstScreen = step.kind === 'macroPicker' && step.group === MACRO_GROUPS[0];
+  usePreventRemove(activeSlots.length > 0 && !onFirstScreen, ({ data }) => {
+    if (data.action.type === 'GO_BACK' || data.action.type === 'POP') {
+      // The loading screen has no back: the shortlist lands on its own.
+      if (!shortlistLoading) stepBack();
+    } else {
+      navigation.dispatch(data.action);
+    }
+  });
+
   // ── All-slots-skipped guard ─────────────────────────────────────────────
   // Checked before any wizard screen so the user can't fill in preferences
   // only to find there's nothing to plan for.
@@ -602,7 +638,7 @@ export default function BuildPlanScreen() {
   if (shortlistLoading) {
     return (
       <Screen edges={['top', 'bottom']}>
-        <Header title="Building your shortlist" />
+        <Header title="Building your shortlist" hideBack />
         <View style={styles.loadingWrap}>
           <ActivityIndicator size="large" color={COLORS.green} />
           <Text style={styles.loadingText}>Putting together your options…</Text>
@@ -621,6 +657,9 @@ export default function BuildPlanScreen() {
   // answers and their saved profile before we spend an AI call. Read-only —
   // to change an answer, the user goes back.
   if (step.kind === 'guide') {
+    // Came back from the shortlist without changing an answer: return to it
+    // (picks kept) instead of spending a scan on a new one (Nov 25 audit).
+    const canReuseShortlist = shortlistBuiltFrom !== null && shortlistBuiltFrom === shortlistInputKey();
     const dietary = profile.dietaryRestrictions ?? [];
     const allergies = profile.allergies ?? [];
     const slotCount = activeSlots.length;
@@ -634,10 +673,7 @@ export default function BuildPlanScreen() {
 
     return (
       <Screen edges={['top', 'bottom']}>
-        <Header
-          title="Review"
-          onBack={() => setStep({ kind: 'secondaryPrefs', questionIdx: 3 })}
-        />
+        <Header title="Review" onBack={stepBack} />
 
         <ScrollView contentContainerStyle={styles.guideBody} showsVerticalScrollIndicator={false}>
           <Text style={styles.guideHero}>Looking good</Text>
@@ -825,12 +861,15 @@ export default function BuildPlanScreen() {
         <View style={[styles.footer, { paddingBottom: footerBottomPad }]}>
           <TouchableOpacity
             style={[styles.primaryBtn, styles.guideCta, shortlistLoading && styles.disabledBtn]}
-            onPress={() => runShortlistGeneration()}
+            onPress={() => {
+              if (canReuseShortlist) setStep({ kind: 'shortlist', typeIdx: 0 });
+              else void runShortlistGeneration();
+            }}
             disabled={shortlistLoading}
             activeOpacity={0.85}
           >
             <Text style={styles.primaryBtnText}>
-              {shortlistLoading ? 'Building…' : 'Build my shortlist'}
+              {shortlistLoading ? 'Building…' : canReuseShortlist ? 'Back to your shortlist' : 'Build my shortlist'}
             </Text>
           </TouchableOpacity>
         </View>
@@ -877,7 +916,6 @@ export default function BuildPlanScreen() {
     const group = step.group;
     const g = MACRO_META[group];
     const groupIdx = MACRO_GROUPS.indexOf(group);
-    const isFirst = groupIdx === 0;
     const isLastGroup = groupIdx === MACRO_GROUPS.length - 1;
     // Per-screen gate: each group needs at least one pick before advancing, so
     // the AI shortlist always has a protein, a carb, and a fat to build around.
@@ -906,9 +944,7 @@ export default function BuildPlanScreen() {
       : options;
 
     const goBack = () => {
-      setMacroSearch('');
-      if (isFirst) router.back();
-      else setStep({ kind: 'macroPicker', group: MACRO_GROUPS[groupIdx - 1] });
+      if (!stepBack()) router.back();
     };
     // Next keeps what's still typed in "Add your own" (it was dropped unless
     // Add / Return was tapped — Nov 24 audit).
@@ -1103,12 +1139,8 @@ export default function BuildPlanScreen() {
         setStep({ kind: 'secondaryPrefs', questionIdx: (qIdx + 1) as 0 | 1 | 2 | 3 });
       }
     };
-    const goBack = () => {
-      // Q1 back returns to the last macro picker screen (Fats); later questions
-      // step back.
-      if (qIdx === 0) setStep({ kind: 'macroPicker', group: 'fats' });
-      else setStep({ kind: 'secondaryPrefs', questionIdx: (qIdx - 1) as 0 | 1 | 2 | 3 });
-    };
+    // Q1 back returns to the last macro picker screen (Fats).
+    const goBack = stepBack;
     const skipAll = () => setStep({ kind: 'guide' });
 
     // Q1 helpers — "Mixed or Everything" is mutually exclusive with picks.
@@ -1451,10 +1483,29 @@ export default function BuildPlanScreen() {
                         </TouchableOpacity>
                       );
                     })}
-                    {filteredAvoid.length === 0 && customAvoidTokens.length === 0 && !showAddCustom && (
-                      <Text style={styles.macroEmpty}>
-                        {avoidQuery ? 'No matches.' : 'Loading foods…'}
-                      </Text>
+                    {allFoodOptionsError && !avoidQuery ? (
+                      <View style={styles.macroError}>
+                        <Text style={styles.macroErrorText}>
+                          Couldn&apos;t load the food list. Type any food above and tap Add, or retry.
+                        </Text>
+                        <TouchableOpacity
+                          style={styles.macroRetryBtn}
+                          onPress={() => setMacroReloadKey(k => k + 1)}
+                          activeOpacity={0.85}
+                        >
+                          <Text style={styles.macroRetryText}>Retry</Text>
+                        </TouchableOpacity>
+                      </View>
+                    ) : (
+                      filteredAvoid.length === 0 && customAvoidTokens.length === 0 && !showAddCustom && (
+                        <Text style={styles.macroEmpty}>
+                          {avoidQuery
+                            ? 'No matches.'
+                            : allFoodOptions === null && !allFoodOptionsError
+                              ? 'Loading foods…'
+                              : 'Type any food above and tap Add.'}
+                        </Text>
+                      )
                     )}
                   </ScrollView>
                 </>
@@ -1524,6 +1575,40 @@ export default function BuildPlanScreen() {
     else addMacroToken(group, value);
   }
 
+  // One step back: every screen's ← button and swipe-back use this, so they
+  // can't drift. False on the first screen, where back leaves the wizard.
+  function stepBack(): boolean {
+    switch (step.kind) {
+      case 'macroPicker': {
+        const i = MACRO_GROUPS.indexOf(step.group);
+        if (i <= 0) return false;
+        setMacroSearch('');
+        setStep({ kind: 'macroPicker', group: MACRO_GROUPS[i - 1] });
+        return true;
+      }
+      case 'secondaryPrefs':
+        setStep(
+          step.questionIdx === 0
+            ? { kind: 'macroPicker', group: 'fats' }
+            : { kind: 'secondaryPrefs', questionIdx: (step.questionIdx - 1) as 0 | 1 | 2 | 3 },
+        );
+        return true;
+      case 'guide':
+        setStep({ kind: 'secondaryPrefs', questionIdx: 3 });
+        return true;
+      case 'shortlist':
+        setStep(step.typeIdx === 0 ? { kind: 'guide' } : { kind: 'shortlist', typeIdx: step.typeIdx - 1 });
+        return true;
+      case 'preview':
+        setStep({ kind: 'shortlist', typeIdx: Math.max(0, activeCategories.length - 1) });
+        return true;
+      case 'pick':
+        setMode({ kind: 'normal' });
+        setStep({ kind: 'preview' });
+        return true;
+    }
+  }
+
   // ── AI shortlist helpers ────────────────────────────────────────────────
   // Shared request payload for both the full build and a per-type top-up, so
   // the two calls can never drift on which preferences they send.
@@ -1537,6 +1622,11 @@ export default function BuildPlanScreen() {
       loves: prefs.loves,
       avoid: prefs.avoid,
     };
+  }
+
+  // Everything the shortlist is built from, as one comparable string.
+  function shortlistInputKey(): string {
+    return JSON.stringify({ types: activeCategories, ...shortlistPrefsPayload() });
   }
 
   // Convert AI concepts into cards, dropping anything that trips the local
@@ -1571,6 +1661,7 @@ export default function BuildPlanScreen() {
       }
       setShortlistByType(next);
       setSelectedByType({});
+      setShortlistBuiltFrom(shortlistInputKey());
       setStep({ kind: 'shortlist', typeIdx: 0 });
     } catch (e) {
       handleAIError(e, () => void runShortlistGeneration());
@@ -1645,12 +1736,11 @@ export default function BuildPlanScreen() {
     }
   }
 
-  // Shared AI failure handler for the free-scan-pool AI seams in this wizard
-  // (shortlist build, per-type top-up, Describe). Premium gate opens the
-  // shared paywall (matching What Can I Make / ScanTab) and retries the exact
-  // same call on a successful purchase; everything else is a lightweight
-  // toast. Suggest-more's own AI top-up is deliberately excluded — it already
-  // degrades silently to a toast on any failure (see addAutoPage below).
+  // Shared AI failure handler for every AI seam in this wizard (shortlist
+  // build, per-type top-up, Describe, Swap's Suggest more). Premium gate opens
+  // the shared paywall (matching What Can I Make / ScanTab) and retries the
+  // exact same call on a successful purchase; everything else is a
+  // lightweight toast.
   function handleAIError(e: unknown, retry?: () => void) {
     if (isAIConsentDeclined(e)) return; // "Not now" on the AI permission sheet: stay quiet
     console.warn('Meal suggestion failed:', e);
@@ -1682,9 +1772,10 @@ export default function BuildPlanScreen() {
       return;
     }
 
-    // Pool exhausted — try an AI top-up. On any failure or empty result we
-    // degrade gracefully to the original Describe nudge rather than blocking
-    // the flow mid-scroll.
+    // Pool exhausted — try an AI top-up. It spends a scan like every other AI
+    // call here, so its errors go through handleAIError: out of scans opens
+    // the paywall (it used to say "No more options", Nov 25 audit). An empty
+    // answer still nudges toward Describe.
     if (suggestMoreLoadingBySlot[slot.id]) return;
     setSuggestMoreLoadingBySlot(prev => ({ ...prev, [slot.id]: true }));
     try {
@@ -1706,9 +1797,7 @@ export default function BuildPlanScreen() {
       }
       appendMealsForSlot(slot, safe, /* isSuggestMore */ true);
     } catch (e) {
-      console.warn('Suggest-more AI top-up failed:', e);
-      if (isAIConsentDeclined(e)) return; // "Not now" on the AI permission sheet: stay quiet
-      showToast('No more options — try Describe for custom ideas');
+      handleAIError(e, () => void addAutoPage(slot));
     } finally {
       setSuggestMoreLoadingBySlot(prev => ({ ...prev, [slot.id]: false }));
     }
@@ -1863,99 +1952,124 @@ export default function BuildPlanScreen() {
     setStep({ kind: 'preview' });
   }
 
-  // ── Activate flow ──────────────────────────────────────────────────────
-  function handleActivate() {
-    // Client-only Pro gate: activating a built plan has no edge function of
-    // its own to return a not_premium error, so this is checked directly
-    // against the live RevenueCat entitlement. A successful purchase resumes
-    // straight into activation rather than requiring a second tap — so read
-    // the store, not the render-time `isPro`: the resumed call is this same
-    // closure, which would still see false and reopen the paywall (Nov 12).
-    if (!useEntitlementStore.getState().isPro) {
-      openPaywall({
-        reason: 'premium_feature',
-        headline: 'Activate your plan with Pro',
-        onSuccess: handleActivate,
-      });
-      return;
-    }
+  // ── Start / Save for later ─────────────────────────────────────────────
+  // Client-only Pro gate: a built plan has no edge function of its own to
+  // return a not_premium error, so this is checked directly against the live
+  // RevenueCat entitlement. A successful purchase resumes straight into the
+  // action rather than requiring a second tap — so read the store, not the
+  // render-time `isPro`: the resumed call is this same closure, which would
+  // still see false and reopen the paywall (Nov 12). Save for later is gated
+  // too: the user's own saved plans start without Pro, so an ungated save
+  // would be a way around the plan paywall.
+  function needsPro(headline: string, resume: () => void): boolean {
+    if (useEntitlementStore.getState().isPro) return false;
+    openPaywall({ reason: 'premium_feature', headline, onSuccess: resume });
+    return true;
+  }
 
-    const planName = autoPlanName();
+  // Adds the built plan to Saved Plans and returns it. Both Start plan and
+  // Save for later go through here (every Build My Plan plan is saved).
+  function saveBuiltPlan(): MealPlan {
+    // Persist any AI/Describe-generated ("custom-") cards referenced by the
+    // plan into savedRecipes (source 'ai') so buildTemplatesFromPlan can
+    // resolve their real nutrition — both now and after restart via
+    // hydrateActivePlanIfNeeded — instead of falling back to fabricated
+    // values. Catalogue picks already resolve by id, so only custom cards
+    // need saving. Keyed on recipeId = card.id so re-saves dedupe.
+    // Each plan meal is then linked to its saved recipe's own id: by card id
+    // it fell back to name lookups after a reinstall, which could pick a
+    // different recipe with the same name (Nov 24 audit).
+    const savedIdByCard = new Map<string, string>();
+    previewDays.forEach(day =>
+      day.forEach(meal => {
+        if (!meal.recipeId.startsWith('custom-') || savedIdByCard.has(meal.recipeId)) return;
+        const card = sessionCardById.get(meal.recipeId);
+        if (!card) return;
+        const saved = ensureRecipeSaved({
+          recipeId: card.id,
+          name: card.name,
+          category: card.category,
+          calories: card.calories,
+          cookTimeMin: card.cookTimeMin,
+          macros: card.macros,
+          ingredients: card.ingredients,
+          // Empty for shortlist meals (Nov 23): the recipe page writes the
+          // steps when the recipe is first opened (generate-recipe-steps).
+          steps: card.steps,
+          difficulty: card.difficulty,
+          source: 'ai',
+        });
+        savedIdByCard.set(meal.recipeId, saved.id);
+      }),
+    );
+    const linkedDays = previewDays.map(day =>
+      day.map(m => {
+        const savedId = savedIdByCard.get(m.recipeId);
+        return savedId ? { ...m, recipeId: savedId } : m;
+      }),
+    );
+
+    // Named here, after "Save and replace" may have added one: a second build
+    // on the same day becomes "My Plan — Nov 6 (2)".
+    const state = useMealStore.getState();
     const plan: MealPlan = {
       // UUID so the local id doubles as the server plans.id primary key.
       id: newId(),
-      name: planName,
+      name: uniquePlanName(autoPlanName(), [...state.savedPlans, ...state.plans]),
       description: 'Custom plan built from your picks.',
       disclaimer: undefined,
       category: undefined,
-      days: previewDays,
+      days: linkedDays,
       savedAt: new Date().toISOString(),
       source: 'user',
     };
+    useMealStore.setState(s => ({ savedPlans: [plan, ...s.savedPlans] }));
+    return plan;
+  }
 
-    const finalize = () => {
-      // Persist any AI/Describe-generated ("custom-") cards referenced by the
-      // plan into savedRecipes (source 'ai') so buildTemplatesFromPlan can
-      // resolve their real nutrition — both now and after restart via
-      // hydrateActivePlanIfNeeded — instead of falling back to fabricated
-      // values. Catalogue picks already resolve by id, so only custom cards
-      // need saving. Keyed on recipeId = card.id so re-saves dedupe.
-      // Each plan meal is then linked to its saved recipe's own id: by card id
-      // it fell back to name lookups after a reinstall, which could pick a
-      // different recipe with the same name (Nov 24 audit).
-      const savedIdByCard = new Map<string, string>();
-      previewDays.forEach(day =>
-        day.forEach(meal => {
-          if (!meal.recipeId.startsWith('custom-') || savedIdByCard.has(meal.recipeId)) return;
-          const card = sessionCardById.get(meal.recipeId);
-          if (!card) return;
-          const saved = ensureRecipeSaved({
-            recipeId: card.id,
-            name: card.name,
-            category: card.category,
-            calories: card.calories,
-            cookTimeMin: card.cookTimeMin,
-            macros: card.macros,
-            ingredients: card.ingredients,
-            // Empty for shortlist meals (Nov 23): the recipe page writes the
-            // steps when the recipe is first opened (generate-recipe-steps).
-            steps: card.steps,
-            difficulty: card.difficulty,
-            source: 'ai',
-          });
-          savedIdByCard.set(meal.recipeId, saved.id);
-        }),
-      );
-      const linkedDays = previewDays.map(day =>
-        day.map(m => {
-          const savedId = savedIdByCard.get(m.recipeId);
-          return savedId ? { ...m, recipeId: savedId } : m;
-        }),
-      );
+  // Runs Start plan / Save for later once. If saving throws, say so and let
+  // the user try again instead of leaving both buttons dead.
+  function finishOnce(finish: () => void) {
+    if (finishingRef.current) return;
+    finishingRef.current = true;
+    try {
+      finish();
+    } catch (e) {
+      finishingRef.current = false;
+      reportError(e, 'build-plan-finish');
+      showToast("Couldn't save your plan. Please try again.");
+    }
+  }
 
-      // Auto-save to Saved Plans (matches spec: every Build My Plan run saves).
-      // Named here, after "Save current plan" may have added one: a second
-      // build on the same day becomes "My Plan — Nov 6 (2)".
-      const state = useMealStore.getState();
-      const named = {
-        ...plan,
-        days: linkedDays,
-        name: uniquePlanName(plan.name, [...state.savedPlans, ...state.plans]),
-      };
-      useMealStore.setState(s => ({ savedPlans: [named, ...s.savedPlans] }));
-      activatePlan(named);
-      showToast(`${named.name} activated`);
+  function handleActivate() {
+    if (needsPro('Start your plan with Pro', handleActivate)) return;
+
+    const start = () => finishOnce(() => {
+      const plan = saveBuiltPlan();
+      activatePlan(plan);
+      showToast(`${plan.name} activated`);
       router.dismissAll();
-    };
-
+    });
     confirmPlanActivation({
       hasCurrentPlan: !!profile.activePlanName,
-      onActivate: finalize,
+      onActivate: start,
       onSaveAndActivate: () => {
         const fallback = profile.activePlanName || `Plan saved ${new Date().toLocaleDateString()}`;
         saveCurrentPlanAs(fallback);
-        finalize();
+        start();
       },
+    });
+  }
+
+  // Keep the plan without starting it (Nov 25, Alex): the current plan and
+  // its meals are untouched; start it later from Saved Plans.
+  function handleSaveForLater() {
+    if (finishingRef.current) return;
+    if (needsPro('Save your plan with Pro', handleSaveForLater)) return;
+    finishOnce(() => {
+      const plan = saveBuiltPlan();
+      showToast(`${plan.name} saved to Saved Plans`);
+      router.dismissAll();
     });
   }
 
@@ -1970,7 +2084,7 @@ export default function BuildPlanScreen() {
     if (!slot || mode.kind !== 'preview-swap') {
       return (
         <Screen edges={['top', 'bottom']}>
-          <Header title="Nothing to swap" onBack={() => setStep({ kind: 'preview' })} />
+          <Header title="Nothing to swap" onBack={stepBack} />
           <View style={styles.guardWrap}>
             <Text style={styles.guardBody}>
               Head back to your plan and tap Swap on the meal you want to change.
@@ -1991,10 +2105,7 @@ export default function BuildPlanScreen() {
         <Header
           title={slot.name}
           subtitle={`Swap meal · ${slot.name}`}
-          onBack={() => {
-            setMode({ kind: 'normal' });
-            setStep({ kind: 'preview' });
-          }}
+          onBack={stepBack}
         />
 
         {/* Elevated card wraps everything below the header. The card's
@@ -2202,7 +2313,7 @@ export default function BuildPlanScreen() {
         <Header
           title={SHORTLIST_TITLES[category] ?? `Pick your ${lower}`}
           subtitle={`${idx + 1} of ${typeCount} · ${picked.length} picked`}
-          onBack={() => setStep(idx === 0 ? { kind: 'guide' } : { kind: 'shortlist', typeIdx: idx - 1 })}
+          onBack={stepBack}
           rightAction={
             <TouchableOpacity
               onPress={onNext}
@@ -2332,7 +2443,7 @@ export default function BuildPlanScreen() {
       <Header
         title="Preview your plan"
         subtitle="Tap any meal to swap it"
-        onBack={() => setStep({ kind: 'shortlist', typeIdx: Math.max(0, activeCategories.length - 1) })}
+        onBack={stepBack}
       />
 
       <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
@@ -2445,10 +2556,13 @@ export default function BuildPlanScreen() {
         })}
       </ScrollView>
 
-      {/* Single Confirm Plan button — Back is the header arrow. */}
+      {/* Save for later | Start plan — Back is the header arrow. */}
       <View style={[styles.footer, { paddingBottom: footerBottomPad }]}>
-        <TouchableOpacity style={[styles.primaryBtn, styles.primaryBtnFull]} onPress={handleActivate}>
-          <Text style={styles.primaryBtnText}>Confirm Plan</Text>
+        <TouchableOpacity style={styles.secondaryBtn} onPress={handleSaveForLater} activeOpacity={0.85}>
+          <Text style={styles.secondaryBtnText}>Save for later</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.primaryBtn} onPress={handleActivate} activeOpacity={0.85}>
+          <Text style={styles.primaryBtnText}>Start plan</Text>
         </TouchableOpacity>
       </View>
 
@@ -2530,11 +2644,15 @@ function Header({
   title,
   subtitle,
   onBack,
+  hideBack,
   rightAction,
 }: {
   title: string;
   subtitle?: string;
   onBack?: () => void;
+  // The shortlist loading screen: back is blocked there (usePreventRemove),
+  // so a visible ← would do nothing.
+  hideBack?: boolean;
   rightAction?: React.ReactNode;
 }) {
   const handleBack = () => {
@@ -2546,7 +2664,7 @@ function Header({
       {/* Same 56pt side width as the right slot so the title stays centred;
           the chevron sits flush left like every PageHeader. */}
       <View style={[styles.headerBack, styles.headerBackLeft]}>
-        <BackButton onPress={handleBack} />
+        {hideBack ? null : <BackButton onPress={handleBack} />}
       </View>
       <View style={{ flex: 1 }}>
         <Text style={styles.headerTitle} numberOfLines={1}>{title}</Text>

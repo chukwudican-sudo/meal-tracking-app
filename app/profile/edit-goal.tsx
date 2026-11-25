@@ -52,7 +52,6 @@ export default function EditGoalScreen() {
   const updateProfile = useMealStore(s => s.updateProfile);
   const updateGoals   = useMealStore(s => s.updateGoals);
   const logWeight     = useMealStore(s => s.logWeight);
-  const templates        = useMealStore(s => s.templates);
   const saveCurrentPlanAs = useMealStore(s => s.saveCurrentPlanAs);
 
   const isImperial = (profile.weightUnit ?? 'lbs') === 'lbs';
@@ -208,7 +207,10 @@ export default function EditGoalScreen() {
 
     if (updatePlan) {
       // Auto-save the current plan (nothing lost) before building a new one.
-      if (templates.length > 0) {
+      // Only a running plan: the user's own repeating meals aren't a plan (and
+      // are kept by plan activation), so saving them made junk "Auto-saved
+      // Plan" entries (Nov 25 review).
+      if (profile.activePlanName) {
         const today = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
         saveCurrentPlanAs(`Auto-saved Plan – ${today}`);
       }
