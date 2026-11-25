@@ -86,7 +86,7 @@ const PART_RETRY_DELAY_MS = 800;
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 const FUNCTION_NAME = 'generate-plan-shortlist';
 // Bump on any prompt/schema change so ai_events can compare versions.
-const PROMPT_VERSION = 'shortlist-2026-11-25';
+const PROMPT_VERSION = 'shortlist-2026-11-25-families';
 const LOG_PREFIX = `[${FUNCTION_NAME}]`;
 
 interface RequestPrefs {

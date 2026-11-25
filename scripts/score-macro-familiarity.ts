@@ -10,6 +10,10 @@
  *
  *   npm run score:macro-familiarity
  *   npm run score:macro-familiarity -- --dry-run   # score + print, no writes
+ *   npm run score:macro-familiarity -- --names "Rice,Fish"   # score new foods
+ *       (print only, no database): new rows get their score from the same
+ *       rules as everything else, then go in a migration with that number,
+ *       so dev and production get identical rows (Nov 25).
  *
  * Requires (read from meal-app/.env, git-ignored — never commit real values):
  *   GEMINI_API_KEY             the same key stored as a Supabase Edge Function
@@ -71,6 +75,11 @@ if (!GEMINI_API_KEY || !SUPABASE_URL || !SECRET_KEY) {
 }
 
 const DRY_RUN = process.argv.includes('--dry-run');
+const namesArgIdx = process.argv.indexOf('--names');
+const NAMES_ONLY: string[] | null =
+  namesArgIdx >= 0
+    ? (process.argv[namesArgIdx + 1] ?? '').split(',').map((n) => n.trim()).filter(Boolean)
+    : null;
 
 // Kept in lockstep with the app's pinned Flash model (see the edge functions).
 const GEMINI_MODEL = 'gemini-3.6-flash';
@@ -292,6 +301,12 @@ async function scoreTable(table: string) {
 }
 
 async function main() {
+  if (NAMES_ONLY) {
+    if (NAMES_ONLY.length === 0) throw new Error('--names needs a comma-separated list');
+    const scores = await scoreBatch(NAMES_ONLY, '[names]');
+    for (const name of NAMES_ONLY) console.log(`${String(scores.get(name.toLowerCase()) ?? '??').padStart(3)}  ${name}`);
+    return;
+  }
   console.log(DRY_RUN ? 'DRY RUN — scoring only, no writes.' : 'Scoring and writing familiarity scores…');
   for (const table of TABLES) {
     await scoreTable(table);

@@ -144,6 +144,17 @@ export const PROTEIN_FAMILIES: FamilySet = {
     { name: 'Turkey Leg', score: 65 },
     { name: 'Ground Turkey', score: 65 },
   ],
+  // Fish, Rice and Beans (Nov 25): names and scores match their rows in the
+  // food lists (migration 20261125010000). Shrimp stays out of Fish: shellfish
+  // is its own allergy group.
+  Fish: [
+    { name: 'Tuna', score: 92 },
+    { name: 'Salmon', score: 90 },
+    { name: 'Cod', score: 80 },
+    { name: 'Tilapia', score: 75 },
+    { name: 'Mackerel', score: 75 },
+    { name: 'Catfish', score: 62 },
+  ],
 };
 
 export const CARB_FAMILIES: FamilySet = {
@@ -151,6 +162,24 @@ export const CARB_FAMILIES: FamilySet = {
     { name: 'Russet Potato', score: 65 },
     { name: 'Red Potato', score: 60 },
     { name: 'Golden Potato', score: 58 },
+  ],
+  Rice: [
+    { name: 'White Rice', score: 100 },
+    { name: 'Brown Rice', score: 90 },
+    { name: 'Basmati Rice', score: 78 },
+    { name: 'Jasmine Rice', score: 75 },
+    { name: 'Parboiled Rice', score: 55 },
+  ],
+  // Lentils and chickpeas stay separate: most people don't call them beans.
+  Beans: [
+    { name: 'Kidney Beans', score: 85 },
+    { name: 'Black Beans', score: 82 },
+    { name: 'Pinto Beans', score: 78 },
+    { name: 'Red Beans', score: 75 },
+    { name: 'Black-Eyed Peas', score: 70 },
+    { name: 'Navy Beans', score: 65 },
+    { name: 'Lima Beans', score: 65 },
+    { name: 'Cannellini Beans', score: 60 },
   ],
 };
 

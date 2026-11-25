@@ -207,8 +207,10 @@ Changing `_shared/*` → redeploy every importer. Changing `constants/entitlemen
   suggestions lean on them (e.g. "Exactly 1-2 of these 5"), constant ratio, no escalation; cook time is a barely
   perceptible tie-breaker; a user description is the dominant instruction (drops conflicting style cues, never hard constraints).
 - **Build My Plan:** protein/carb/fat picks are the dominant signal. Umbrella expansion (`expandFamilyPicks`):
-  Chicken/Beef/Pork/Turkey (hardcoded member arrays — never string-matched, Pork includes Bacon/Ham) and Potato
-  (Russet/Red/Golden). Umbrella only → expand, favour high-familiarity members; umbrella + specific cut → lean to the cut;
+  Chicken/Beef/Pork/Turkey/Fish (hardcoded member arrays — never string-matched, Pork includes Bacon/Ham; Fish has no
+  shellfish) and Potato (Russet/Red/Golden), Rice (White/Brown/Basmati/Jasmine/Parboiled), Beans (8 kinds incl.
+  Black-Eyed Peas; lentils/chickpeas separate) — Fish/Rice/Beans + yam, plantain, cassava, fufu, garri added Nov 25
+  (migration `20261125010000`, scores from `score-macro-familiarity.ts --names`). Umbrella only → expand, favour high-familiarity members; umbrella + specific cut → lean to the cut;
   specific cut only → locked to it. Meal names must use the actual cut. **Sweet Potato is never grouped with/substituted for Potato.**
 - **Custom Recipe (`generate-recipe-concept`):** the typed description is the complete, exact request. Name it
   "based only on what the user actually described — do not invent a cuisine style, sauce, or flavor descriptor".
