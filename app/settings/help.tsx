@@ -3,6 +3,7 @@ import { StyleSheet, Text, TouchableOpacity } from 'react-native';
 
 import { FormPage, FormSection } from '@/components/profile/FormPage';
 import { COLORS } from '@/constants/theme';
+import { appVersionLabel } from '@/lib/appVersion';
 import { openHealthData, openPrivacy, openSupportEmail, openTerms } from '@/lib/openLink';
 
 // Only things that work (Apple 2.1: no "coming soon"). FAQ and About Us come
@@ -26,6 +27,8 @@ export default function HelpScreen() {
           </TouchableOpacity>
         ))}
       </FormSection>
+      {/* Which build + update this is, for bug reports. */}
+      <Text style={styles.version} selectable>{appVersionLabel()}</Text>
     </FormPage>
   );
 }
@@ -42,4 +45,5 @@ const styles = StyleSheet.create({
   },
   rowText: { flex: 1, marginRight: 12, color: COLORS.text, fontSize: 15 },
   rowArrow: { color: COLORS.textSecondary, fontSize: 22, fontWeight: '300' },
+  version: { color: COLORS.textMuted, fontSize: 12, textAlign: 'center', marginTop: 20 },
 });

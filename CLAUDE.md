@@ -84,6 +84,17 @@ npm run dev -- --tunnel     # only when phone + Mac can't see each other (café 
 - New dev build: `npx eas-cli@latest build --profile development --platform ios` (plain `npx eas` fetches an
   unrelated npm package and fails; Alex runs it in his own terminal — it asks for Apple login/2FA) (or `npx expo run:ios` if Xcode is installed — it
   wasn't as of June). Needed whenever a native module/plugin/app.json native field changes.
+- **Over-the-air updates (expo-updates, Nov 25; first in build 4):** JS-only fixes reach installed TestFlight/App Store
+  builds without a build: `npx eas-cli@latest update --channel production --environment production --message "…"`
+  (a live change — show the command, get Alex's OK). The app downloads it on open and runs it on the NEXT open.
+  `runtimeVersion: { policy: 'fingerprint' }` (app.json): an update only reaches builds whose native code matches, so a
+  native change still needs a build (and old builds simply don't get later updates). Channels in eas.json:
+  production / preview / development (dev builds ignore updates). **Before every publish, make sure the bundle carries
+  the production settings, not the Mac's `.env` (dev Supabase + Test Store key — a Test Store key crashes a Release
+  build):** check the exported bundle contains the prod project ref `tmsydkqpskwcsrrbuqst` and an `appl_` RevenueCat
+  key, and not the dev ref. Settings → Help shows "Version 1.0.0 (build) · Update <date> (id)" (`lib/appVersion.ts`,
+  loads expo-updates only when its native code exists, like expo-notifications). Rollback: republish the previous
+  update (`eas update:republish`) or `eas update:rollback`.
 - Checks before calling anything done: `npx tsc --noEmit` and `npm run lint`.
   **Both are clean (0 errors, 0 warnings) since Nov 14** — keep them that way; any new error is yours.
   Debug logging: no step-by-step `console.info` traces; timing logs only under `if (__DEV__)`.

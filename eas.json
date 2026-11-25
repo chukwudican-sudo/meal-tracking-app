@@ -8,6 +8,7 @@
       "developmentClient": true,
       "distribution": "internal",
       "environment": "development",
+      "channel": "development",
       "env": {
         "APP_VARIANT": "development"
       },
@@ -18,6 +19,7 @@
     "preview": {
       "distribution": "internal",
       "environment": "production",
+      "channel": "preview",
       "ios": {
         "image": "macos-sequoia-15.6-xcode-26.2"
       }
@@ -25,6 +27,7 @@
     "production": {
       "autoIncrement": true,
       "environment": "production",
+      "channel": "production",
       "ios": {
         "image": "macos-sequoia-15.6-xcode-26.2"
       }

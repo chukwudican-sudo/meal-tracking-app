@@ -3,6 +3,12 @@
     "name": "Macrotri",
     "slug": "meal-app",
     "version": "1.0.0",
+    "runtimeVersion": {
+      "policy": "fingerprint"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/ce4ad983-d675-482b-83d6-9eccb1288a16"
+    },
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "mealapp",
