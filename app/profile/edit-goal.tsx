@@ -1,5 +1,5 @@
 import { router } from 'expo-router';
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import {
   Alert,
   ScrollView,
@@ -11,6 +11,8 @@ import {
 } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { PageHeader } from '@/components/PageHeader';
+import { GoalTimeline } from '@/components/onboarding/GoalTimeline';
+import { WeightPicker, type WeightUnitChoice } from '@/components/onboarding/WeightPicker';
 import { Screen } from '@/components/Screen';
 
 import { COLORS } from '@/constants/theme';
@@ -20,9 +22,12 @@ import {
   GOAL_LABEL,
   calcTargets,
   clampPace,
+  formatWeight,
   goalDirection,
+  goalWeightProblem,
   kgToLbs,
   lbsToKg,
+  suggestGoalWeightKg,
   type GoalTargets,
 } from '@/constants/goalCalc';
 import { calcGoalDate } from '@/constants/onboardingCalc';
@@ -35,9 +40,11 @@ import { useMealStore } from '@/store/useMealStore';
 import { HealthNote } from '@/components/HealthNote';
 import { PaceSlider } from '@/components/PaceSlider';
 
-type StepId = 'Goal' | 'Weight' | 'Activity' | 'Pace' | 'Summary';
-// Maintaining has no pace to pick (as in onboarding).
-const STEPS_WEIGHT_GOAL: StepId[] = ['Goal', 'Weight', 'Activity', 'Pace', 'Summary'];
+type StepId = 'Goal' | 'Weight' | 'GoalWeight' | 'Activity' | 'Pace' | 'Timeline' | 'Summary';
+// Maintaining has no goal weight, pace or timeline (as in onboarding). The
+// goal weight + "you'll reach it by …" steps came in Nov 25: switching e.g.
+// gain → lose used to drop the goal weight and its date.
+const STEPS_WEIGHT_GOAL: StepId[] = ['Goal', 'Weight', 'GoalWeight', 'Activity', 'Pace', 'Timeline', 'Summary'];
 const STEPS_MAINTAIN: StepId[] = ['Goal', 'Weight', 'Activity', 'Summary'];
 // The same three goals as onboarding. Lean Bulk left the list: with one pace
 // slider it was identical to Gain Muscle (a saved one opens as Gain Muscle).
@@ -94,21 +101,39 @@ export default function EditGoalScreen() {
     return isImperial ? lbsToKg(n) : n;
   }, [weightStr, initialWeightStr, profile.weightKg, isImperial]);
 
-  // Edit Goal has no goal-weight step, so the saved goal weight only counts
-  // when it was set for a goal in the same direction and still lies ahead
-  // ("eat healthier" saves a copy of the current weight — not a goal).
+  // Goal weight (losing / gaining only). Set when its step opens — today's
+  // weight may just have changed — until the user turns the wheel: the saved
+  // goal when it's for this direction and still ahead ("eat healthier" saves
+  // a copy of the current weight — not a goal), else a suggestion.
   const dir = goalDirection(goalType);
-  const savedTarget = profile.targetWeightKg;
-  const goalWeightKg = dir !== 0 && goalDirection(savedGoal) === dir
-    && savedTarget != null && weightKg != null
-    && (dir < 0 ? savedTarget < weightKg : savedTarget > weightKg)
-    ? savedTarget
+  const [goalWeightKg, setGoalWeightKg] = useState<number | null>(null);
+  const goalTouchedRef = useRef(false);
+  const startingGoalWeight = (): number | null => {
+    if (dir === 0 || weightKg == null) return null;
+    const saved = profile.targetWeightKg;
+    if (goalDirection(savedGoal) === dir && saved != null && !goalWeightProblem(goalType, weightKg, saved)) return saved;
+    return suggestGoalWeightKg(weightKg, profile.heightCm, goalType, isImperial);
+  };
+  // The wheel's own unit toggle only changes how this step shows the number.
+  const [pickerUnit, setPickerUnit] = useState<WeightUnitChoice>(isImperial ? 'lbs' : 'kg');
+  const goalWarning = dir !== 0 && goalWeightKg != null && weightKg != null
+    ? goalWeightProblem(goalType, weightKg, goalWeightKg)
     : null;
+  const goalDate = dir !== 0 && goalWeightKg != null && weightKg != null
+    ? calcGoalDate(weightKg, goalWeightKg, paceLbsPerWeek)
+    : null;
+
+  const chooseGoal = (g: GoalType) => {
+    // A new direction gets a fresh goal-weight suggestion.
+    if (goalDirection(g) !== dir) goalTouchedRef.current = false;
+    setGoalType(g);
+  };
 
   const canProceed = useMemo(() => {
     if (stepId === 'Weight') return weightKg != null;
+    if (stepId === 'GoalWeight') return goalWeightKg != null && !goalWarning;
     return true;
-  }, [stepId, weightKg]);
+  }, [stepId, weightKg, goalWeightKg, goalWarning]);
 
   const dirty = step > 0;
 
@@ -125,13 +150,16 @@ export default function EditGoalScreen() {
   };
 
   const handleNext = () => {
+    if (steps[step + 1] === 'GoalWeight' && !goalTouchedRef.current) {
+      setGoalWeightKg(startingGoalWeight());
+    }
     if (steps[step + 1] === 'Summary') {
       // About to reach Summary — compute targets.
       const ageVal = profile.age ?? 30;
       const heightVal = profile.heightCm ?? 175;
       const result = calcTargets({
         weightKg: weightKg!,
-        targetWeightKg: goalWeightKg,
+        targetWeightKg: dir !== 0 ? goalWeightKg : null,
         heightCm: heightVal,
         age: ageVal,
         gender: profile.gender ?? 'other',
@@ -174,23 +202,15 @@ export default function EditGoalScreen() {
   };
 
   const persist = (t: GoalTargets, updatePlan: boolean) => {
-    // The pace (and the goal date it implies) are saved with the goal, so the
-    // profile always matches the numbers it produced.
-    // A goal weight belongs to the direction it was set for. Changing
-    // direction here (there's no goal-weight step) drops it — maintaining keeps
-    // the current weight, as onboarding does — so an old target never comes
-    // back as the new goal on a later visit.
-    const directionChanged = goalDirection(goalType) !== goalDirection(savedGoal);
+    // The goal weight, pace and the goal date they imply are saved with the
+    // goal, so the profile always matches the numbers it produced. Maintaining
+    // keeps the current weight as the target, as onboarding does.
     updateProfile({
       goalType,
       activityLevel: activity,
       paceLbsPerWeek,
-      goalDate: goalWeightKg != null && weightKg != null
-        ? calcGoalDate(weightKg, goalWeightKg, paceLbsPerWeek)
-        : null,
-      ...(directionChanged
-        ? { targetWeightKg: goalType === 'maintain' && weightKg != null ? weightKg : undefined }
-        : {}),
+      goalDate,
+      targetWeightKg: (dir === 0 ? weightKg : goalWeightKg) ?? undefined,
     });
     if (weightKg != null && weightKg !== profile.weightKg) {
       logWeight(weightKg);
@@ -257,7 +277,7 @@ export default function EditGoalScreen() {
               <TouchableOpacity
                 key={g}
                 style={[styles.tile, goalType === g && styles.tileActive]}
-                onPress={() => setGoalType(g)}
+                onPress={() => chooseGoal(g)}
                 activeOpacity={0.85}
               >
                 <Text style={[styles.tileTitle, goalType === g && styles.tileTitleActive]}>
@@ -283,6 +303,21 @@ export default function EditGoalScreen() {
               />
               <Text style={styles.weightUnit}>{isImperial ? 'lbs' : 'kg'}</Text>
             </View>
+          </>
+        )}
+
+        {stepId === 'GoalWeight' && goalWeightKg != null && (
+          <>
+            <StepHeader title="What is your goal weight?" sub="Pick where you'd like to get to." />
+            <View style={styles.pickerWrap}>
+              <WeightPicker
+                weightKg={goalWeightKg}
+                unit={pickerUnit}
+                onChange={kg => { goalTouchedRef.current = true; setGoalWeightKg(kg); }}
+                onUnitChange={setPickerUnit}
+              />
+            </View>
+            {goalWarning ? <Text style={styles.warn}>{goalWarning}</Text> : null}
           </>
         )}
 
@@ -315,6 +350,16 @@ export default function EditGoalScreen() {
               onChange={setPaceLbs}
             />
           </>
+        )}
+
+        {stepId === 'Timeline' && goalWeightKg != null && weightKg != null && (
+          <GoalTimeline
+            name={profile.firstName ?? ''}
+            currentLabel={formatWeight(weightKg, isImperial)}
+            goalLabel={formatWeight(goalWeightKg, isImperial)}
+            goalDate={goalDate}
+            losing={dir < 0}
+          />
         )}
 
         {stepId === 'Summary' && targets && (
@@ -505,6 +550,8 @@ const styles = StyleSheet.create({
     paddingVertical: 18,
   },
   weightUnit: { color: COLORS.textSecondary, fontSize: 16, fontWeight: '600' },
+  pickerWrap: { alignItems: 'center', justifyContent: 'center', paddingVertical: 8 },
+  warn: { color: COLORS.red, fontSize: 13, textAlign: 'center', marginTop: 12 },
 
   compareCard: {
     backgroundColor: COLORS.card,

@@ -33,9 +33,13 @@ export function WeightPicker({ weightKg, unit, onChange, onUnitChange }: WeightP
 
   let columns: React.ReactNode;
 
+  // Values are rounded to the wheel's 0.1 step before splitting: a kg↔lb
+  // round trip lands just under the whole number (154.99999 lb) and showed as
+  // "154 .9" (Nov 25 review).
   if (unit === 'kg') {
-    const whole = Math.max(27, Math.min(250, Math.floor(weightKg)));
-    const tenth = Math.max(0, Math.min(9, Math.round((weightKg - Math.floor(weightKg)) * 10)));
+    const kg = Math.round(weightKg * 10) / 10;
+    const whole = Math.max(27, Math.min(250, Math.floor(kg)));
+    const tenth = Math.max(0, Math.min(9, Math.round((kg - Math.floor(kg)) * 10)));
     columns = (
       <>
         <WheelPicker
@@ -53,7 +57,7 @@ export function WeightPicker({ weightKg, unit, onChange, onUnitChange }: WeightP
       </>
     );
   } else if (unit === 'lbs') {
-    const totalLbs = weightKg * LBS_PER_KG;
+    const totalLbs = Math.round(weightKg * LBS_PER_KG * 10) / 10;
     const whole = Math.max(60, Math.min(500, Math.floor(totalLbs)));
     const tenth = Math.max(0, Math.min(9, Math.round((totalLbs - Math.floor(totalLbs)) * 10)));
     columns = (
@@ -74,7 +78,7 @@ export function WeightPicker({ weightKg, unit, onChange, onUnitChange }: WeightP
     );
   } else {
     // stone / lbs
-    const totalLbs = weightKg * LBS_PER_KG;
+    const totalLbs = Math.round(weightKg * LBS_PER_KG * 10) / 10;
     const stone = Math.max(4, Math.min(35, Math.floor(totalLbs / 14)));
     const lbsRem = Math.max(0, Math.min(13, Math.round(totalLbs - stone * 14)));
     columns = (

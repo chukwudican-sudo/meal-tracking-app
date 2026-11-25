@@ -257,8 +257,9 @@ there are **no Add to Plan / Add to Today buttons** on recipe pages (add via "+"
 
 Five phases with a global progress bar; Back keeps answers. Welcome (Get Started + Log In) → carousel → name → goal
 (lose weight / eat healthier / build muscle; auto-advance) → gender ("What gender were you born with?") → birthday wheel
-→ height wheel (ft/in ↔ cm) → weight (lbs/kg/st-lbs) → motivational pause → target weight (validation copy per goal; eat
-healthier = current) → activity (4 friendly phrasings) → pace slider (lose 0.5–2.0 lb/wk, build 0.25–1.0) → diet → allergies →
+→ height wheel (ft/in ↔ cm) → weight (lbs/kg/st-lbs) → motivational pause → target weight (starts on a suggestion:
+losing 10% below today but never under BMI 18.5, gaining 5% above, whole kg/lb — `goalCalc#suggestGoalWeightKg`; Next
+blocked with the per-goal message while it's on the wrong side of today's weight; eat healthier = current) → activity (4 friendly phrasings) → pace slider (lose 0.5–2.0 lb/wk, build 0.25–1.0) → diet → allergies →
 secondary nutrients (skippable) → processing 0→100% (ProgressiveLoader-style) → "Your personalized plan is ready" with
 Apple/Google (coming soon)/Email → email + password + confirm → **6-digit code screen ("I'll verify later" allowed)** →
 setup → goal timeline ("[Name], you will reach your goal by [date]") → calorie ring → notifications ask → "Ready to build
@@ -278,8 +279,11 @@ Exact screen copy is in `chat-history/main-chat-may-oct-2026.md` (message around
   goal (→ Edit Goal), active plan, Free/Pro status with **Upgrade** (paywall) or **Manage Subscription** (Apple sheet).
   Sections: Body & Goals (Edit Goal, Personal Details), Nutrition (Dietary & Allergies, Nutrition Goals), Preferences
   (lbs/kg, app-wide, default lbs). Gear → Settings.
-- **Edit Goal:** goal tiles (Lose Weight / Maintain / Gain Muscle — same as onboarding) → confirm weight → activity →
-  pace slider (shared `components/PaceSlider`, skipped for Maintain) → old vs new targets side by side (manual tweaks) →
+- **Edit Goal:** goal tiles (Lose Weight / Maintain / Gain Muscle — same as onboarding) → confirm weight → **goal weight**
+  (same wheel + rules as onboarding; starts on the saved goal if it's for this direction and still ahead, else the
+  suggestion) → activity → pace slider (shared `components/PaceSlider`) → **goal timeline** (shared
+  `components/onboarding/GoalTimeline`; goal weight, pace and timeline skipped for Maintain — Nov 25) → old vs new
+  targets side by side (manual tweaks) →
   "Update your meal plan to match?" Yes → auto-save current plan as "Auto-saved Plan – {date}" (only if it isn't
   already in Saved Plans / Explore) and
   `router.replace('/plan/build')`; No → targets only.

@@ -75,6 +75,58 @@ export function goalDirection(g: GoalType): -1 | 0 | 1 {
   return g === 'lose_weight' ? -1 : g === 'maintain' ? 0 : 1;
 }
 
+// ─── Goal weight (Nov 25) ────────────────────────────────────────────────────
+// Where the goal-weight wheel starts in onboarding and Edit Goal (onboarding
+// always started on 65 kg): losing → 10% below today, never below a healthy
+// weight for the height (BMI 18.5); gaining → 5% above. Rounded to a whole kg
+// or lb, the way the wheel reads. Null for maintain.
+const SUGGESTED_LOSS = 0.1;
+const SUGGESTED_GAIN = 0.05;
+const HEALTHY_BMI_MIN = 18.5;
+
+export function suggestGoalWeightKg(
+  currentKg: number,
+  heightCm: number | null | undefined,
+  goal: GoalType,
+  imperial: boolean,
+): number | null {
+  const dir = goalDirection(goal);
+  if (dir === 0 || !Number.isFinite(currentKg) || currentKg <= 0) return null;
+  const whole = (k: number, round: (n: number) => number) =>
+    imperial ? lbsToKg(round(kgToLbs(k))) : round(k);
+  let kg = whole(currentKg * (dir < 0 ? 1 - SUGGESTED_LOSS : 1 + SUGGESTED_GAIN), Math.round);
+  if (dir < 0 && heightCm != null && Number.isFinite(heightCm) && heightCm > 0) {
+    const m = heightCm / 100;
+    // Rounded UP, so rounding never lands under the healthy minimum.
+    kg = Math.max(kg, whole(HEALTHY_BMI_MIN * m * m, Math.ceil));
+  }
+  // Already at the healthy minimum: start on today's weight (the wheel then
+  // asks for a lower one) rather than suggest going under it.
+  return dir < 0 ? Math.min(kg, currentKg) : kg;
+}
+
+// A goal weight must lie on the goal's side of today's weight, or the goal
+// date is nonsense (onboarding only warned before, Nov 25). The message to
+// show, or null when it fits. 0.01 kg absorbs lb↔kg rounding yet stays under
+// the wheel's 0.1 lb step.
+const SAME_WEIGHT_KG = 0.01;
+export function goalWeightProblem(goal: GoalType, currentKg: number, targetKg: number): string | null {
+  const dir = goalDirection(goal);
+  if (dir < 0 && !(targetKg < currentKg - SAME_WEIGHT_KG)) {
+    return "You're trying to lose weight, so your goal weight should be less than your current weight.";
+  }
+  if (dir > 0 && !(targetKg > currentKg + SAME_WEIGHT_KG)) {
+    return "You're trying to build muscle, so your goal weight should be more than your current weight.";
+  }
+  return null;
+}
+
+// "154 lbs", "153.6 lbs", "69.9 kg": to the wheel's 0.1 step, so a goal 0.4 lb
+// under today never reads "154 lbs → 154 lbs".
+export function formatWeight(kg: number, imperial: boolean): string {
+  return imperial ? `${Math.round(kgToLbs(kg) * 10) / 10} lbs` : `${Math.round(kg * 10) / 10} kg`;
+}
+
 // "1.5 lbs / week" or "0.68 kg / week" (same wording as onboarding's slider).
 export function formatPace(lbsPerWeek: number, imperial: boolean): string {
   return imperial

@@ -15,23 +15,22 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
-import Svg, { Line, Polyline, Circle as SvgCircle } from 'react-native-svg';
 
 import { EmailCodeVerification } from '@/components/auth/EmailCodeVerification';
 import { HeightPicker, type HeightUnit } from '@/components/onboarding/HeightPicker';
 import { WeightPicker, type WeightUnitChoice } from '@/components/onboarding/WeightPicker';
+import { GoalTimeline } from '@/components/onboarding/GoalTimeline';
 import { BackButton, HEADER_SIDE } from '@/components/PageHeader';
 import { ProgressRing } from '@/components/ProgressRing';
 import { PaceSlider } from '@/components/PaceSlider';
 import { Screen } from '@/components/Screen';
 import { APP_NAME } from '@/constants/app';
-import { clampPace } from '@/constants/goalCalc';
+import { clampPace, formatWeight, goalWeightProblem, suggestGoalWeightKg } from '@/constants/goalCalc';
 import { NUTRIENT_META } from '@/constants/nutrients';
 import {
   ageFromBirthday,
   calcGoalDate,
   calcOnboardingTargets,
-  LBS_PER_KG,
   ONBOARDING_GOAL_TYPE,
   type OnboardingGoal,
 } from '@/constants/onboardingCalc';
@@ -155,8 +154,17 @@ export default function OnboardingScreen() {
   const index = Math.max(0, steps.indexOf(stepId));
   const progress = steps.length > 1 ? index / (steps.length - 1) : 0;
 
+  // The goal-weight wheel starts on a suggestion from today's weight and
+  // height (it always started on 65 kg) until the user turns it (Nov 25).
+  const targetTouchedRef = useRef(false);
   const go = (delta: number) => {
     const next = steps[Math.max(0, Math.min(steps.length - 1, index + delta))];
+    if (next === 'targetWeight' && !targetTouchedRef.current && answers.goal) {
+      const suggested = suggestGoalWeightKg(
+        answers.weightKg, answers.heightCm, ONBOARDING_GOAL_TYPE[answers.goal], answers.weightUnit !== 'kg',
+      );
+      if (suggested != null) patch({ targetWeightKg: suggested });
+    }
     setStepId(next);
   };
 
@@ -249,8 +257,7 @@ export default function OnboardingScreen() {
   };
 
   // Weight display used for the results screens (st treated as lbs).
-  const displayWeight = (kg: number) =>
-    answers.weightUnit === 'kg' ? `${(Math.round(kg * 10) / 10)} kg` : `${Math.round(kg * LBS_PER_KG)} lbs`;
+  const displayWeight = (kg: number) => formatWeight(kg, answers.weightUnit !== 'kg');
 
   // Steps that auto-advance / shouldn't show a back arrow.
   const noBack = stepId === 'welcome' || stepId === 'processing' || stepId === 'accountConfirm' || stepId === 'setupLoading';
@@ -324,7 +331,12 @@ export default function OnboardingScreen() {
                 key={o.value}
                 label={o.label}
                 selected={answers.goal === o.value}
-                onPress={() => { patch({ goal: o.value }); setTimeout(() => go(1), 120); }}
+                onPress={() => {
+                  // A new goal gets a fresh goal-weight suggestion.
+                  if (o.value !== answers.goal) targetTouchedRef.current = false;
+                  patch({ goal: o.value });
+                  setTimeout(() => go(1), 120);
+                }}
               />
             ))}
           </CardsStep>
@@ -421,24 +433,23 @@ export default function OnboardingScreen() {
         );
 
       case 'targetWeight': {
-        const warn =
-          answers.goal === 'lose' && answers.targetWeightKg > answers.weightKg
-            ? "You're trying to lose weight, so your goal weight should be less than your current weight."
-            : answers.goal === 'muscle' && answers.targetWeightKg < answers.weightKg
-            ? "You're trying to build muscle, so your goal weight should be more than your current weight."
-            : null;
+        // Next waits for a goal on the right side of today's weight (it only
+        // warned before, and a wrong-way goal made a nonsense goal date).
+        const warn = answers.goal
+          ? goalWeightProblem(ONBOARDING_GOAL_TYPE[answers.goal], answers.weightKg, answers.targetWeightKg)
+          : null;
         return (
           <FormStep
             title="What is your goal weight?"
             explain="This helps us create a plan that supports your wellbeing and feels right for you."
-            canNext
+            canNext={!warn}
             onNext={() => go(1)}
           >
             <View style={styles.pickerWrap}>
               <WeightPicker
                 weightKg={answers.targetWeightKg}
                 unit={answers.weightUnit}
-                onChange={kg => patch({ targetWeightKg: kg })}
+                onChange={kg => { targetTouchedRef.current = true; patch({ targetWeightKg: kg }); }}
                 onUnitChange={u => patch({ weightUnit: u })}
               />
             </View>
@@ -933,42 +944,9 @@ function TimelineStep({
 }: {
   name: string; currentLabel: string; goalLabel: string; goalDate: string | null; losing: boolean; onNext: () => void;
 }) {
-  const { width } = useWindowDimensions();
-  const w = width - 40;
-  const h = 140;
-  const y1 = losing ? 30 : h - 30;
-  const y2 = losing ? h - 30 : 30;
-  const dateText = goalDate
-    ? new Date(goalDate + 'T00:00:00').toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
-    : 'your target date';
-  const months = useMemo(() => {
-    const arr: string[] = [];
-    const d = new Date();
-    for (let i = 0; i < 4; i++) { arr.push(d.toLocaleDateString('en-US', { month: 'short' })); d.setMonth(d.getMonth() + 1); }
-    return arr;
-  }, []);
   return (
     <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
-      <Svg width={w} height={h}>
-        <Line x1={0} y1={h - 1} x2={w} y2={h - 1} stroke={COLORS.border} strokeWidth={1} />
-        <Polyline points={`0,${y1} ${w},${y2}`} fill="none" stroke={COLORS.green} strokeWidth={3} strokeLinecap="round" />
-        <SvgCircle cx={0} cy={y1} r={5} fill={COLORS.green} />
-        <SvgCircle cx={w} cy={y2} r={6} fill={COLORS.green} />
-      </Svg>
-      <View style={styles.monthRow}>
-        {months.map((m, i) => <Text key={i} style={styles.monthLabel}>{m}</Text>)}
-      </View>
-
-      <Text style={styles.resultLabel}>Your goal weight</Text>
-      <Text style={styles.resultBig}>{goalLabel}</Text>
-      <View style={styles.motivTag}><Text style={styles.motivTagText}>You can do it!</Text></View>
-
-      <Text style={[styles.resultLabel, { marginTop: 24 }]}>Your personalized plan</Text>
-      <Text style={styles.resultPlan}>
-        {name || 'You'}, you will reach your goal by {dateText}.
-      </Text>
-      <Text style={styles.resultSub}>From {currentLabel} → {goalLabel}</Text>
-
+      <GoalTimeline name={name} currentLabel={currentLabel} goalLabel={goalLabel} goalDate={goalDate} losing={losing} />
       <PrimaryButton label="Continue" onPress={onNext} />
     </ScrollView>
   );
@@ -1288,14 +1266,6 @@ const styles = StyleSheet.create({
   ringCalories: { color: COLORS.text, fontSize: 44, fontWeight: '800' },
   ringGoal: { color: COLORS.textSecondary, fontSize: 13 },
 
-  monthRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 6 },
-  monthLabel: { color: COLORS.textMuted, fontSize: 11 },
-  resultLabel: { color: COLORS.textSecondary, fontSize: 13, marginTop: 20 },
-  resultBig: { color: COLORS.text, fontSize: 34, fontWeight: '800', marginTop: 4 },
-  motivTag: { alignSelf: 'flex-start', backgroundColor: COLORS.green + '22', borderRadius: 999, paddingHorizontal: 12, paddingVertical: 5, marginTop: 10 },
-  motivTagText: { color: COLORS.green, fontSize: 13, fontWeight: '700' },
-  resultPlan: { color: COLORS.text, fontSize: 17, fontWeight: '600', marginTop: 6, lineHeight: 24 },
-  resultSub: { color: COLORS.textSecondary, fontSize: 13, marginTop: 8 },
 
   // Account
   legal: { color: COLORS.textMuted, fontSize: 12, textAlign: 'center', marginTop: 24, lineHeight: 18 },
