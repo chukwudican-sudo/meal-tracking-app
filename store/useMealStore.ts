@@ -117,8 +117,14 @@ function ensureNutrition<T extends { name: string; calories?: number; macros?: M
 // Match priority: by recipeId (premade source of truth), then by lowercased name.
 function findExistingSavedRecipe(
   list: SavedRecipe[],
-  candidate: { recipeId?: string; name: string }
+  candidate: { id?: string; recipeId?: string; name: string }
 ): SavedRecipe | undefined {
+  // The exact entry first: two saved recipes can share a name (an AI one and
+  // a built-in), and the heart must flip the one the user tapped.
+  if (candidate.id) {
+    const byId = list.find(r => r.id === candidate.id);
+    if (byId) return byId;
+  }
   if (candidate.recipeId) {
     const byRecipeId = list.find(r => r.recipeId === candidate.recipeId);
     if (byRecipeId) return byRecipeId;
@@ -1015,6 +1021,7 @@ export const useMealStore = create<AppStore>()(
       resetUserData: () => {
         set({
           findPlanAnswers: null, // per account
+          planAvoidFoods: [],    // per account: the next person on this phone mustn't inherit it
           logs:         {},
           goals:        DEFAULT_GOALS,
           goalsBeforePlan: null,
@@ -1444,7 +1451,12 @@ export const useMealStore = create<AppStore>()(
       // ─── Recipe actions ─────────────────────────────────────────────────
       ensureRecipeSaved: (recipe) => {
         const state = get();
-        const existing = findExistingSavedRecipe(state.savedRecipes, recipe);
+        // An AI recipe with its own id (a Build My Plan card) is only ever the
+        // same recipe as itself: matching by name made a new "Avocado Toast"
+        // reuse an older one's calories and ingredients (Nov 24 audit).
+        const existing = recipe.source === 'ai' && recipe.recipeId
+          ? state.savedRecipes.find(r => r.recipeId === recipe.recipeId)
+          : findExistingSavedRecipe(state.savedRecipes, recipe);
         if (existing) return existing;
 
         const next: SavedRecipe = {

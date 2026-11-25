@@ -32,6 +32,7 @@ import { useEntitlementStore } from '@/store/useEntitlementStore';
 import { uniquePlanName, useMealStore } from '@/store/useMealStore';
 import { useToastStore } from '@/store/useToastStore';
 import { confirmPlanActivation } from '@/lib/planActivation';
+import { recipeFitsProfile } from '@/lib/findPlan';
 import { PLAN_PICK_LIMITS } from '@/constants/planPicks';
 import type {
   MealPlan,
@@ -90,29 +91,16 @@ function categoryForSlot(slotName: string): RecipeCategory {
   return 'Lunch';
 }
 
-// Filter the catalogue by dietary preferences + allergies coming from profile.
+// Filter recipes by the profile's diet + allergies: built-in ones in the swap
+// list, and a second line of defence for AI cards (the server already treats
+// them as hard rules). Uses Find Your Plan's ingredient matcher — the old
+// keyword check here never matched allergy labels like "Allergic to nuts" and
+// dropped vegan meals for "egg" in eggplant (Nov 24 audit).
 function applyDietaryFilter(
   recipes: RecipeTemplate[],
   profile: UserProfile,
 ): RecipeTemplate[] {
-  const allergies = (profile.allergies ?? []).map(a => a.toLowerCase()).filter(Boolean);
-  const dietary = (profile.dietaryRestrictions ?? []).map(d => d.toLowerCase());
-  const vegetarian = dietary.some(d => d.includes('vegetarian'));
-  const vegan = dietary.some(d => d.includes('vegan'));
-  const pesc = dietary.some(d => d.includes('pesc'));
-
-  const MEAT_KEYWORDS = ['chicken', 'beef', 'turkey', 'pork', 'bacon', 'ham', 'sausage'];
-  const SEAFOOD_KEYWORDS = ['fish', 'salmon', 'tuna', 'shrimp', 'prawn'];
-  const ANIMAL_KEYWORDS = ['egg', 'milk', 'yogurt', 'cheese', 'butter', 'cream'];
-
-  return recipes.filter(r => {
-    const text = r.ingredients.map(i => i.name.toLowerCase()).join(' ') + ' ' + r.name.toLowerCase();
-    if (allergies.some(a => text.includes(a))) return false;
-    if (vegan && [...MEAT_KEYWORDS, ...SEAFOOD_KEYWORDS, ...ANIMAL_KEYWORDS].some(k => text.includes(k))) return false;
-    if (vegetarian && [...MEAT_KEYWORDS, ...SEAFOOD_KEYWORDS].some(k => text.includes(k))) return false;
-    if (pesc && MEAT_KEYWORDS.some(k => text.includes(k))) return false;
-    return true;
-  });
+  return recipes.filter(r => recipeFitsProfile(r, profile));
 }
 
 // Rank recipes by goal-aware score, optionally biased by the wizard's
@@ -300,7 +288,7 @@ type Step =
   | { kind: 'preview' };
 
 // ─── Preferences ─────────────────────────────────────────────────────────────
-// Gathered fresh every Build My Plan run (re-shown on Regenerate). Answers live
+// Gathered fresh every Build My Plan run. Answers live
 // only in component state — never persisted to profile (people's mood changes
 // day to day). The protein/carb/fat picks are the PRIMARY personalisation
 // signal for the AI shortlist; cuisines/cookTime/loves are light secondary
@@ -346,7 +334,7 @@ const LOVE_SUGGESTIONS = ['Chicken', 'Rice', 'Eggs', 'Pasta', 'Salmon', 'Beef', 
 // depth after the primary protein/carb/fat picker.
 const SECONDARY_TOTAL = 4;
 
-// Extra options appended per "Generate more" tap for a single meal type. The
+// Extra options appended per "More options" tap for a single meal type. The
 // initial shortlist uses the server-side defaults (mains 4, snacks 2).
 const GENERATE_MORE_COUNT = 3;
 
@@ -488,8 +476,8 @@ export default function BuildPlanScreen() {
   // by RecipeCategory since the AI generates per meal type, not per slot.
   const [shortlistByType, setShortlistByType] = useState<Partial<Record<RecipeCategory, RecipeTemplate[]>>>({});
   const [selectedByType, setSelectedByType] = useState<Partial<Record<RecipeCategory, RecipeTemplate[]>>>({});
-  // In-flight flags: whole-shortlist generation (initial / Regenerate) and the
-  // per-type "Generate more" top-up.
+  // In-flight flags: whole-shortlist generation and the per-type
+  // "More options" top-up.
   const [shortlistLoading, setShortlistLoading] = useState(false);
   const [generateMoreLoadingByType, setGenerateMoreLoadingByType] = useState<Partial<Record<RecipeCategory, boolean>>>({});
 
@@ -608,8 +596,8 @@ export default function BuildPlanScreen() {
   }
 
   // ── Shortlist generation loading screen ─────────────────────────────────
-  // Covers both the initial build and a Regenerate re-run. A full screen (not
-  // just a button spinner) because the call can take 10-20s and the user has
+  // A full screen (not just a button spinner) because the call takes ~5s
+  // (up to its 25s budget) and the user has
   // nothing else to do on the review page while it runs.
   if (shortlistLoading) {
     return (
@@ -922,7 +910,16 @@ export default function BuildPlanScreen() {
       if (isFirst) router.back();
       else setStep({ kind: 'macroPicker', group: MACRO_GROUPS[groupIdx - 1] });
     };
+    // Next keeps what's still typed in "Add your own" (it was dropped unless
+    // Add / Return was tapped — Nov 24 audit).
+    const pendingCustom = g.value.trim();
+    const canGoNext = groupHasPick || pendingCustom.length > 0;
     const goNext = () => {
+      if (pendingCustom) {
+        const added = addMacroToken(group, pendingCustom);
+        if (!added) return;
+        g.setValue('');
+      }
       setMacroSearch('');
       if (isLastGroup) setStep({ kind: 'secondaryPrefs', questionIdx: 0 });
       else setStep({ kind: 'macroPicker', group: MACRO_GROUPS[groupIdx + 1] });
@@ -1036,13 +1033,13 @@ export default function BuildPlanScreen() {
                       onChangeText={g.setValue}
                       placeholder={g.placeholder}
                       placeholderTextColor={COLORS.textMuted}
-                      onSubmitEditing={() => { addMacroToken(group, g.value); g.setValue(''); }}
+                      onSubmitEditing={() => { if (addMacroToken(group, g.value)) g.setValue(''); }}
                       returnKeyType="done"
                     />
                     <TouchableOpacity
                       style={[styles.tokenAddBtn, !g.value.trim() && styles.disabledBtn]}
                       disabled={!g.value.trim()}
-                      onPress={() => { addMacroToken(group, g.value); g.setValue(''); }}
+                      onPress={() => { if (addMacroToken(group, g.value)) g.setValue(''); }}
                     >
                       <Text style={styles.tokenAddBtnText}>Add</Text>
                     </TouchableOpacity>
@@ -1054,13 +1051,13 @@ export default function BuildPlanScreen() {
 
           <View style={[styles.footer, { paddingBottom: footerBottomPad }]}>
             <TouchableOpacity
-              style={[styles.primaryBtn, styles.guideCta, !groupHasPick && styles.disabledBtn]}
-              disabled={!groupHasPick}
+              style={[styles.primaryBtn, styles.guideCta, !canGoNext && styles.disabledBtn]}
+              disabled={!canGoNext}
               onPress={goNext}
               activeOpacity={0.85}
             >
               <Text style={styles.primaryBtnText}>
-                {groupHasPick
+                {canGoNext
                   ? 'Next'
                   : `Pick at least one ${g.title.toLowerCase().replace(/s$/, '')}`}
               </Text>
@@ -1081,6 +1078,23 @@ export default function BuildPlanScreen() {
     const isLast = qIdx === SECONDARY_TOTAL - 1;
 
     const goNext = () => {
+      // Typed but not added: a loved food is kept as is; an avoided food is a
+      // hard rule, so ask instead of guessing (the box is also the search).
+      if (qIdx === 2 && loveInput.trim()) {
+        if (!addLoveToken(loveInput)) return;
+        setLoveInput('');
+      }
+      const pendingAvoid = avoidInput.trim();
+      if (qIdx === 3 && pendingAvoid && prefs.avoid.some(a => a.toLowerCase() === pendingAvoid.toLowerCase())) {
+        setAvoidInput('');
+      } else if (qIdx === 3 && pendingAvoid) {
+        const exact = (allFoodOptions ?? []).find(o => o.toLowerCase() === pendingAvoid.toLowerCase()) ?? pendingAvoid;
+        Alert.alert(`Avoid “${exact}”?`, "You typed it but didn't add it.", [
+          { text: "Don't add", style: 'cancel', onPress: () => { setAvoidInput(''); setStep({ kind: 'guide' }); } },
+          { text: 'Add', onPress: () => { if (addAvoidToken(exact)) { setAvoidInput(''); setStep({ kind: 'guide' }); } } },
+        ]);
+        return;
+      }
       if (isLast) {
         // After the last question, route to the guide review page so the user
         // sees every answer before we spend an AI call.
@@ -1110,33 +1124,34 @@ export default function BuildPlanScreen() {
     };
 
     // Q3 / Q4 helpers
-    const addLoveToken = (raw: string) => {
+    const addLoveToken = (raw: string): boolean => {
       const v = raw.trim();
-      if (!v) return;
+      if (!v) return false;
       if (prefs.avoid.some(a => a.toLowerCase() === v.toLowerCase())) {
         Alert.alert(
           `${v} is in foods to avoid`,
           'A food can only be loved or avoided. Pick one.',
         );
-        return;
+        return false;
       }
       if (!prefs.loves.some(l => l.toLowerCase() === v.toLowerCase()) && prefs.loves.length >= PLAN_PICK_LIMITS.loves) {
         showToast(`You can add up to ${PLAN_PICK_LIMITS.loves} foods you love.`);
-        return;
+        return false;
       }
       setPrefs(p => p.loves.some(l => l.toLowerCase() === v.toLowerCase()) ? p : { ...p, loves: [...p.loves, v] });
+      return true;
     };
     const removeLoveToken = (token: string) =>
       setPrefs(p => ({ ...p, loves: p.loves.filter(t => t !== token) }));
-    const addAvoidToken = (raw: string) => {
+    const addAvoidToken = (raw: string): boolean => {
       const v = raw.trim();
-      if (!v) return;
+      if (!v) return false;
       if (prefs.loves.some(a => a.toLowerCase() === v.toLowerCase())) {
         Alert.alert(
           `${v} is in foods you love`,
           'A food can only be loved or avoided. Pick one.',
         );
-        return;
+        return false;
       }
       // Avoid is a hard constraint, so it can't contradict a primary pick —
       // otherwise the prompt would tell the model to both build around a food
@@ -1149,13 +1164,14 @@ export default function BuildPlanScreen() {
           `${v} is one of your picked foods`,
           'Remove it from your foods first if you\u2019d rather avoid it.',
         );
-        return;
+        return false;
       }
       if (!prefs.avoid.some(l => l.toLowerCase() === v.toLowerCase()) && prefs.avoid.length >= PLAN_PICK_LIMITS.avoid) {
         showToast(`You can add up to ${PLAN_PICK_LIMITS.avoid} foods to avoid.`);
-        return;
+        return false;
       }
       setPrefs(p => p.avoid.some(l => l.toLowerCase() === v.toLowerCase()) ? p : { ...p, avoid: [...p.avoid, v] });
+      return true;
     };
     const removeAvoidToken = (token: string) =>
       setPrefs(p => ({ ...p, avoid: p.avoid.filter(t => t !== token) }));
@@ -1251,13 +1267,13 @@ export default function BuildPlanScreen() {
                     onChangeText={setLoveInput}
                     placeholder="e.g. salmon, mango, oats"
                     placeholderTextColor={COLORS.textMuted}
-                    onSubmitEditing={() => { addLoveToken(loveInput); setLoveInput(''); }}
+                    onSubmitEditing={() => { if (addLoveToken(loveInput)) setLoveInput(''); }}
                     returnKeyType="done"
                   />
                   <TouchableOpacity
                     style={[styles.tokenAddBtn, !loveInput.trim() && styles.disabledBtn]}
                     disabled={!loveInput.trim()}
-                    onPress={() => { addLoveToken(loveInput); setLoveInput(''); }}
+                    onPress={() => { if (addLoveToken(loveInput)) setLoveInput(''); }}
                   >
                     <Text style={styles.tokenAddBtnText}>Add</Text>
                   </TouchableOpacity>
@@ -1338,16 +1354,49 @@ export default function BuildPlanScreen() {
                     This is for foods you don&apos;t enjoy — your allergies are already saved in your profile.
                   </Text>
 
+                  {/* The list is remembered between runs (planAvoidFoods), so show
+                      it up top: a remembered food far down the list looked like
+                      it had ticked itself (Nov 24). Same chips as "Foods you love". */}
+                  {prefs.avoid.length > 0 && (
+                    <View style={styles.tokenList}>
+                      <Text style={styles.tokenListLabel}>Your list · saved for next time</Text>
+                      <View style={styles.chipGrid}>
+                        {prefs.avoid.map(t => (
+                          <TouchableOpacity
+                            key={t}
+                            style={[styles.chip, styles.chipActive]}
+                            onPress={() => removeAvoidToken(t)}
+                            activeOpacity={0.7}
+                            accessibilityRole="button"
+                            accessibilityLabel={`Remove ${t}`}
+                          >
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                              <Text style={[styles.chipText, styles.chipTextActive]}>{t}</Text>
+                              <Ionicons name="close" size={14} color={COLORS.green} />
+                            </View>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    </View>
+                  )}
+
                   <View style={styles.macroSearchWrap}>
                     <Ionicons name="search" size={18} color={COLORS.textMuted} />
                     <TextInput
                       style={styles.macroSearchInput}
                       value={avoidInput}
                       onChangeText={setAvoidInput}
-                      placeholder="Search foods or type your own"
+                      placeholder="Search or type any food"
                       placeholderTextColor={COLORS.textMuted}
-                      returnKeyType="search"
+                      returnKeyType="done"
                       autoCorrect={false}
+                      onSubmitEditing={() => {
+                        // Return adds what's typed: the matching list item, or the text itself.
+                        const q = avoidInput.trim();
+                        if (!q) return;
+                        const exact = avoidPool.find(o => o.toLowerCase() === q.toLowerCase());
+                        if (queryAlreadyAdded || addAvoidToken(exact ?? q)) setAvoidInput('');
+                      }}
                     />
                     {avoidInput.length > 0 && (
                       <TouchableOpacity onPress={() => setAvoidInput('')} hitSlop={8}>
@@ -1355,6 +1404,7 @@ export default function BuildPlanScreen() {
                       </TouchableOpacity>
                     )}
                   </View>
+                  <Text style={styles.avoidAddHint}>Not in the list? Type it, then tap Add.</Text>
 
                   <ScrollView
                     style={{ flex: 1 }}
@@ -1365,7 +1415,7 @@ export default function BuildPlanScreen() {
                     {showAddCustom && (
                       <TouchableOpacity
                         style={styles.macroPickRow}
-                        onPress={() => { addAvoidToken(avoidInput.trim()); setAvoidInput(''); }}
+                        onPress={() => { if (addAvoidToken(avoidInput.trim())) setAvoidInput(''); }}
                         activeOpacity={0.7}
                       >
                         <Ionicons name="add-circle" size={24} color={COLORS.green} />
@@ -1442,25 +1492,26 @@ export default function BuildPlanScreen() {
   // ── Macro picker helpers ────────────────────────────────────────────────
   // A food can be a preference or on the avoid list, never both — the same
   // rule the loves/avoid questions already enforce between themselves.
-  function addMacroToken(group: MacroGroup, raw: string) {
+  function addMacroToken(group: MacroGroup, raw: string): boolean {
     const v = raw.trim();
-    if (!v) return;
+    if (!v) return false;
     if (prefs.avoid.some(a => a.toLowerCase() === v.toLowerCase())) {
       Alert.alert(
         `${v} is in foods to avoid`,
         'A food can only be a preference or avoided. Pick one.',
       );
-      return;
+      return false;
     }
     if (!prefs[group].some(x => x.toLowerCase() === v.toLowerCase()) && prefs[group].length >= PLAN_PICK_LIMITS[group]) {
       showToast(`You can pick up to ${PLAN_PICK_LIMITS[group]} ${group}.`);
-      return;
+      return false;
     }
     setPrefs(p =>
       p[group].some(x => x.toLowerCase() === v.toLowerCase())
         ? p
         : { ...p, [group]: [...p[group], v] },
     );
+    return true;
   }
 
   function removeMacroToken(group: MacroGroup, token: string) {
@@ -1498,7 +1549,7 @@ export default function BuildPlanScreen() {
   }
 
   // The one AI call that powers the whole flow: one shortlist per active meal
-  // type, one scan. Called from the guide CTA and after a Regenerate.
+  // type, one scan. Called from the guide CTA.
   async function runShortlistGeneration() {
     if (shortlistLoading || activeCategories.length === 0) return;
     setShortlistLoading(true);
@@ -1566,27 +1617,6 @@ export default function BuildPlanScreen() {
         [category]: exists ? list.filter(r => r.id !== card.id) : [...list, card],
       };
     });
-  }
-
-  // Regenerate: back to the required picker so the user can change the inputs
-  // that matter, then re-run the full call from the review page. Resetting
-  // costs nothing — the scan is only spent when they tap Build again.
-  function handleRegenerate() {
-    Alert.alert(
-      'Start over?',
-      'This clears your current options and picks so you can change what you asked for.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Start over',
-          onPress: () => {
-            setShortlistByType({});
-            setSelectedByType({});
-            setStep({ kind: 'macroPicker', group: 'proteins' });
-          },
-        },
-      ],
-    );
   }
 
   // Lands the user on the current last page after meals are added, then
@@ -1718,6 +1748,39 @@ export default function BuildPlanScreen() {
     }
   }
 
+  // Describe on a shortlist screen: one meal from the user's words, added to
+  // that meal type's options already picked (they asked for it).
+  async function addDescribeToShortlist(category: RecipeCategory, rawText: string) {
+    const text = rawText.trim();
+    if (!text || describeLoading) return;
+    setDescribeLoading(true);
+    try {
+      const concepts = await generateMealSuggestions({
+        mealType: category,
+        count: 1,
+        cuisines: prefs.cuisines,
+        cookTime: prefs.cookTime,
+        loves: prefs.loves,
+        avoid: prefs.avoid,
+        description: text,
+      });
+      const card = concepts[0] ? conceptToTemplate(concepts[0], category) : null;
+      if (!card || applyDietaryFilter([card], profile).length === 0) {
+        showToast("Couldn't generate a meal that fits your profile — try describing it differently.");
+        return;
+      }
+      setShortlistByType(prev => ({ ...prev, [category]: [...(prev[category] ?? []), card] }));
+      setSelectedByType(prev => ({ ...prev, [category]: [...(prev[category] ?? []), card] }));
+      showToast('Added and picked');
+      setDescribeModalVisible(false);
+      setDescribeModalText('');
+    } catch (e) {
+      handleAIError(e, () => void addDescribeToShortlist(category, rawText));
+    } finally {
+      setDescribeLoading(false);
+    }
+  }
+
   // Resolve a recipe id to a card for calorie maths. Catalogue first, then any
   // card generated this session, then an explicit extra (a just-swapped card
   // whose state update hasn't landed yet).
@@ -1837,14 +1900,16 @@ export default function BuildPlanScreen() {
       // hydrateActivePlanIfNeeded — instead of falling back to fabricated
       // values. Catalogue picks already resolve by id, so only custom cards
       // need saving. Keyed on recipeId = card.id so re-saves dedupe.
-      const savedCustomIds = new Set<string>();
+      // Each plan meal is then linked to its saved recipe's own id: by card id
+      // it fell back to name lookups after a reinstall, which could pick a
+      // different recipe with the same name (Nov 24 audit).
+      const savedIdByCard = new Map<string, string>();
       previewDays.forEach(day =>
         day.forEach(meal => {
-          if (!meal.recipeId.startsWith('custom-') || savedCustomIds.has(meal.recipeId)) return;
+          if (!meal.recipeId.startsWith('custom-') || savedIdByCard.has(meal.recipeId)) return;
           const card = sessionCardById.get(meal.recipeId);
           if (!card) return;
-          savedCustomIds.add(meal.recipeId);
-          ensureRecipeSaved({
+          const saved = ensureRecipeSaved({
             recipeId: card.id,
             name: card.name,
             category: card.category,
@@ -1858,6 +1923,13 @@ export default function BuildPlanScreen() {
             difficulty: card.difficulty,
             source: 'ai',
           });
+          savedIdByCard.set(meal.recipeId, saved.id);
+        }),
+      );
+      const linkedDays = previewDays.map(day =>
+        day.map(m => {
+          const savedId = savedIdByCard.get(m.recipeId);
+          return savedId ? { ...m, recipeId: savedId } : m;
         }),
       );
 
@@ -1865,7 +1937,11 @@ export default function BuildPlanScreen() {
       // Named here, after "Save current plan" may have added one: a second
       // build on the same day becomes "My Plan — Nov 6 (2)".
       const state = useMealStore.getState();
-      const named = { ...plan, name: uniquePlanName(plan.name, [...state.savedPlans, ...state.plans]) };
+      const named = {
+        ...plan,
+        days: linkedDays,
+        name: uniquePlanName(plan.name, [...state.savedPlans, ...state.plans]),
+      };
       useMealStore.setState(s => ({ savedPlans: [named, ...s.savedPlans] }));
       activatePlan(named);
       showToast(`${named.name} activated`);
@@ -2026,65 +2102,15 @@ export default function BuildPlanScreen() {
 
         {/* Describe popup overlay. Lives inside the pick render so we have
             `slot` in scope and can route the generated page to the right slot. */}
-        <Modal
-          transparent
-          animationType="fade"
+        <DescribeSheet
           visible={describeModalVisible}
-          onRequestClose={() => setDescribeModalVisible(false)}
-        >
-          <KeyboardAvoidingView
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-            style={{ flex: 1 }}
-          >
-            <Pressable style={styles.describeOverlay} onPress={() => setDescribeModalVisible(false)}>
-              <Pressable style={styles.describeCard} onPress={e => e.stopPropagation?.()}>
-                <View style={styles.describeCardHeader}>
-                  <Text style={styles.describeCardTitle}>Describe what you want</Text>
-                  <TouchableOpacity
-                    onPress={() => setDescribeModalVisible(false)}
-                    hitSlop={10}
-                    style={styles.describeCloseBtn}
-                  >
-                    <Ionicons name="close" size={16} color={COLORS.text} />
-                  </TouchableOpacity>
-                </View>
-                <Text style={styles.describeCardHint}>
-                  Tell us what you&apos;re craving for {slot.name.toLowerCase()} and we&apos;ll generate options.
-                </Text>
-                <TextInput
-                  style={styles.describeTextArea}
-                  value={describeModalText}
-                  onChangeText={setDescribeModalText}
-                  placeholder="e.g. high-protein breakfast under 500 cal"
-                  placeholderTextColor={COLORS.textMuted}
-                  multiline
-                  autoFocus
-                />
-                <TouchableOpacity
-                  style={[
-                    styles.describeGenBtn,
-                    (!describeModalText.trim() || describeLoading) && styles.disabledBtn,
-                  ]}
-                  disabled={!describeModalText.trim() || describeLoading}
-                  onPress={() => {
-                    const text = describeModalText.trim();
-                    if (!text) return;
-                    addDescribePage(slot, text);
-                  }}
-                >
-                  <Text style={styles.describeGenBtnText}>
-                    {describeLoading ? 'Generating…' : 'Generate'}
-                  </Text>
-                </TouchableOpacity>
-              </Pressable>
-            </Pressable>
-          </KeyboardAvoidingView>
-          <AIConsentHost active={describeModalVisible} />
-          {/* A Describe that hits the free-scan limit shows the paywall (and
-              toasts) here, on top — otherwise they'd open behind this popup. */}
-          <PaywallModalHost active={describeModalVisible} />
-          <ToastHost />
-        </Modal>
+          text={describeModalText}
+          onChangeText={setDescribeModalText}
+          loading={describeLoading}
+          mealLabel={slot.name.toLowerCase()}
+          onGenerate={text => void addDescribePage(slot, text)}
+          onClose={() => setDescribeModalVisible(false)}
+        />
 
         {/* Suggest more popup: fires once per slot at SUGGEST_POPUP_AT clicks.
             Two CTAs — open Describe or keep suggesting. Suggest more keeps
@@ -2162,13 +2188,11 @@ export default function BuildPlanScreen() {
       (sum, c) => sum + (selectedByType[c] ?? []).length,
       0,
     );
-    const footerLabel = !isLast
-      ? (picked.length > 0 ? 'Next' : `Skip ${lower}`)
-      : totalPicked === 0
-        ? 'Pick at least one meal'
-        : picked.length > 0 ? 'Build my week' : `Skip ${lower} and build my week`;
-    const footerDisabled = isLast && totalPicked === 0;
-    const onFooter = () => {
+    // Top-right action (Nov 23, Alex: one place to move on, like a standard
+    // iOS flow; back already undoes, so no "Redo").
+    const nextLabel = !isLast ? (picked.length > 0 ? 'Next' : 'Skip') : 'Build';
+    const nextDisabled = isLast && totalPicked === 0;
+    const onNext = () => {
       if (!isLast) setStep({ kind: 'shortlist', typeIdx: idx + 1 });
       else handleBuildWeek();
     };
@@ -2180,13 +2204,23 @@ export default function BuildPlanScreen() {
           subtitle={`${idx + 1} of ${typeCount} · ${picked.length} picked`}
           onBack={() => setStep(idx === 0 ? { kind: 'guide' } : { kind: 'shortlist', typeIdx: idx - 1 })}
           rightAction={
-            <TouchableOpacity onPress={handleRegenerate} hitSlop={10}>
-              <Text style={styles.headerRightMutedText}>Redo</Text>
+            <TouchableOpacity
+              onPress={onNext}
+              disabled={nextDisabled}
+              hitSlop={10}
+              accessibilityRole="button"
+              accessibilityLabel={isLast ? 'Build my week' : nextLabel}
+            >
+              <Text style={nextDisabled ? styles.headerRightMutedText : styles.headerRightText}>{nextLabel}</Text>
             </TouchableOpacity>
           }
         />
 
-        <ScrollView key={category} contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
+        <ScrollView
+          key={category}
+          contentContainerStyle={[styles.body, { paddingBottom: footerBottomPad }]}
+          showsVerticalScrollIndicator={false}
+        >
           <Text style={styles.onbHint}>
             Choose the ones you&apos;d actually eat. Pick one and it repeats daily; pick
             several and we&apos;ll rotate them through the week.
@@ -2206,28 +2240,37 @@ export default function BuildPlanScreen() {
             ))
           )}
 
-          <TouchableOpacity
-            style={[styles.shortlistGenMore, busy && styles.disabledBtn]}
-            onPress={() => generateMoreForType(category)}
-            disabled={busy}
-            activeOpacity={0.85}
-          >
-            <Text style={styles.shortlistGenMoreText}>
-              {busy ? 'Finding more…' : `✨ More ${lower} options`}
-            </Text>
-          </TouchableOpacity>
+          <View style={styles.shortlistActions}>
+            <TouchableOpacity
+              style={[styles.shortlistGenMore, styles.shortlistActionBtn, busy && styles.disabledBtn]}
+              onPress={() => generateMoreForType(category)}
+              disabled={busy}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.shortlistGenMoreText}>{busy ? 'Finding more…' : '✨ More options'}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.shortlistGenMore, styles.shortlistActionBtn]}
+              onPress={() => {
+                setDescribeModalText('');
+                setDescribeModalVisible(true);
+              }}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.shortlistGenMoreText}>✏️ Describe</Text>
+            </TouchableOpacity>
+          </View>
         </ScrollView>
 
-        <View style={[styles.footer, { paddingBottom: footerBottomPad }]}>
-          <TouchableOpacity
-            style={[styles.primaryBtn, styles.primaryBtnFull, footerDisabled && styles.disabledBtn]}
-            disabled={footerDisabled}
-            onPress={onFooter}
-            activeOpacity={0.85}
-          >
-            <Text style={styles.primaryBtnText}>{footerLabel}</Text>
-          </TouchableOpacity>
-        </View>
+        <DescribeSheet
+          visible={describeModalVisible}
+          text={describeModalText}
+          onChangeText={setDescribeModalText}
+          loading={describeLoading}
+          mealLabel={lower}
+          onGenerate={text => void addDescribeToShortlist(category, text)}
+          onClose={() => setDescribeModalVisible(false)}
+        />
       </Screen>
     );
   }
@@ -2514,6 +2557,71 @@ function Header({
   );
 }
 
+// The "Describe what you want" pop-up, shared by the Swap screen and the
+// shortlist screens. Lives in an RN Modal, so it carries its own AI-consent,
+// paywall and toast hosts (they'd otherwise open behind it).
+function DescribeSheet({
+  visible,
+  text,
+  onChangeText,
+  loading,
+  mealLabel,
+  onGenerate,
+  onClose,
+}: {
+  visible: boolean;
+  text: string;
+  onChangeText: (t: string) => void;
+  loading: boolean;
+  mealLabel: string;
+  onGenerate: (text: string) => void;
+  onClose: () => void;
+}) {
+  return (
+    <Modal transparent animationType="fade" visible={visible} onRequestClose={onClose}>
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
+        <Pressable style={styles.describeOverlay} onPress={onClose}>
+          <Pressable style={styles.describeCard} onPress={e => e.stopPropagation?.()}>
+            <View style={styles.describeCardHeader}>
+              <Text style={styles.describeCardTitle}>Describe what you want</Text>
+              <TouchableOpacity onPress={onClose} hitSlop={10} style={styles.describeCloseBtn}>
+                <Ionicons name="close" size={16} color={COLORS.text} />
+              </TouchableOpacity>
+            </View>
+            <Text style={styles.describeCardHint}>
+              Tell us what you&apos;re craving for {mealLabel} and we&apos;ll generate options.
+            </Text>
+            <TextInput
+              style={styles.describeTextArea}
+              value={text}
+              onChangeText={onChangeText}
+              placeholder="e.g. high-protein breakfast under 500 cal"
+              placeholderTextColor={COLORS.textMuted}
+              multiline
+              autoFocus
+            />
+            <TouchableOpacity
+              style={[styles.describeGenBtn, (!text.trim() || loading) && styles.disabledBtn]}
+              disabled={!text.trim() || loading}
+              onPress={() => {
+                const t = text.trim();
+                if (t) onGenerate(t);
+              }}
+            >
+              <Text style={styles.describeGenBtnText}>{loading ? 'Generating…' : 'Generate'}</Text>
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </KeyboardAvoidingView>
+      <AIConsentHost active={visible} />
+      {/* A Describe that hits the free-scan limit shows the paywall (and
+          toasts) here, on top — otherwise they'd open behind this popup. */}
+      <PaywallModalHost active={visible} />
+      <ToastHost />
+    </Modal>
+  );
+}
+
 function PickCard({
   recipe,
   selected,
@@ -2539,7 +2647,11 @@ function PickCard({
         selected ? `${recipe.name}, selected` : `${recipe.name}`
       }
     >
-      <Text style={styles.pickName} numberOfLines={1}>{recipe.name}</Text>
+      {/* Two lines, kept clear of the corner "Selected" badge (it covered
+          the end of long names). */}
+      <Text style={[styles.pickName, showCheck && styles.pickNameBadgeRoom]} numberOfLines={2}>
+        {recipe.name}
+      </Text>
       <Text style={styles.pickMeta}>{recipe.calories} cal · {recipe.cookTimeMin}m</Text>
       <View style={styles.macroRow}>
         <Text style={styles.macroPill}>P {recipe.macros.protein}g</Text>
@@ -2684,6 +2796,7 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.green + '1F',
   },
   pickName: { color: COLORS.text, fontSize: 15, fontWeight: '700', flex: 1, marginRight: 8 },
+  pickNameBadgeRoom: { marginRight: 92 },
   pickMeta: { color: COLORS.textSecondary, fontSize: 12, marginTop: 4 },
   macroRow: { flexDirection: 'row', gap: 6, marginTop: 8 },
   macroPill: {
@@ -3114,6 +3227,8 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   macroFallbackLabel: { color: COLORS.textMuted, fontSize: 12, fontWeight: '600' },
+  // Sits just under the avoid search box (onbBody's gap is 16).
+  avoidAddHint: { color: COLORS.textSecondary, fontSize: 13, lineHeight: 18, marginHorizontal: 16, marginTop: -12 },
 
   // Preview header cards
   planNameCard: {
@@ -3246,6 +3361,8 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   shortlistGenMoreText: { color: COLORS.green, fontSize: 13, fontWeight: '700' },
+  shortlistActions: { flexDirection: 'row', gap: 10, marginTop: 4 },
+  shortlistActionBtn: { flex: 1, marginTop: 0 },
 
   // Shortlist generation loading screen
   loadingWrap: {

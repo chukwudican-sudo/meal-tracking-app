@@ -33,8 +33,9 @@ type Flag =
 const RULES: Record<Flag, { words: string[]; except?: string[] }> = {
   meat: {
     words: ['chicken', 'turkey', 'beef', 'pork', 'bacon', 'ham', 'lamb', 'sausage', 'steak', 'prosciutto', 'salami',
-      'duck', 'veal', 'pepperoni', 'chorizo', 'mince', 'meatball', 'jerky', 'stock', 'broth', 'gelatin', 'lard'],
-    except: ['vegetable stock', 'vegetable broth', 'veggie stock', 'veggie broth', 'mushroom broth'],
+      'duck', 'veal', 'pepperoni', 'chorizo', '=mince', 'meatball', 'jerky', 'stock', 'broth', 'gelatin', 'lard'],
+    except: ['vegetable stock', 'vegetable broth', 'veggie stock', 'veggie broth', 'mushroom broth',
+      'cauliflower steak', 'mushroom steak', 'tofu steak'],
   },
   red_meat: {
     words: ['beef', 'pork', 'bacon', 'ham', 'lamb', 'sausage', 'steak', 'prosciutto', 'salami', 'veal', 'pepperoni',
@@ -48,6 +49,7 @@ const RULES: Record<Flag, { words: string[]; except?: string[] }> = {
   shellfish: {
     words: ['shrimp', 'prawn', 'crab', 'lobster', 'scallop', 'mussel', 'clam', 'oyster', 'crawfish', 'crayfish',
       'squid', 'calamari', 'octopus', 'curry paste'],
+    except: ['oyster mushroom'],
   },
   dairy: {
     words: ['milk', 'cheese', 'cheddar', 'parmesan', 'mozzarella', 'feta', 'halloumi', 'ricotta', 'paneer', 'yogurt',
@@ -60,12 +62,13 @@ const RULES: Record<Flag, { words: string[]; except?: string[] }> = {
   },
   egg: { words: ['egg', 'mayonnaise', 'mayo', 'aioli', 'meringue', 'caesar'], except: ['eggplant'] },
   gluten: {
-    words: ['bread', 'toast', 'wrap', 'tortilla', 'pasta', 'spaghetti', 'noodle', 'wheat', 'flour', 'couscous',
+    words: ['bread', '=toast', '=toasts', 'wrap', 'tortilla', 'pasta', 'spaghetti', 'noodle', 'wheat', 'flour', 'couscous',
       'barley', 'oat', 'soy sauce', 'bagel', 'pita', 'granola', 'crouton', 'cracker', '=bun', '=buns', 'ciabatta',
       'pizza', 'teriyaki', 'panko', 'udon', 'ramen', 'spelt', 'seitan', 'bulgur', 'worcestershire', 'rye', 'muffin',
       'biscuit', 'cereal', 'beer', 'malt', 'pancake', 'sourdough', 'naan', 'brioche', 'gnocchi', 'semolina', 'orzo',
       'farro', 'dumpling', 'pretzel', '*bread'],
-    except: ['corn tortilla'],
+    except: ['corn tortilla', 'almond flour', 'coconut flour', 'rice flour', 'chickpea flour', 'cassava flour',
+      'corn flour', 'cornflour', 'rice noodle', 'glass noodle', 'shirataki noodle'],
   },
   nuts: {
     words: ['almond', 'walnut', 'cashew', 'pecan', 'peanut', 'pistachio', 'hazelnut', 'macadamia', 'nut', 'granola',
@@ -88,10 +91,22 @@ const COMPILED = (Object.keys(RULES) as Flag[]).map(flag => ({
   except: RULES[flag].except ?? [],
 }));
 
+// A "free-from" word cancels the flag it names for that ingredient: AI recipes
+// for a gluten-free or vegan user say "Gluten-free pasta", "Vegan cheese",
+// "Dairy-free yogurt" — blocking those dropped good meals (Nov 24 review).
+const FREE_FROM: Partial<Record<Flag, string[]>> = {
+  gluten: ['gluten-free', 'gluten free'],
+  dairy: ['dairy-free', 'dairy free', 'non-dairy', 'vegan', 'plant-based', 'plant based'],
+  egg: ['egg-free', 'egg free', 'eggless', 'vegan'],
+  meat: ['vegan', 'plant-based', 'plant based', 'meatless', 'meat-free'],
+  nuts: ['nut-free', 'nut free'],
+};
+
 function flagsFor(ingredientName: string): Set<Flag> {
   const base = ingredientName.toLowerCase();
   const flags = new Set<Flag>();
   for (const rule of COMPILED) {
+    if (FREE_FROM[rule.flag]?.some(phrase => base.includes(phrase))) continue;
     let name = base;
     for (const phrase of rule.except) name = name.split(phrase).join(' ');
     if (rule.words.some(re => re.test(name))) flags.add(rule.flag);
@@ -144,6 +159,20 @@ export function avoidFromProfile(profile: Pick<UserProfile, 'dietaryRestrictions
     if (s.includes('soy')) out.add('no_soy');
   }
   return Array.from(out);
+}
+
+// Whether a recipe is safe for the profile's diet and allergies, with the
+// same ingredient matcher Find Your Plan uses (word boundaries + exceptions:
+// eggplant isn't egg, peanut butter isn't dairy, nutmeg isn't a nut). Build
+// My Plan's swap list used a plain "does the text contain the label" check
+// before, which never matched labels like "Allergic to nuts" (Nov 24 audit).
+export function recipeFitsProfile(
+  recipe: { ingredients: { name: string }[] },
+  profile: Pick<UserProfile, 'dietaryRestrictions' | 'allergies'>,
+): boolean {
+  const blocked = new Set(avoidFromProfile(profile).flatMap(a => AVOID_BLOCKS[a]));
+  if (blocked.size === 0) return true;
+  return !recipe.ingredients.some(i => Array.from(flagsFor(i.name)).some(f => blocked.has(f)));
 }
 
 export function defaultAnswers(profile: UserProfile): FindPlanAnswers {

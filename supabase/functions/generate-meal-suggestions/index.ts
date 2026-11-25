@@ -23,6 +23,7 @@ import { aiConsentGiven, consentRequiredResponse } from '../_shared/aiConsent.ts
 import { createAdminClient, getAuthedUser } from '../_shared/auth.ts';
 import { consumeFreeScan, resolveEntitlement } from '../_shared/entitlement.ts';
 import { isRateLimited, logAiUsage } from '../_shared/rateLimit.ts';
+import { recordAiEvent } from '../_shared/aiEvents.ts';
 import { callGeminiJSON, GeminiTimeoutError } from '../_shared/gemini.ts';
 import {
   buildHardConstraints,
@@ -55,6 +56,8 @@ const MAX_DESCRIPTION_LEN = 200;
 // 10-recipe payload, so a slightly shorter Gemini ceiling is plenty.
 const GEMINI_TIMEOUT_MS = 20000;
 const FUNCTION_NAME = 'generate-meal-suggestions';
+// Bump on any prompt/schema change so ai_events can compare versions.
+const PROMPT_VERSION = 'suggestions-2026-11-24';
 const LOG_PREFIX = `[${FUNCTION_NAME}]`;
 
 // Structured-output schema. Built per-request so `category` is locked to the
@@ -143,7 +146,8 @@ function buildPrompt(
     `foods. Cook time preference carries almost no weight — only use it as ` +
     `a barely-perceptible tie-breaker between otherwise equally-suitable ` +
     `options; it should never visibly steer which meals get selected. Each ` +
-    `suggestion needs a short name, a calorie estimate for one serving, ` +
+    `suggestion needs a short name (2–5 words) unless the user described a ` +
+    `specific dish, a calorie estimate for one serving, ` +
     `cookTimeMin, difficulty (Easy/Medium/Hard), macros (protein/carbs/fats in ` +
     `grams), an ingredients list with quantity and unit, and clear numbered ` +
     `cooking steps. Vary the suggestions so they are meaningfully different ` +
@@ -164,7 +168,13 @@ function buildPrompt(
         `style cues above (cuisines, loved foods) only apply if they don't ` +
         `conflict with the description; drop them entirely if they would. The ` +
         `hard constraints above (allergies, avoid list, dietary preferences) ` +
-        `still always apply, no matter what the description says.`
+        `still always apply, no matter what the description says. If the ` +
+        `description names a specific dish, use that as the meal's name, ` +
+        `keeping their words (up to about 80 characters) — unless their words ` +
+        `name something the hard constraints rule out, in which case name the ` +
+        `adjusted dish you actually made (e.g. "Peanut-Free Satay Chicken"). ` +
+        `If it only gives requirements (e.g. "high-protein breakfast under ` +
+        `500 cal"), give the meal its own short dish name instead.`
       : '',
     `Generate ${count} ${mealType} suggestion${count === 1 ? '' : 's'}.`,
   ].filter(Boolean);
@@ -270,6 +280,9 @@ Deno.serve(async (req: Request) => {
 
   const { system, userText } = buildPrompt(mealType, count, prefs, profile);
 
+  const startedAt = Date.now();
+  const event = { userId: user.id, functionName: FUNCTION_NAME, promptVersion: PROMPT_VERSION, startedAt, input: { mealType, count, ...prefs } };
+
   let result: unknown;
   try {
     result = await callGeminiJSON({
@@ -283,6 +296,7 @@ Deno.serve(async (req: Request) => {
     });
   } catch (e) {
     console.error(`${LOG_PREFIX} Gemini call failed:`, e);
+    recordAiEvent(admin, { ...event, success: false, errorCode: e instanceof GeminiTimeoutError ? 'timeout' : 'ai_failed' });
     const message =
       e instanceof GeminiTimeoutError
         ? 'The AI took too long to suggest meals. Please try again.'
@@ -296,6 +310,7 @@ Deno.serve(async (req: Request) => {
   // it. consumeFreeScan stays awaited: it's the atomic guard enforcing the
   // free-scan limit and must register before we respond.
   void logAiUsage(admin, user.id, FUNCTION_NAME);
+  recordAiEvent(admin, { ...event, success: true, output: result });
   if (!entitlement.isSubscriber) {
     await consumeFreeScan(admin, user.id);
   }

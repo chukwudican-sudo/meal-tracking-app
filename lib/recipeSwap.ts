@@ -38,7 +38,9 @@ export function applyRecipeSwap(pending: PendingSwap, recipe: SavedRecipe): () =
 
   const draft = deps.customizeDraft;
   if (!draft) return undo;
-  const planRecipeId = recipe.recipeId ?? recipe.id;
+  // A built-in recipe is stored in plans by its catalog id; anything else by its
+  // saved id (an AI card's recipeId is a local `custom-…` key, not a recipe row).
+  const planRecipeId = recipe.source === 'premade' ? (recipe.recipeId ?? recipe.id) : recipe.id;
   // The slot keeps its calories (same rule as a day's swap, swapPortion): the
   // new recipe's portion is sized to what the replaced meal gave the plan.
   // Both sides come from the resolver the plan's numbers and meals use — not

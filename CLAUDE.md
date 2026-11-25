@@ -236,9 +236,10 @@ These come straight from months of his feedback. Violating them is the #1 thing 
   users) must check `supabase.auth.getSession()` first and return empty (done in `useInboxStore`,
   `lib/macroFoodOptions`). Every new function: `revoke all … from public, anon, authenticated`, then grant `execute`
   to the roles that need it (server-only RPCs: `service_role` only). Otherwise the app gets "permission denied".
-- **AI quality log (`ai_events`):** six functions record every outcome (input, before/after, prompt version,
-  latency, error) — scan-meal, fix-meal, fix-recipe, generate-recipe-concept, generate-recipe-steps and
-  estimate-nutrition (Nov 15); the other five AI functions don't — via `_shared/aiEvents.ts#recordAiEvent` — private table (RLS, no policies), no photos, rows cascade
+- **AI quality log (`ai_events`):** eight functions record every outcome (input, before/after, prompt version,
+  latency, error) — scan-meal, fix-meal, fix-recipe, generate-recipe-concept, generate-recipe-steps,
+  estimate-nutrition (Nov 15), generate-plan-shortlist and generate-meal-suggestions (Build My Plan shortlist,
+  More options, Describe — Nov 25); the other three AI functions don't — via `_shared/aiEvents.ts#recordAiEvent` — private table (RLS, no policies), no photos, rows cascade
   on account delete and are **deleted after 90 days** by the nightly pg_cron job `ai-data-retention` (migration
   `20261115010000`, which also prunes `ai_usage_log` after 30 days). **Bump a function's `PROMPT_VERSION` on any prompt/schema change.** To analyse a test, read it
   with the secret key (`SUPABASE_SECRET_KEY`) from `.env` (read-only). Other AI functions can adopt it one at a time.

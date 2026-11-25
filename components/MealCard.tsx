@@ -38,7 +38,7 @@ export function MealCard({ entry, date, now, onToggle, onOpenDetail }: MealCardP
 
         {/* Name + time + badges */}
         <View style={styles.nameBlock}>
-          <Text style={[styles.mealName, isCompleted && styles.mealNameDone]} numberOfLines={1}>
+          <Text style={[styles.mealName, isCompleted && styles.mealNameDone]} numberOfLines={2}>
             {entry.name}
           </Text>
           <View style={styles.timeRow}>

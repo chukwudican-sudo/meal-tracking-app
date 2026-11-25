@@ -153,9 +153,12 @@ empty removed slots). Back = Cancel ("All unsaved changes will be lost. Are you 
    what you typed as a custom entry, e.g. "shellfish"; **persisted** in `planAvoidFoods` and pre-filled next time; hard
    constraint like allergies).
 4. **AI shortlist** (`generate-plan-shortlist`, one call, 1 scan, ~5 s, no cooking steps — written when a kept meal's
-   recipe is first opened): **one screen per active meal type, in day order, with Next** (Nov 23, Alex; "Skip
-   breakfast" when nothing is picked, "Build my week" on the last) — 4 options per main, 2 snacks,
-   pick favourites; **Generate More** per type (≈3 more, 1 scan); **Regenerate** returns to the picker (1 scan).
+   recipe is first opened): **one screen per active meal type, in day order** (Nov 23, Alex). Top-right **Next**
+   ("Skip" when nothing is picked, "Build" on the last screen; no "Redo" — back undoes). Under the options one row:
+   **✨ More options** (≈3 more, 1 scan) and **✏️ Describe** (one meal from your words via
+   `generate-meal-suggestions`, 1 scan, added already picked, named in your words). The AI gets each meal's share of
+   the daily target (breakfast 20–30%, lunch/dinner 25–35%, each snack 5–15%) and keeps invented names to 2–5 words;
+   names wrap to 2 lines (pick cards, Home). 4 options per main, 2 snacks.
 5. **Build my week:** rotate the user's own picks across 7 days (`day % picks.length`) — no AI-generated variations.
 6. **Preview:** looks exactly like the plan detail pages; quick **Swap** (catalog browse free, Describe = 1 scan via
    `generate-meal-suggestions`); non-blocking toast if a swap moves a day ±15% off the calorie target.

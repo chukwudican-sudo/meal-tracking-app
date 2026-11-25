@@ -30,6 +30,7 @@ import { aiConsentGiven, consentRequiredResponse } from '../_shared/aiConsent.ts
 import { createAdminClient, getAuthedUser } from '../_shared/auth.ts';
 import { consumeFreeScan, resolveEntitlement } from '../_shared/entitlement.ts';
 import { isRateLimited, logAiUsage } from '../_shared/rateLimit.ts';
+import { recordAiEvent } from '../_shared/aiEvents.ts';
 import { callGeminiJSON, GeminiTimeoutError } from '../_shared/gemini.ts';
 import {
   buildHardConstraints,
@@ -84,6 +85,8 @@ const OVERALL_BUDGET_MS = 25000;
 const PART_RETRY_DELAY_MS = 800;
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 const FUNCTION_NAME = 'generate-plan-shortlist';
+// Bump on any prompt/schema change so ai_events can compare versions.
+const PROMPT_VERSION = 'shortlist-2026-11-24';
 const LOG_PREFIX = `[${FUNCTION_NAME}]`;
 
 interface RequestPrefs {
@@ -206,6 +209,23 @@ function buildMacroPrefs(prefs: RequestPrefs, exp: MacroExpansions): string {
   return parts.join(' ');
 }
 
+// Each meal's usual share of the day (Nov 23, Alex): the daily target alone
+// left the model to guess how big a lunch should be. Snacks are per snack.
+const MEAL_SHARE: Record<MealType, [number, number]> = {
+  Breakfast: [0.2, 0.3],
+  Lunch: [0.25, 0.35],
+  Dinner: [0.25, 0.35],
+  Snacks: [0.05, 0.15],
+};
+
+function buildCalorieRanges(types: MealType[], dailyTarget: number | null): string {
+  if (!dailyTarget || dailyTarget <= 0) return '';
+  const r10 = (n: number) => Math.round(n / 10) * 10;
+  return types
+    .map(t => `${t} ${r10(dailyTarget * MEAL_SHARE[t][0])}–${r10(dailyTarget * MEAL_SHARE[t][1])} kcal`)
+    .join(', ');
+}
+
 function buildPrompt(
   types: MealType[],
   counts: Record<MealType, number>,
@@ -238,13 +258,15 @@ function buildPrompt(
     `flavour cues for variety only, not requirements. Cook time preference ` +
     `carries almost no weight — only use it as a barely-perceptible tie-breaker ` +
     `between otherwise equally-suitable options; it should never visibly steer ` +
-    `which meals get selected. Each suggestion needs a short name, a ` +
+    `which meals get selected. Each suggestion needs a short name (2–5 words, ` +
+    `about 40 characters at most), a ` +
     `calorie estimate for one serving, cookTimeMin, difficulty (Easy/Medium/` +
     `Hard), macros (protein/carbs/fats in grams), and an ingredients list ` +
     `with quantity and unit.` +
     (hasExpansions
       ? ` IMPORTANT: when a family expansion is provided (for proteins or carbs), ` +
-        `always use the specific variety name in the meal's name — e.g. ` +
+        `always use the specific variety name in the meal's name, still keeping ` +
+        `the name short — e.g. ` +
         `"Chicken Thigh Stir Fry" not "Chicken Stir Fry", "Russet Potato Soup" ` +
         `not "Potato Soup", "Ground Beef Tacos" not "Beef Tacos". ` +
         `The variety should be visible to the user in the meal name.`
@@ -252,6 +274,7 @@ function buildPrompt(
     ` Respond with JSON only, matching the provided schema.`;
 
   const perTypeRequest = types.map(t => `${t}: ${counts[t]}`).join(', ');
+  const calorieRanges = buildCalorieRanges(types, p.daily_calorie_target);
 
   const parts = [
     userContext ? `User context: ${userContext}` : '',
@@ -263,6 +286,10 @@ function buildPrompt(
         `should lean into the style cues above; the rest must be genuinely ` +
         `varied, general, traditional dishes across different culinary styles — ` +
         `not thematically repetitive.`
+      : '',
+    calorieRanges
+      ? `Size each option for one serving within its meal's share of the daily ` +
+        `target: ${calorieRanges}.`
       : '',
     `Generate this many options per meal type: ${perTypeRequest}.`,
   ].filter(Boolean);
@@ -365,6 +392,7 @@ Deno.serve(async (req: Request) => {
 
   const deadline = Date.now() + OVERALL_BUDGET_MS;
   const startedAt = Date.now();
+  const event = { userId: user.id, functionName: FUNCTION_NAME, promptVersion: PROMPT_VERSION, startedAt, input: { mealTypes, counts, ...prefs } };
 
   // One meal type's options: up to 2 tries, each capped by what's left of the
   // overall budget.
@@ -401,7 +429,9 @@ Deno.serve(async (req: Request) => {
   const failed = parts.filter((r): r is PromiseRejectedResult => r.status === 'rejected');
   if (failed.length > 0) {
     console.error(`${LOG_PREFIX} ${failed.length} of ${mealTypes.length} meal types failed after retries`);
-    const message = failed.some(f => f.reason instanceof GeminiTimeoutError)
+    const timedOut = failed.some(f => f.reason instanceof GeminiTimeoutError);
+    recordAiEvent(admin, { ...event, success: false, errorCode: timedOut ? 'timeout' : 'ai_failed' });
+    const message = timedOut
       ? 'The AI took too long to build your shortlist. Please try again.'
       : 'Could not generate your meal shortlist. Please try again.';
     return errorResponse('ai_failed', message, 502);
@@ -419,6 +449,7 @@ Deno.serve(async (req: Request) => {
   // it. consumeFreeScan stays awaited: it's the atomic guard enforcing the
   // free-scan limit and must register before we respond.
   void logAiUsage(admin, user.id, FUNCTION_NAME);
+  recordAiEvent(admin, { ...event, success: true, output: result });
   if (!entitlement.isSubscriber) {
     await consumeFreeScan(admin, user.id);
   }
