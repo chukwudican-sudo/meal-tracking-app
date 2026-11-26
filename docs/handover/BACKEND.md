@@ -237,9 +237,15 @@ Changing `_shared/*` → redeploy every importer. Changing `constants/entitlemen
   (App Store compliance — a competitor was removed for the reverse). Monthly plain. Button "Get Macrotri Pro",
   Restore Purchases (Apple requirement), auto-renew fine print, Terms/Privacy links (placeholders), X to close —
   **never a hard paywall**. On success: refresh entitlement → close → run `pendingResume` (the original action continues).
-- **Server status via webhook:** INITIAL_PURCHASE, RENEWAL, UNCANCELLATION, PRODUCT_CHANGE, NON_RENEWING_PURCHASE,
-  TRANSFER → `active` (+ provider, expiry). EXPIRATION → `expired`. CANCELLATION / BILLING_ISSUE → no change
-  (access lasts until expiry). Always 200, idempotent. Accepted race: briefly after purchase the server may still say `free`.
+- **Server status via webhook:** INITIAL_PURCHASE, RENEWAL, UNCANCELLATION, PRODUCT_CHANGE, SUBSCRIPTION_EXTENDED,
+  NON_RENEWING_PURCHASE → `active`/`trial` (+ provider, expiry). EXPIRATION → `expired`. CANCELLATION / BILLING_ISSUE →
+  no change (access lasts until expiry). TRANSFER → every account involved is re-checked with RevenueCat. Idempotent.
+  NON_RENEWING_PURCHASE is how RevenueCat reports Pro **granted free from the dashboard** (testers, the App Review demo
+  account): store/period_type PROMOTIONAL, always environment PRODUCTION, no app_id (it was missing until Nov 26, so
+  grants never reached the server). Grant for a set time (never lifetime: no expiry = never re-checked), and only to
+  people without a paid subscription (the grant's own EXPIRATION would mark them expired). The app's Restore Purchases
+  is only on the paywall, which a phone with Pro never shows, so a grant reaches the server only through the webhook.
+  Accepted race: briefly after purchase the server may still say `free` (sync-subscription closes it).
 - **Client-only Pro gates** (`lib/entitlements.ts`, Nov 23: recipes free, plans and AI Pro): Build My Plan
   **activation**; **Start Plan / Customize on a premade plan** (`planRequiresPro` = `source === 'premade'`, checked in
   `lib/planActivation.ts#startPlanWithConfirm` and the plan page's Customize); an **AI recipe's full steps**

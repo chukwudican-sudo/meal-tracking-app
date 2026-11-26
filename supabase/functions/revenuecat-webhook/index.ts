@@ -37,12 +37,21 @@ const LOG_PREFIX = `[${FUNCTION_NAME}]`;
 
 // Event types that grant/renew Pro access. period_type on the event decides
 // 'trial' vs 'active'.
+//
+// NON_RENEWING_PURCHASE = Pro granted for free from the RevenueCat dashboard
+// (testers, the App Review demo account): RevenueCat reports a grant as a
+// production NON_RENEWING_PURCHASE with store and period_type PROMOTIONAL,
+// never INITIAL_PURCHASE (docs, Nov 26). Without it a grant never reached the
+// server. Grant for a set time, not lifetime: a lifetime grant has no expiry,
+// so the server would never re-check it. Only grant to people without a paid
+// subscription: the grant's own EXPIRATION would mark them expired here.
 const GRANT_EVENT_TYPES = new Set([
   'INITIAL_PURCHASE',
   'RENEWAL',
   'UNCANCELLATION',
   'PRODUCT_CHANGE',
   'SUBSCRIPTION_EXTENDED',
+  'NON_RENEWING_PURCHASE',
 ]);
 
 // Revokes access immediately — the subscription has actually ended.
